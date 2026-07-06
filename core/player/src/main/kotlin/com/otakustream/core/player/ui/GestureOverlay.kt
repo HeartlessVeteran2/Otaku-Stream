@@ -27,6 +27,7 @@ fun GestureOverlay(
     onSeekBy: (deltaMs: Long) -> Unit,
     onVolumeDeltaChange: (delta: Float) -> Unit,
     onBrightnessDeltaChange: (delta: Float) -> Unit,
+    onTap: () -> Unit = {},
 ) {
     Box(
         modifier = modifier
@@ -69,6 +70,10 @@ fun GestureOverlay(
                             }
                             null -> Unit
                         }
+                    }
+
+                    if (axis == null) {
+                        onTap()
                     }
                 }
             },
