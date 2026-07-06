@@ -1,22 +1,53 @@
 package com.otakustream.app.navigation
 
+import android.net.Uri
 import androidx.compose.runtime.Composable
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.otakustream.core.player.ui.PlayerScreen
+import com.otakustream.feature.sources.ui.CatalogScreen
+import com.otakustream.feature.sources.ui.MediaDetailsScreen
 
-private const val SAMPLE_HLS_URL =
-    "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8"
-
-private const val ROUTE_PLAYER = "player"
+private const val ROUTE_CATALOG = "catalog"
+private const val ROUTE_DETAILS = "details/{sourceId}/{mediaUrl}/{title}"
+private const val ROUTE_PLAYER = "player/{videoUrl}"
 
 @Composable
 fun AppNavHost() {
     val navController = rememberNavController()
-    NavHost(navController = navController, startDestination = ROUTE_PLAYER) {
-        composable(ROUTE_PLAYER) {
-            PlayerScreen(videoUrl = SAMPLE_HLS_URL)
+    NavHost(navController = navController, startDestination = ROUTE_CATALOG) {
+        composable(ROUTE_CATALOG) {
+            CatalogScreen(
+                onMediaClick = { sourceId, mediaUrl, title ->
+                    navController.navigate("details/$sourceId/${Uri.encode(mediaUrl)}/${Uri.encode(title)}")
+                },
+            )
+        }
+        composable(
+            ROUTE_DETAILS,
+            arguments = listOf(
+                navArgument("sourceId") { type = NavType.LongType },
+                navArgument("mediaUrl") { type = NavType.StringType },
+                navArgument("title") { type = NavType.StringType },
+            ),
+        ) { backStackEntry ->
+            val args = backStackEntry.arguments
+            MediaDetailsScreen(
+                sourceId = args?.getLong("sourceId") ?: 0L,
+                mediaUrl = Uri.decode(args?.getString("mediaUrl").orEmpty()),
+                mediaTitle = Uri.decode(args?.getString("title").orEmpty()),
+                onPlayVideo = { videoUrl -> navController.navigate("player/${Uri.encode(videoUrl)}") },
+            )
+        }
+        composable(
+            ROUTE_PLAYER,
+            arguments = listOf(navArgument("videoUrl") { type = NavType.StringType }),
+        ) { backStackEntry ->
+            val videoUrl = Uri.decode(backStackEntry.arguments?.getString("videoUrl").orEmpty())
+            PlayerScreen(videoUrl = videoUrl)
         }
     }
 }
