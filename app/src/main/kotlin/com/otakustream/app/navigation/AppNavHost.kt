@@ -9,9 +9,11 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.otakustream.core.player.ui.PlayerScreen
 import com.otakustream.feature.sources.ui.CatalogScreen
+import com.otakustream.feature.sources.ui.ManageSourcesScreen
 import com.otakustream.feature.sources.ui.MediaDetailsScreen
 
 private const val ROUTE_CATALOG = "catalog"
+private const val ROUTE_MANAGE_SOURCES = "manage-sources"
 private const val ROUTE_DETAILS = "details/{sourceId}/{mediaUrl}/{title}"
 private const val ROUTE_PLAYER = "player/{videoUrl}"
 
@@ -24,7 +26,11 @@ fun AppNavHost() {
                 onMediaClick = { sourceId, mediaUrl, title ->
                     navController.navigate("details/$sourceId/${Uri.encode(mediaUrl)}/${Uri.encode(title)}")
                 },
+                onManageSourcesClick = { navController.navigate(ROUTE_MANAGE_SOURCES) },
             )
+        }
+        composable(ROUTE_MANAGE_SOURCES) {
+            ManageSourcesScreen()
         }
         composable(
             ROUTE_DETAILS,

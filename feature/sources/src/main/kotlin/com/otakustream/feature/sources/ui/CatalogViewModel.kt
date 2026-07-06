@@ -3,6 +3,7 @@ package com.otakustream.feature.sources.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.otakustream.core.sources.api.MediaItem
+import com.otakustream.core.sources.scripting.ScriptedSourceBootstrapper
 import com.otakustream.feature.sources.SourceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,13 +23,17 @@ data class CatalogUiState(
 @HiltViewModel
 class CatalogViewModel @Inject constructor(
     private val sourceRepository: SourceRepository,
+    private val bootstrapper: ScriptedSourceBootstrapper,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CatalogUiState())
     val uiState: StateFlow<CatalogUiState> = _uiState.asStateFlow()
 
     init {
-        search("")
+        viewModelScope.launch {
+            bootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic)
+            search("")
+        }
     }
 
     fun search(query: String) {
