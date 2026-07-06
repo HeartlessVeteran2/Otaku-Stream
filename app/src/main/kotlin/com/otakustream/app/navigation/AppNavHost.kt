@@ -14,8 +14,8 @@ import com.otakustream.feature.sources.ui.MediaDetailsScreen
 
 private const val ROUTE_CATALOG = "catalog"
 private const val ROUTE_MANAGE_SOURCES = "manage-sources"
-private const val ROUTE_DETAILS = "details/{sourceId}/{mediaUrl}/{title}"
-private const val ROUTE_PLAYER = "player/{videoUrl}"
+private const val ROUTE_DETAILS = "details/{sourceId}?mediaUrl={mediaUrl}&title={title}"
+private const val ROUTE_PLAYER = "player?videoUrl={videoUrl}"
 
 @Composable
 fun AppNavHost() {
@@ -24,7 +24,7 @@ fun AppNavHost() {
         composable(ROUTE_CATALOG) {
             CatalogScreen(
                 onMediaClick = { sourceId, mediaUrl, title ->
-                    navController.navigate("details/$sourceId/${Uri.encode(mediaUrl)}/${Uri.encode(title)}")
+                    navController.navigate("details/$sourceId?mediaUrl=${Uri.encode(mediaUrl)}&title=${Uri.encode(title)}")
                 },
                 onManageSourcesClick = { navController.navigate(ROUTE_MANAGE_SOURCES) },
             )
@@ -36,8 +36,16 @@ fun AppNavHost() {
             ROUTE_DETAILS,
             arguments = listOf(
                 navArgument("sourceId") { type = NavType.LongType },
-                navArgument("mediaUrl") { type = NavType.StringType },
-                navArgument("title") { type = NavType.StringType },
+                navArgument("mediaUrl") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = ""
+                },
+                navArgument("title") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = ""
+                },
             ),
         ) { backStackEntry ->
             val args = backStackEntry.arguments
@@ -45,12 +53,18 @@ fun AppNavHost() {
                 sourceId = args?.getLong("sourceId") ?: 0L,
                 mediaUrl = Uri.decode(args?.getString("mediaUrl").orEmpty()),
                 mediaTitle = Uri.decode(args?.getString("title").orEmpty()),
-                onPlayVideo = { videoUrl -> navController.navigate("player/${Uri.encode(videoUrl)}") },
+                onPlayVideo = { videoUrl -> navController.navigate("player?videoUrl=${Uri.encode(videoUrl)}") },
             )
         }
         composable(
             ROUTE_PLAYER,
-            arguments = listOf(navArgument("videoUrl") { type = NavType.StringType }),
+            arguments = listOf(
+                navArgument("videoUrl") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = ""
+                },
+            ),
         ) { backStackEntry ->
             val videoUrl = Uri.decode(backStackEntry.arguments?.getString("videoUrl").orEmpty())
             PlayerScreen(videoUrl = videoUrl)

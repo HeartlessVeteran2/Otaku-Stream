@@ -9,6 +9,8 @@ import com.otakustream.core.sources.api.SourceFilter
 import com.otakustream.core.sources.api.Video
 import com.otakustream.core.sources.api.VideoSource
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -22,21 +24,26 @@ class ScriptedVideoSource(
     override val lang: String,
 ) : VideoSource {
 
+    // Rhino's Scriptable/Context are not thread-safe — serialize all calls into this instance's
+    // scope so two concurrent VideoSource calls (e.g. a search while a details load is in flight)
+    // can't interleave against the same interpreter state.
+    private val mutex = Mutex()
+
     override suspend fun getPopular(page: Int): CatalogPage = withContext(Dispatchers.IO) {
-        parseCatalogPage(engine.call(scope, "getPopular", page.toDouble()))
+        mutex.withLock { parseCatalogPage(engine.call(scope, "getPopular", page.toDouble())) }
     }
 
     override suspend fun getLatest(page: Int): CatalogPage = withContext(Dispatchers.IO) {
-        parseCatalogPage(engine.call(scope, "getLatest", page.toDouble()))
+        mutex.withLock { parseCatalogPage(engine.call(scope, "getLatest", page.toDouble())) }
     }
 
     override suspend fun search(query: String, filters: List<SourceFilter>, page: Int): CatalogPage =
         withContext(Dispatchers.IO) {
-            parseCatalogPage(engine.call(scope, "search", query, page.toDouble()))
+            mutex.withLock { parseCatalogPage(engine.call(scope, "search", query, page.toDouble())) }
         }
 
     override suspend fun getMediaDetails(media: MediaItem): MediaDetails = withContext(Dispatchers.IO) {
-        val json = JSONObject(engine.call(scope, "getMediaDetails", media.url))
+        val json = JSONObject(mutex.withLock { engine.call(scope, "getMediaDetails", media.url) })
         MediaDetails(
             media = media,
             description = json.optString("description").ifEmpty { null },
@@ -46,7 +53,7 @@ class ScriptedVideoSource(
     }
 
     override suspend fun getEpisodeList(media: MediaItem): List<Episode> = withContext(Dispatchers.IO) {
-        val array = JSONArray(engine.call(scope, "getEpisodeList", media.url))
+        val array = JSONArray(mutex.withLock { engine.call(scope, "getEpisodeList", media.url) })
         (0 until array.length()).map { index ->
             val entry = array.getJSONObject(index)
             Episode(
@@ -58,7 +65,7 @@ class ScriptedVideoSource(
     }
 
     override suspend fun getVideoList(episode: Episode): List<Video> = withContext(Dispatchers.IO) {
-        val array = JSONArray(engine.call(scope, "getVideoList", episode.url))
+        val array = JSONArray(mutex.withLock { engine.call(scope, "getVideoList", episode.url) })
         (0 until array.length()).map { index ->
             val entry = array.getJSONObject(index)
             Video(

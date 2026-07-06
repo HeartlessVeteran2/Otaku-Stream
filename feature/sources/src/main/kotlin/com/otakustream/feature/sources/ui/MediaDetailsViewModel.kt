@@ -7,6 +7,7 @@ import com.otakustream.core.sources.api.MediaDetails
 import com.otakustream.core.sources.api.MediaItem
 import com.otakustream.feature.sources.SourceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,10 +31,13 @@ class MediaDetailsViewModel @Inject constructor(
     val uiState: StateFlow<MediaDetailsUiState> = _uiState.asStateFlow()
 
     private var loadedFor: Pair<Long, String>? = null
+    private var loadJob: Job? = null
+    private var playJob: Job? = null
 
     fun load(sourceId: Long, mediaUrl: String, mediaTitle: String) {
         if (loadedFor == sourceId to mediaUrl) return
         loadedFor = sourceId to mediaUrl
+        loadJob?.cancel()
 
         val source = sourceRepository.getSource(sourceId)
         if (source == null) {
@@ -42,7 +46,7 @@ class MediaDetailsViewModel @Inject constructor(
         }
 
         _uiState.value = _uiState.value.copy(isLoading = true)
-        viewModelScope.launch {
+        loadJob = viewModelScope.launch {
             runCatching {
                 val media = MediaItem(url = mediaUrl, title = mediaTitle)
                 val details = source.getMediaDetails(media)
@@ -58,7 +62,8 @@ class MediaDetailsViewModel @Inject constructor(
 
     fun playEpisode(sourceId: Long, episode: Episode) {
         val source = sourceRepository.getSource(sourceId) ?: return
-        viewModelScope.launch {
+        playJob?.cancel()
+        playJob = viewModelScope.launch {
             runCatching { source.getVideoList(episode) }
                 .onSuccess { videos ->
                     val url = videos.firstOrNull()?.url

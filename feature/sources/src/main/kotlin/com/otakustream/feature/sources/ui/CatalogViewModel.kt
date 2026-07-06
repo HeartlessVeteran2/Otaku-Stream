@@ -6,6 +6,7 @@ import com.otakustream.core.sources.api.MediaItem
 import com.otakustream.core.sources.scripting.ScriptedSourceBootstrapper
 import com.otakustream.feature.sources.SourceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,6 +30,8 @@ class CatalogViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(CatalogUiState())
     val uiState: StateFlow<CatalogUiState> = _uiState.asStateFlow()
 
+    private var searchJob: Job? = null
+
     init {
         viewModelScope.launch {
             bootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic)
@@ -37,8 +40,9 @@ class CatalogViewModel @Inject constructor(
     }
 
     fun search(query: String) {
+        searchJob?.cancel()
         _uiState.value = _uiState.value.copy(query = query, isLoading = true)
-        viewModelScope.launch {
+        searchJob = viewModelScope.launch {
             val entries = sourceRepository.getSources().flatMap { source ->
                 runCatching {
                     val page = if (query.isBlank()) source.getPopular(1) else source.search(query, emptyList(), 1)
