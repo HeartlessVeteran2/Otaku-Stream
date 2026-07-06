@@ -54,7 +54,13 @@ fun PlayerScreen(
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_PAUSE -> viewModel.controller.pause()
+                Lifecycle.Event.ON_PAUSE -> {
+                    // Entering PiP also triggers ON_PAUSE — only pause playback when the
+                    // activity is actually backgrounded, not when it's still visible in PiP.
+                    if (activity?.isInPictureInPictureMode != true) {
+                        viewModel.controller.pause()
+                    }
+                }
                 else -> Unit
             }
         }

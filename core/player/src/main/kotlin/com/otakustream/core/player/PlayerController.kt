@@ -18,9 +18,9 @@ import com.otakustream.core.database.skip.SkipSegmentRepository
 import com.otakustream.core.database.skip.SkipSegmentType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -62,7 +62,9 @@ class PlayerController @Inject constructor(
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
 
-    private val scope = CoroutineScope(SupervisorJob())
+    // ExoPlayer must only be touched from the thread it was created on (the main thread here) —
+    // pin the scope to Main.immediate so every launch{} below stays off Dispatchers.Default.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private var currentMediaUrl: String? = null
     private var lastPersistAtMs = 0L
@@ -125,6 +127,7 @@ class PlayerController @Inject constructor(
 
     private fun maybePersistProgress(positionMs: Long, force: Boolean) {
         val url = currentMediaUrl ?: return
+        if (!force && !player.isPlaying) return
         val now = SystemClock.elapsedRealtime()
         if (!force && now - lastPersistAtMs < PROGRESS_PERSIST_INTERVAL_MS) return
         lastPersistAtMs = now
@@ -230,11 +233,5 @@ class PlayerController @Inject constructor(
 
     fun skipActiveSegment() {
         _uiState.value.activeSkipSegment?.let { seekTo(it.endMs) }
-    }
-
-    fun release() {
-        scope.cancel()
-        player.release()
-        _uiState.value = PlayerUiState()
     }
 }
