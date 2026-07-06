@@ -18,3 +18,4 @@ rootProject.name = "Otaku-Stream"
 
 include(":app")
 include(":core:player")
+include(":core:database")
