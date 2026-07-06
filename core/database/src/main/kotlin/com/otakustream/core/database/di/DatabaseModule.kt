@@ -6,6 +6,9 @@ import com.otakustream.core.database.AppDatabase
 import com.otakustream.core.database.playback.PlaybackProgressDao
 import com.otakustream.core.database.playback.PlaybackProgressRepository
 import com.otakustream.core.database.playback.PlaybackProgressRepositoryImpl
+import com.otakustream.core.database.scripted.ScriptedSourceDao
+import com.otakustream.core.database.scripted.ScriptedSourceRepository
+import com.otakustream.core.database.scripted.ScriptedSourceRepositoryImpl
 import com.otakustream.core.database.skip.SkipSegmentDao
 import com.otakustream.core.database.skip.SkipSegmentRepository
 import com.otakustream.core.database.skip.SkipSegmentRepositoryImpl
@@ -31,6 +34,9 @@ object DatabaseProvidesModule {
 
     @Provides
     fun provideSkipSegmentDao(database: AppDatabase): SkipSegmentDao = database.skipSegmentDao()
+
+    @Provides
+    fun provideScriptedSourceDao(database: AppDatabase): ScriptedSourceDao = database.scriptedSourceDao()
 }
 
 @Module
@@ -46,4 +52,9 @@ abstract class DatabaseBindsModule {
     abstract fun bindSkipSegmentRepository(
         impl: SkipSegmentRepositoryImpl,
     ): SkipSegmentRepository
+
+    @Binds
+    abstract fun bindScriptedSourceRepository(
+        impl: ScriptedSourceRepositoryImpl,
+    ): ScriptedSourceRepository
 }
