@@ -8,6 +8,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -101,6 +102,8 @@ class PlayerController @Inject constructor(
     }
 
     fun release() {
+        scope.cancel()
         player.release()
+        _uiState.value = PlayerUiState()
     }
 }
