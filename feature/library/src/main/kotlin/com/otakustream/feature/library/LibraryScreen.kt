@@ -5,8 +5,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Icon
@@ -24,6 +26,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.database.library.WatchHistoryEntry
@@ -91,6 +94,13 @@ private fun WatchlistTab(
         items(uiState.watchlist, key = { it.mediaUrl }) { entry ->
             ListItem(
                 headlineContent = { Text(entry.title) },
+                leadingContent = {
+                    CoverImage(
+                        url = entry.coverUrl,
+                        contentDescription = entry.title,
+                        modifier = Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)),
+                    )
+                },
                 trailingContent = {
                     IconButton(onClick = { viewModel.removeFromWatchlist(entry.mediaUrl) }) {
                         Icon(Icons.Filled.Delete, contentDescription = "Remove")
@@ -134,6 +144,13 @@ private fun HistoryTab(
 private fun HistoryRow(entry: WatchHistoryEntry, onClick: () -> Unit) {
     ListItem(
         headlineContent = { Text(entry.mediaTitle) },
+        leadingContent = {
+            CoverImage(
+                url = entry.coverUrl,
+                contentDescription = entry.mediaTitle,
+                modifier = Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)),
+            )
+        },
         supportingContent = {
             val formattedDate = remember(entry.watchedAtEpochMs) {
                 DateFormat.getDateTimeInstance().format(Date(entry.watchedAtEpochMs))

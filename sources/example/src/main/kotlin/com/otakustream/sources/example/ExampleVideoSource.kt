@@ -19,16 +19,25 @@ class ExampleVideoSource : VideoSource {
 
     private val catalog = listOf(
         CatalogEntry(
-            media = MediaItem(url = "example://big-buck-bunny", title = "Big Buck Bunny"),
+            media = MediaItem(
+                url = "example://big-buck-bunny",
+                title = "Big Buck Bunny",
+                coverUrl = "https://upload.wikimedia.org/wikipedia/commons/c/c5/Big_buck_bunny_poster_big.jpg",
+            ),
             videoUrl = "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
             description = "Blender Foundation short film, Creative Commons Attribution 3.0.",
         ),
         CatalogEntry(
-            media = MediaItem(url = "example://sintel", title = "Sintel"),
+            media = MediaItem(
+                url = "example://sintel",
+                title = "Sintel",
+                coverUrl = "https://upload.wikimedia.org/wikipedia/commons/8/8f/Sintel_poster.jpg",
+            ),
             videoUrl = "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
             description = "Blender Foundation short film, Creative Commons Attribution 3.0.",
         ),
         CatalogEntry(
+            // No coverUrl: a synthetic test pattern has no real poster, exercising the null-coverUrl fallback.
             media = MediaItem(url = "example://bipbop", title = "Bip Bop Test Pattern"),
             videoUrl = "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8",
             description = "Apple's public HLS test stream.",

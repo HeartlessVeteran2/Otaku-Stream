@@ -139,6 +139,7 @@ class MediaDetailsViewModel @Inject constructor(
                     episodeName = episode.name,
                     episodeNumber = episode.episodeNumber,
                     watchedAtEpochMs = System.currentTimeMillis(),
+                    coverUrl = _uiState.value.details?.media?.coverUrl,
                 ),
             )
             trackingManager.onEpisodeWatched(mediaUrl, episode.episodeNumber)
