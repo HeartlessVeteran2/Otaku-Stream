@@ -8,11 +8,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import com.otakustream.app.navigation.AppNavHost
+import com.otakustream.app.ui.theme.OtakuStreamTheme
 import com.otakustream.core.player.PlayerController
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -30,8 +29,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize(), color = Color.Black) {
+            OtakuStreamTheme {
+                Surface(modifier = Modifier.fillMaxSize()) {
                     AppNavHost()
                 }
             }

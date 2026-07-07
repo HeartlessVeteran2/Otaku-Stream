@@ -7,7 +7,7 @@ plugins {
 }
 
 android {
-    namespace = "com.otakustream.feature.sources"
+    namespace = "com.otakustream.feature.tracking"
     compileSdk = 35
 
     defaultConfig {
@@ -29,21 +29,16 @@ android {
 }
 
 dependencies {
-    implementation(project(":core:sources-api"))
-    implementation(project(":core:sources-scripting"))
-    implementation(project(":feature:tracking"))
-    implementation(libs.coil.compose)
+    api(project(":core:database"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
+    implementation(libs.okhttp)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
-    implementation(libs.androidx.ui.graphics)
-    implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
-    implementation(libs.androidx.material.icons.extended)
 
     implementation(libs.hilt.android)
     implementation(libs.hilt.navigation.compose)
