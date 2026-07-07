@@ -38,7 +38,7 @@ class AniListClient @Inject constructor(
             val title = entry.getJSONObject("title")
             AniListMedia(
                 id = entry.getLong("id"),
-                title = title.optString("english").ifEmpty { title.optString("romaji") },
+                title = title.stringOrEmpty("english").ifEmpty { title.stringOrEmpty("romaji") },
                 episodes = entry.optInt("episodes", 0).takeIf { it > 0 },
             )
         }
@@ -65,12 +65,22 @@ class AniListClient @Inject constructor(
             .build()
         httpClient.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
-            val root = JSONObject(text)
-            if (!response.isSuccessful || root.has("errors")) {
-                val message = root.optJSONArray("errors")?.optJSONObject(0)?.optString("message")
+            if (!response.isSuccessful) {
+                // Body may be non-JSON (proxy/HTML error page) — never let a parse failure mask the HTTP code.
+                val message = runCatching { parseErrorMessage(JSONObject(text)) }.getOrNull()
                 error(message ?: "AniList request failed: HTTP ${response.code}")
+            }
+            val root = JSONObject(text)
+            if (root.has("errors")) {
+                error(parseErrorMessage(root) ?: "AniList request failed")
             }
             return root.getJSONObject("data")
         }
     }
+
+    private fun parseErrorMessage(root: JSONObject): String? =
+        root.optJSONArray("errors")?.optJSONObject(0)?.stringOrEmpty("message")?.ifEmpty { null }
 }
+
+// Android's JSONObject.optString returns the literal string "null" for JSON null values.
+private fun JSONObject.stringOrEmpty(key: String): String = if (isNull(key)) "" else optString(key)

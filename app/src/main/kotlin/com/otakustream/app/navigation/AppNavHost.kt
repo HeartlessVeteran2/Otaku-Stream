@@ -53,7 +53,7 @@ fun AppNavHost() {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-    val showBottomBar = currentRoute in bottomTabs.map { it.route }
+    val showBottomBar = currentRoute == ROUTE_CATALOG || currentRoute == ROUTE_LIBRARY || currentRoute == ROUTE_SETTINGS
 
     Scaffold(
         bottomBar = {

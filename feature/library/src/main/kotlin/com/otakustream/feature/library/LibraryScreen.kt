@@ -135,7 +135,10 @@ private fun HistoryRow(entry: WatchHistoryEntry, onClick: () -> Unit) {
     ListItem(
         headlineContent = { Text(entry.mediaTitle) },
         supportingContent = {
-            Text("${entry.episodeName} · ${DateFormat.getDateTimeInstance().format(Date(entry.watchedAtEpochMs))}")
+            val formattedDate = remember(entry.watchedAtEpochMs) {
+                DateFormat.getDateTimeInstance().format(Date(entry.watchedAtEpochMs))
+            }
+            Text("${entry.episodeName} · $formattedDate")
         },
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
     )
