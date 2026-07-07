@@ -13,4 +13,5 @@ data class WatchHistoryEntry(
     val episodeName: String,
     val episodeNumber: Float,
     val watchedAtEpochMs: Long,
+    val coverUrl: String? = null,
 )
