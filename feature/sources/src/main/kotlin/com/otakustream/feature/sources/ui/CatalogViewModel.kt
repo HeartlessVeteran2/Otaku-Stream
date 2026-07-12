@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.otakustream.core.sources.api.MediaItem
 import com.otakustream.core.sources.scripting.ScriptedSourceBootstrapper
+import com.otakustream.core.sources.stremio.StremioAddonBootstrapper
 import com.otakustream.feature.sources.SourceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
@@ -25,6 +26,7 @@ data class CatalogUiState(
 class CatalogViewModel @Inject constructor(
     private val sourceRepository: SourceRepository,
     private val bootstrapper: ScriptedSourceBootstrapper,
+    private val stremioBootstrapper: StremioAddonBootstrapper,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CatalogUiState())
@@ -35,6 +37,7 @@ class CatalogViewModel @Inject constructor(
     init {
         viewModelScope.launch {
             bootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic)
+            stremioBootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic)
             search("")
         }
     }
