@@ -10,12 +10,16 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.VideoSize
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.otakustream.core.database.playback.PlaybackProgressRepository
 import com.otakustream.core.database.skip.SkipSegment
 import com.otakustream.core.database.skip.SkipSegmentRepository
 import com.otakustream.core.database.skip.SkipSegmentType
+import com.otakustream.core.sources.api.PendingPlayback
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -141,7 +145,7 @@ class PlayerController @Inject constructor(
         }
     }
 
-    fun play(url: String, startPositionMs: Long? = null, subtitles: List<SubtitleTrack> = emptyList()) {
+    fun play(url: String, startPositionMs: Long? = null) {
         currentMediaUrl = url
         pendingSegmentStartMs = null
         _uiState.value = _uiState.value.copy(isMarkingSegment = false)
@@ -151,13 +155,27 @@ class PlayerController @Inject constructor(
             skipSegmentRepository.observeForMedia(url).collect { segments -> currentSegments = segments }
         }
 
+        val pending = PendingPlayback.consume(url)
+
         scope.launch {
             val resumeMs = startPositionMs ?: progressRepository.getSavedPositionMs(url) ?: 0L
+            val subtitles = pending?.subtitleTracks.orEmpty().map { it.toPlayerTrack() }
             val mediaItem = MediaItem.Builder()
                 .setUri(url)
                 .setSubtitleConfigurations(subtitles.map { it.toMedia3Config() })
+                .apply { if (pending?.isM3U8 == true) setMimeType(MimeTypes.APPLICATION_M3U8) }
                 .build()
-            player.setMediaItem(mediaItem, resumeMs)
+
+            // A single ExoPlayer instance is shared across every playback, but headers are
+            // per-video — build a fresh DataSource.Factory per call rather than baking one
+            // into the player at construction time.
+            val headers = pending?.headers.orEmpty()
+            val dataSourceFactory = DefaultHttpDataSource.Factory().apply {
+                if (headers.isNotEmpty()) setDefaultRequestProperties(headers)
+            }
+            val mediaSource = DefaultMediaSourceFactory(dataSourceFactory).createMediaSource(mediaItem)
+
+            player.setMediaSource(mediaSource, resumeMs)
             player.prepare()
             player.playWhenReady = true
         }

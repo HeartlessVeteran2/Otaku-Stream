@@ -24,3 +24,6 @@ internal fun SubtitleTrack.toMedia3Config(): MediaItem.SubtitleConfiguration =
         .setLabel(label)
         .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
         .build()
+
+internal fun com.otakustream.core.sources.api.SubtitleTrack.toPlayerTrack(): SubtitleTrack =
+    SubtitleTrack(url = url, language = lang, label = label)

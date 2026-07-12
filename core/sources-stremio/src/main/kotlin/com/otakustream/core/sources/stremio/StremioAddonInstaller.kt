@@ -15,9 +15,14 @@ class StremioAddonInstaller @Inject constructor(
     private val stremioRepository: StremioRepository,
 ) {
     suspend fun installFromUrl(manifestUrl: String): List<StremioVideoSource> = withContext(Dispatchers.IO) {
-        val normalizedUrl = manifestUrl.trim()
-            .replaceFirst("stremio://", "https://")
-            .let { if (it.endsWith("manifest.json")) it else "${it.trimEnd('/')}/manifest.json" }
+        val normalizedUrl = manifestUrl.trim().let { raw ->
+            val withScheme = when {
+                raw.startsWith("stremio://", ignoreCase = true) -> raw.replaceFirst("stremio://", "https://")
+                raw.startsWith("http://", ignoreCase = true) || raw.startsWith("https://", ignoreCase = true) -> raw
+                else -> "https://$raw"
+            }
+            if (withScheme.endsWith("manifest.json")) withScheme else "${withScheme.trimEnd('/')}/manifest.json"
+        }
         val request = Request.Builder().url(normalizedUrl).build()
         val content = httpClient.newCall(request).execute().use { response ->
             require(response.isSuccessful) { "Failed to download manifest: HTTP ${response.code}" }

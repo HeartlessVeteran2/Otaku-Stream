@@ -1,9 +1,10 @@
 package com.otakustream.core.database.library
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "watch_history")
+@Entity(tableName = "watch_history", indices = [Index(value = ["watchedAtEpochMs"])])
 data class WatchHistoryEntry(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val sourceId: Long,

@@ -31,7 +31,7 @@ import com.otakustream.core.database.tracking.TrackingDao
         StremioAddonEntity::class,
         StremioServerConfigEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {

@@ -10,6 +10,7 @@ import com.otakustream.core.database.tracking.TrackingRepository
 import com.otakustream.core.sources.api.Episode
 import com.otakustream.core.sources.api.MediaDetails
 import com.otakustream.core.sources.api.MediaItem
+import com.otakustream.core.sources.api.PendingPlayback
 import com.otakustream.feature.sources.SourceRepository
 import com.otakustream.feature.tracking.TrackingManager
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -115,9 +116,10 @@ class MediaDetailsViewModel @Inject constructor(
         playJob = viewModelScope.launch {
             runCatching { source.getVideoList(episode) }
                 .onSuccess { videos ->
-                    val url = videos.firstOrNull()?.url
-                    _uiState.value = _uiState.value.copy(resolvedVideoUrl = url, error = if (url == null) "No video found" else null)
-                    if (url != null) {
+                    val video = videos.firstOrNull()
+                    video?.let(PendingPlayback::stash)
+                    _uiState.value = _uiState.value.copy(resolvedVideoUrl = video?.url, error = if (video == null) "No video found" else null)
+                    if (video != null) {
                         recordWatchAndSync(episode)
                     }
                 }
