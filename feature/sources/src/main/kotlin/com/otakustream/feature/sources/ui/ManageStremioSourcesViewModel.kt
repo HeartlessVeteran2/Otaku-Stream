@@ -75,8 +75,10 @@ class ManageStremioSourcesViewModel @Inject constructor(
     }
 
     fun saveServerUrl(url: String) {
-        if (url.isBlank()) return
-        viewModelScope.launch { stremioRepository.saveServerBaseUrl(url.trim()) }
+        val trimmed = url.trim()
+        if (trimmed.isBlank()) return
+        val normalized = if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) trimmed else "http://$trimmed"
+        viewModelScope.launch { stremioRepository.saveServerBaseUrl(normalized) }
     }
 
     fun clearServerUrl() {

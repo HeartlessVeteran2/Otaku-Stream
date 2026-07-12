@@ -43,8 +43,13 @@ fun parseManifest(json: String): StremioManifest {
     val catalogs = (0 until catalogsArray.length()).map { index ->
         val entry = catalogsArray.getJSONObject(index)
         val extraArray = entry.optJSONArray("extra") ?: JSONArray()
+        // "extra" is normally an array of {name: ...} objects, but some addons use the
+        // backward-compatible plain-string-array form (e.g. ["search"]) instead.
         val extraNames = (0 until extraArray.length())
-            .map { extraArray.getJSONObject(it).stringOrEmpty("name") }
+            .mapNotNull { index ->
+                val obj = extraArray.optJSONObject(index)
+                if (obj != null) obj.stringOrEmpty("name").ifEmpty { null } else extraArray.optString(index).ifEmpty { null }
+            }
             .toSet()
         StremioCatalog(
             type = entry.getString("type"),

@@ -72,8 +72,8 @@ class StremioVideoSource(
     }
 
     private fun StremioStream.toVideo(serverBaseUrl: String?): Video? = when {
-        url != null -> Video(url = url, quality = name ?: "default", isM3U8 = url.contains(".m3u8"))
-        infoHash != null && !serverBaseUrl.isNullOrBlank() ->
+        !url.isNullOrBlank() -> Video(url = url, quality = name ?: "default", isM3U8 = url.contains(".m3u8", ignoreCase = true))
+        !infoHash.isNullOrBlank() && !serverBaseUrl.isNullOrBlank() ->
             Video(url = "${serverBaseUrl.trimEnd('/')}/$infoHash/${fileIdx ?: 0}", quality = name ?: "torrent")
         else -> null
     }
