@@ -31,13 +31,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.ui.PlayerView
 import com.otakustream.core.player.PlayerViewModel
-import com.otakustream.core.player.SubtitleTrack
 
 @Composable
 fun PlayerScreen(
     videoUrl: String,
     modifier: Modifier = Modifier,
-    subtitles: List<SubtitleTrack> = emptyList(),
     viewModel: PlayerViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -47,7 +45,7 @@ fun PlayerScreen(
     var showTrackSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(videoUrl) {
-        viewModel.play(videoUrl, subtitles)
+        viewModel.play(videoUrl)
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current

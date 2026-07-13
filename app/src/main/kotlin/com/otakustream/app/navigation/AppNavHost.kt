@@ -29,6 +29,7 @@ import com.otakustream.core.player.ui.PlayerScreen
 import com.otakustream.feature.library.LibraryScreen
 import com.otakustream.feature.sources.ui.CatalogScreen
 import com.otakustream.feature.sources.ui.ManageSourcesScreen
+import com.otakustream.feature.sources.ui.ManageStremioSourcesScreen
 import com.otakustream.feature.sources.ui.MediaDetailsScreen
 import com.otakustream.feature.tracking.TrackingSettingsScreen
 
@@ -37,6 +38,7 @@ private const val ROUTE_LIBRARY = "library"
 private const val ROUTE_SETTINGS = "settings"
 private const val ROUTE_MANAGE_SOURCES = "manage-sources"
 private const val ROUTE_TRACKING_SETTINGS = "tracking-settings"
+private const val ROUTE_MANAGE_STREMIO = "manage-stremio"
 private const val ROUTE_DETAILS = "details/{sourceId}?mediaUrl={mediaUrl}&title={title}"
 private const val ROUTE_PLAYER = "player?videoUrl={videoUrl}"
 
@@ -97,6 +99,7 @@ fun AppNavHost() {
                 SettingsScreen(
                     onManageSourcesClick = { navController.navigate(ROUTE_MANAGE_SOURCES) },
                     onTrackingClick = { navController.navigate(ROUTE_TRACKING_SETTINGS) },
+                    onManageStremioClick = { navController.navigate(ROUTE_MANAGE_STREMIO) },
                 )
             }
             composable(ROUTE_MANAGE_SOURCES) {
@@ -104,6 +107,9 @@ fun AppNavHost() {
             }
             composable(ROUTE_TRACKING_SETTINGS) {
                 TrackingSettingsScreen()
+            }
+            composable(ROUTE_MANAGE_STREMIO) {
+                ManageStremioSourcesScreen()
             }
             composable(
                 ROUTE_DETAILS,
@@ -154,6 +160,7 @@ private fun NavHostController.navigateToDetails(sourceId: Long, mediaUrl: String
 private fun SettingsScreen(
     onManageSourcesClick: () -> Unit,
     onTrackingClick: () -> Unit,
+    onManageStremioClick: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         ListItem(
@@ -165,6 +172,11 @@ private fun SettingsScreen(
             headlineContent = { Text("AniList tracking") },
             supportingContent = { Text("Sync watch progress to your AniList account") },
             modifier = Modifier.clickable(onClick = onTrackingClick),
+        )
+        ListItem(
+            headlineContent = { Text("Stremio addons") },
+            supportingContent = { Text("Add addons and configure a streaming server") },
+            modifier = Modifier.clickable(onClick = onManageStremioClick),
         )
     }
 }

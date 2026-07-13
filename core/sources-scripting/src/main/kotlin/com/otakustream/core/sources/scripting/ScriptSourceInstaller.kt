@@ -2,17 +2,14 @@ package com.otakustream.core.sources.scripting
 
 import com.otakustream.core.database.scripted.ScriptedSourceRecord
 import com.otakustream.core.database.scripted.ScriptedSourceRepository
+import com.otakustream.core.sources.api.stableSourceId as sharedStableSourceId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import javax.inject.Inject
 
-fun stableSourceId(name: String, lang: String): Long {
-    var hash = 1_125_899_906_842_597L
-    for (char in "$name/$lang") hash = 31 * hash + char.code
-    return hash
-}
+fun stableSourceId(name: String, lang: String): Long = sharedStableSourceId(name, lang)
 
 class ScriptSourceInstaller @Inject constructor(
     private val httpClient: OkHttpClient,

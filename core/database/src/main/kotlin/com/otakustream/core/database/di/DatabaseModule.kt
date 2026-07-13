@@ -16,6 +16,9 @@ import com.otakustream.core.database.scripted.ScriptedSourceRepositoryImpl
 import com.otakustream.core.database.skip.SkipSegmentDao
 import com.otakustream.core.database.skip.SkipSegmentRepository
 import com.otakustream.core.database.skip.SkipSegmentRepositoryImpl
+import com.otakustream.core.database.stremio.StremioDao
+import com.otakustream.core.database.stremio.StremioRepository
+import com.otakustream.core.database.stremio.StremioRepositoryImpl
 import com.otakustream.core.database.tracking.TrackingDao
 import com.otakustream.core.database.tracking.TrackingRepository
 import com.otakustream.core.database.tracking.TrackingRepositoryImpl
@@ -55,6 +58,9 @@ object DatabaseProvidesModule {
 
     @Provides
     fun provideTrackingDao(database: AppDatabase): TrackingDao = database.trackingDao()
+
+    @Provides
+    fun provideStremioDao(database: AppDatabase): StremioDao = database.stremioDao()
 }
 
 @Module
@@ -85,4 +91,9 @@ abstract class DatabaseBindsModule {
     abstract fun bindTrackingRepository(
         impl: TrackingRepositoryImpl,
     ): TrackingRepository
+
+    @Binds
+    abstract fun bindStremioRepository(
+        impl: StremioRepositoryImpl,
+    ): StremioRepository
 }

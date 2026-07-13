@@ -14,7 +14,7 @@ class PlayerViewModel @Inject constructor(
 
     val uiState: StateFlow<PlayerUiState> = controller.uiState
 
-    fun play(url: String, subtitles: List<SubtitleTrack> = emptyList()) = controller.play(url, subtitles = subtitles)
+    fun play(url: String) = controller.play(url)
 
     fun togglePlayPause() = controller.togglePlayPause()
 
