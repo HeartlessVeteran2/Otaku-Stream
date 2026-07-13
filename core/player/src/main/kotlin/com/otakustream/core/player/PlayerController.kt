@@ -3,6 +3,7 @@ package com.otakustream.core.player
 import android.content.Context
 import android.content.Intent
 import android.os.SystemClock
+import androidx.annotation.OptIn
 import androidx.core.content.ContextCompat
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -12,6 +13,7 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.VideoSize
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -145,6 +147,7 @@ class PlayerController @Inject constructor(
         }
     }
 
+    @OptIn(UnstableApi::class)
     fun play(url: String, startPositionMs: Long? = null) {
         currentMediaUrl = url
         pendingSegmentStartMs = null
