@@ -14,6 +14,7 @@ data class SubtitleTrack(
 
 private fun guessSubtitleMimeType(url: String): String = when {
     url.endsWith(".srt", ignoreCase = true) -> MimeTypes.APPLICATION_SUBRIP
+    url.endsWith(".ass", ignoreCase = true) || url.endsWith(".ssa", ignoreCase = true) -> MimeTypes.TEXT_SSA
     else -> MimeTypes.TEXT_VTT
 }
 
