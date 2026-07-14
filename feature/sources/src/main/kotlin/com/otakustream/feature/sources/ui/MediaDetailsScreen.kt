@@ -19,6 +19,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,6 +48,7 @@ fun MediaDetailsScreen(
     val uiState by viewModel.uiState.collectAsState()
     val inLibrary by viewModel.inLibrary.collectAsState()
     val trackerLink by viewModel.trackerLink.collectAsState()
+    val autoPlayEnabled by viewModel.autoPlayEnabled.collectAsState()
     var showLinkDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(sourceId, mediaUrl) {
@@ -96,6 +98,11 @@ fun MediaDetailsScreen(
                     TextButton(onClick = viewModel::unlinkTracker) { Text("Unlink") }
                 }
             } ?: TextButton(onClick = { showLinkDialog = true }) { Text("Link to AniList") }
+
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                Text(text = "Auto-play next episode", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                Switch(checked = autoPlayEnabled, onCheckedChange = viewModel::setAutoPlayEnabled)
+            }
 
             if (uiState.isLoading) {
                 CircularProgressIndicator(modifier = Modifier.padding(16.dp))

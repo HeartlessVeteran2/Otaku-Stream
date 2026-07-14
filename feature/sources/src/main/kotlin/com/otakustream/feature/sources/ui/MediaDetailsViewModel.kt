@@ -11,6 +11,8 @@ import com.otakustream.core.sources.api.Episode
 import com.otakustream.core.sources.api.MediaDetails
 import com.otakustream.core.sources.api.MediaItem
 import com.otakustream.core.sources.api.PendingPlayback
+import com.otakustream.core.sources.api.PlaybackQueue
+import com.otakustream.core.sources.api.Video
 import com.otakustream.feature.sources.SourceRepository
 import com.otakustream.feature.tracking.TrackingManager
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -61,6 +63,14 @@ class MediaDetailsViewModel @Inject constructor(
     private var loadedFor: Pair<Long, String>? = null
     private var loadJob: Job? = null
     private var playJob: Job? = null
+
+    private val _autoPlayEnabled = MutableStateFlow(PlaybackQueue.autoPlayEnabled)
+    val autoPlayEnabled: StateFlow<Boolean> = _autoPlayEnabled.asStateFlow()
+
+    fun setAutoPlayEnabled(enabled: Boolean) {
+        PlaybackQueue.autoPlayEnabled = enabled
+        _autoPlayEnabled.value = enabled
+    }
 
     fun load(sourceId: Long, mediaUrl: String, mediaTitle: String) {
         currentMediaUrl.value = mediaUrl
@@ -118,6 +128,7 @@ class MediaDetailsViewModel @Inject constructor(
                 .onSuccess { videos ->
                     val video = videos.firstOrNull()
                     video?.let(PendingPlayback::stash)
+                    PlaybackQueue.setNextResolver { resolveNextVideo(sourceId, episode) }
                     _uiState.value = _uiState.value.copy(resolvedVideoUrl = video?.url, error = if (video == null) "No video found" else null)
                     if (video != null) {
                         recordWatchAndSync(episode)
@@ -127,6 +138,19 @@ class MediaDetailsViewModel @Inject constructor(
                     _uiState.value = _uiState.value.copy(error = error.message)
                 }
         }
+    }
+
+    // Resolves the episode after currentEpisode (by list order, matching what's displayed) and
+    // re-arms the resolver for the one after that, so auto-play chains through the whole list.
+    private suspend fun resolveNextVideo(sourceId: Long, currentEpisode: Episode): Video? {
+        val episodes = _uiState.value.episodes
+        val currentIndex = episodes.indexOfFirst { it.url == currentEpisode.url }
+        val next = episodes.getOrNull(currentIndex + 1) ?: return null
+        val source = sourceRepository.getSource(sourceId) ?: return null
+        val video = source.getVideoList(next).firstOrNull() ?: return null
+        PlaybackQueue.setNextResolver { resolveNextVideo(sourceId, next) }
+        recordWatchAndSync(next)
+        return video
     }
 
     private fun recordWatchAndSync(episode: Episode) {

@@ -2,7 +2,9 @@ package com.otakustream.core.player
 
 import android.content.Context
 import android.content.Intent
+import android.media.audiofx.Equalizer
 import android.os.SystemClock
+import androidx.annotation.OptIn
 import androidx.core.content.ContextCompat
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -12,14 +14,18 @@ import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.VideoSize
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import com.otakustream.core.database.playback.PlaybackProgressRepository
 import com.otakustream.core.database.skip.SkipSegment
 import com.otakustream.core.database.skip.SkipSegmentRepository
 import com.otakustream.core.database.skip.SkipSegmentType
 import com.otakustream.core.sources.api.PendingPlayback
+import com.otakustream.core.sources.api.PlaybackQueue
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +42,11 @@ import javax.inject.Singleton
 
 private const val PROGRESS_PERSIST_INTERVAL_MS = 5_000L
 private const val FINISHED_THRESHOLD_FRACTION = 0.95
+private const val SPEED_BOOST_MULTIPLIER = 2f
+
+enum class ResizeMode { FIT, ZOOM, STRETCH }
+
+enum class EqualizerPreset { FLAT, BASS_BOOST, TREBLE_BOOST }
 
 data class PlayerUiState(
     val isPlaying: Boolean = false,
@@ -53,15 +64,22 @@ data class PlayerUiState(
     val videoHeight: Int = 0,
     val activeSkipSegment: SkipSegment? = null,
     val isMarkingSegment: Boolean = false,
+    val resizeMode: ResizeMode = ResizeMode.FIT,
+    val statsOverlayVisible: Boolean = false,
+    val codecName: String? = null,
+    val videoBitrateBps: Int = 0,
+    val droppedFrameCount: Int = 0,
+    val equalizerPreset: EqualizerPreset = EqualizerPreset.FLAT,
 )
 
+@OptIn(UnstableApi::class)
 @Singleton
 class PlayerController @Inject constructor(
     @ApplicationContext private val appContext: Context,
     private val progressRepository: PlaybackProgressRepository,
     private val skipSegmentRepository: SkipSegmentRepository,
 ) {
-    val player: ExoPlayer = ExoPlayer.Builder(appContext).build()
+    val player: ExoPlayer = ExoPlayer.Builder(appContext, PlayerRenderersFactory(appContext)).build()
 
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
@@ -75,6 +93,8 @@ class PlayerController @Inject constructor(
     private var segmentsJob: Job? = null
     private var currentSegments: List<SkipSegment> = emptyList()
     private var pendingSegmentStartMs: Long? = null
+    private var speedBeforeBoost: Float? = null
+    private var equalizer: Equalizer? = null
 
     init {
         player.addListener(object : Player.Listener {
@@ -90,6 +110,9 @@ class PlayerController @Inject constructor(
                     isBuffering = playbackState == Player.STATE_BUFFERING,
                     durationMs = player.duration.coerceAtLeast(0L),
                 )
+                if (playbackState == Player.STATE_ENDED && PlaybackQueue.autoPlayEnabled) {
+                    scope.launch { playNext() }
+                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -109,6 +132,26 @@ class PlayerController @Inject constructor(
                     videoWidth = videoSize.width,
                     videoHeight = videoSize.height,
                 )
+            }
+        })
+        player.addAnalyticsListener(object : AnalyticsListener {
+            override fun onVideoInputFormatChanged(
+                eventTime: AnalyticsListener.EventTime,
+                format: androidx.media3.common.Format,
+                decoderReuseEvaluation: DecoderReuseEvaluation?,
+            ) {
+                _uiState.value = _uiState.value.copy(
+                    codecName = format.codecs ?: format.sampleMimeType,
+                    videoBitrateBps = format.bitrate,
+                )
+            }
+
+            override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
+                _uiState.value = _uiState.value.copy(droppedFrameCount = _uiState.value.droppedFrameCount + droppedFrames)
+            }
+
+            override fun onAudioSessionIdChanged(eventTime: AnalyticsListener.EventTime, audioSessionId: Int) {
+                rebuildEqualizer(audioSessionId)
             }
         })
         startPositionTicker()
@@ -181,6 +224,12 @@ class PlayerController @Inject constructor(
         }
     }
 
+    private suspend fun playNext() {
+        val next = PlaybackQueue.resolveNext() ?: return
+        PendingPlayback.stash(next)
+        play(next.url)
+    }
+
     fun pause() {
         player.playWhenReady = false
         maybePersistProgress(player.currentPosition.coerceAtLeast(0L), force = true)
@@ -251,5 +300,56 @@ class PlayerController @Inject constructor(
 
     fun skipActiveSegment() {
         _uiState.value.activeSkipSegment?.let { seekTo(it.endMs) }
+    }
+
+    fun beginTemporarySpeedBoost() {
+        if (speedBeforeBoost != null) return
+        speedBeforeBoost = _uiState.value.playbackSpeed
+        setPlaybackSpeed(SPEED_BOOST_MULTIPLIER)
+    }
+
+    fun endTemporarySpeedBoost() {
+        val previousSpeed = speedBeforeBoost ?: return
+        speedBeforeBoost = null
+        setPlaybackSpeed(previousSpeed)
+    }
+
+    fun cycleResizeMode() {
+        val next = when (_uiState.value.resizeMode) {
+            ResizeMode.FIT -> ResizeMode.ZOOM
+            ResizeMode.ZOOM -> ResizeMode.STRETCH
+            ResizeMode.STRETCH -> ResizeMode.FIT
+        }
+        _uiState.value = _uiState.value.copy(resizeMode = next)
+    }
+
+    fun toggleStatsOverlay() {
+        _uiState.value = _uiState.value.copy(statsOverlayVisible = !_uiState.value.statsOverlayVisible)
+    }
+
+    fun setEqualizerPreset(preset: EqualizerPreset) {
+        _uiState.value = _uiState.value.copy(equalizerPreset = preset)
+        applyEqualizerPreset(preset)
+    }
+
+    private fun rebuildEqualizer(sessionId: Int) {
+        if (sessionId == C.AUDIO_SESSION_ID_UNSET) return
+        equalizer?.release()
+        equalizer = runCatching { Equalizer(0, sessionId) }.getOrNull()?.apply { enabled = true }
+        applyEqualizerPreset(_uiState.value.equalizerPreset)
+    }
+
+    private fun applyEqualizerPreset(preset: EqualizerPreset) {
+        val eq = equalizer ?: return
+        val bandCount = eq.numberOfBands.toInt()
+        val maxGain = eq.bandLevelRange[1]
+        for (band in 0 until bandCount) {
+            val level: Short = when (preset) {
+                EqualizerPreset.FLAT -> 0
+                EqualizerPreset.BASS_BOOST -> if (band < bandCount / 3) maxGain else 0
+                EqualizerPreset.TREBLE_BOOST -> if (band >= bandCount - bandCount / 3) maxGain else 0
+            }
+            eq.setBandLevel(band.toShort(), level)
+        }
     }
 }

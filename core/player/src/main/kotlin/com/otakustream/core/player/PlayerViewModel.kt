@@ -43,4 +43,14 @@ class PlayerViewModel @Inject constructor(
     fun markSegmentEnd(type: SkipSegmentType) = controller.markSegmentEnd(type)
 
     fun skipActiveSegment() = controller.skipActiveSegment()
+
+    fun beginSpeedBoost() = controller.beginTemporarySpeedBoost()
+
+    fun endSpeedBoost() = controller.endTemporarySpeedBoost()
+
+    fun cycleResizeMode() = controller.cycleResizeMode()
+
+    fun toggleStatsOverlay() = controller.toggleStatsOverlay()
+
+    fun setEqualizerPreset(preset: EqualizerPreset) = controller.setEqualizerPreset(preset)
 }
