@@ -1,9 +1,11 @@
 package com.otakustream.feature.sources
 
 import com.otakustream.core.sources.api.VideoSource
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -12,6 +14,7 @@ interface SourceRepository {
     fun getSource(id: Long): VideoSource?
     fun registerDynamic(source: VideoSource)
     fun unregisterDynamic(id: Long)
+    fun observeSources(): Flow<List<VideoSource>>
 }
 
 @Singleton
@@ -25,6 +28,8 @@ class SourceRegistry @Inject constructor(
     override fun getSources(): List<VideoSource> = builtInSources.toList() + _dynamicSources.value
 
     override fun getSource(id: Long): VideoSource? = getSources().firstOrNull { it.id == id }
+
+    override fun observeSources(): Flow<List<VideoSource>> = _dynamicSources.map { builtInSources.toList() + it }
 
     override fun registerDynamic(source: VideoSource) {
         if (_dynamicSources.value.any { it.id == source.id }) return
