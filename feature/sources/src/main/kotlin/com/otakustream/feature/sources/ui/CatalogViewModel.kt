@@ -3,6 +3,7 @@ package com.otakustream.feature.sources.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.otakustream.core.sources.api.MediaItem
+import com.otakustream.core.sources.api.SourceFilter
 import com.otakustream.core.sources.api.VideoSource
 import com.otakustream.core.sources.scripting.ScriptedSourceBootstrapper
 import com.otakustream.core.sources.stremio.StremioAddonBootstrapper
@@ -30,6 +31,10 @@ data class CatalogUiState(
     val isLoadingMore: Boolean = false,
     val nextPageBySource: Map<Long, Int> = emptyMap(),
     val exhaustedSources: Set<Long> = emptySet(),
+    // The union of every registered source's declared filters (e.g. genre) merged by name —
+    // sources that don't recognize a given filter simply ignore it when it's passed to search().
+    val availableFilters: List<SourceFilter> = emptyList(),
+    val selectedFilters: List<SourceFilter> = emptyList(),
 )
 
 private data class SourceFetch(val sourceId: Long, val entries: List<CatalogEntry>, val hasNextPage: Boolean)
@@ -55,6 +60,7 @@ class CatalogViewModel @Inject constructor(
         viewModelScope.launch {
             bootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic)
             stremioBootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic)
+            _uiState.value = _uiState.value.copy(availableFilters = fetchAvailableFilters(sourceRepository.getSources()))
             // Only start reacting to searches once bootstrapping has registered every persisted
             // source, so the very first catalog load can't race a still-loading source.
             queryFlow.debounce(SEARCH_DEBOUNCE_MS).collectLatest { query -> runSearch(query) }
@@ -68,6 +74,15 @@ class CatalogViewModel @Inject constructor(
         queryFlow.value = query
     }
 
+    // valueIndex null clears that filter; otherwise selects filter.values[valueIndex] for it.
+    // Re-runs the fan-out immediately (not debounced) since this is a deliberate tap, not typing.
+    fun selectFilter(filter: SourceFilter, valueIndex: Int?) {
+        val remaining = _uiState.value.selectedFilters.filterNot { it.name == filter.name }
+        val updated = if (valueIndex == null) remaining else remaining + filter.copy(selected = valueIndex)
+        _uiState.value = _uiState.value.copy(selectedFilters = updated, isLoading = true)
+        viewModelScope.launch { runSearch(_uiState.value.query) }
+    }
+
     fun loadMore() {
         val state = _uiState.value
         if (state.isLoadingMore) return
@@ -76,7 +91,7 @@ class CatalogViewModel @Inject constructor(
         loadMoreJob?.cancel()
         loadMoreJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoadingMore = true)
-            val results = fetchPage(state.query, pending, state.nextPageBySource)
+            val results = fetchPage(state.query, state.selectedFilters, pending, state.nextPageBySource)
             val current = _uiState.value
             _uiState.value = current.copy(
                 entries = current.entries + results.flatMap { it.entries },
@@ -91,7 +106,7 @@ class CatalogViewModel @Inject constructor(
 
     private suspend fun runSearch(query: String) {
         val sources = sourceRepository.getSources()
-        val results = fetchPage(query, sources, nextPageBySource = emptyMap())
+        val results = fetchPage(query, _uiState.value.selectedFilters, sources, nextPageBySource = emptyMap())
         _uiState.value = _uiState.value.copy(
             entries = results.flatMap { it.entries },
             isLoading = false,
@@ -100,11 +115,23 @@ class CatalogViewModel @Inject constructor(
         )
     }
 
+    // Union of every source's declared filters, merged by name — a source that doesn't recognize
+    // a filter later passed to its search() call is expected to just ignore it (already true for
+    // every existing VideoSource implementation).
+    private suspend fun fetchAvailableFilters(sources: List<VideoSource>): List<SourceFilter> = coroutineScope {
+        sources.map { source -> async { runCatching { source.getAvailableFilters() }.getOrDefault(emptyList()) } }
+            .awaitAll()
+            .flatten()
+            .groupBy { it.name }
+            .map { (name, filters) -> SourceFilter(name = name, values = filters.flatMap { it.values }.distinct()) }
+    }
+
     // Shared parallel fan-out used by both the initial/debounced search and loadMore() — each
     // source is queried concurrently, and a per-source runCatching (not one around the whole
     // awaitAll) keeps one broken source from affecting or cancelling the others.
     private suspend fun fetchPage(
         query: String,
+        filters: List<SourceFilter>,
         sources: List<VideoSource>,
         nextPageBySource: Map<Long, Int>,
     ): List<SourceFetch> = coroutineScope {
@@ -112,7 +139,7 @@ class CatalogViewModel @Inject constructor(
             async {
                 val page = nextPageBySource[source.id] ?: 1
                 runCatching {
-                    val result = if (query.isBlank()) source.getPopular(page) else source.search(query, emptyList(), page)
+                    val result = if (query.isBlank() && filters.isEmpty()) source.getPopular(page) else source.search(query, filters, page)
                     SourceFetch(source.id, result.items.map { CatalogEntry(source.id, it) }, result.hasNextPage)
                 }.getOrDefault(SourceFetch(source.id, emptyList(), hasNextPage = false))
             }

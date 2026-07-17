@@ -46,10 +46,28 @@ class StremioVideoSource(
     override suspend fun getLatest(page: Int): CatalogPage = fetchCatalog(pagingExtra(page))
 
     override suspend fun search(query: String, filters: List<SourceFilter>, page: Int): CatalogPage {
-        if ("search" !in catalog.extraNames) return CatalogPage(emptyList(), false)
-        val encodedQuery = URLEncoder.encode(query, "UTF-8")
-        return fetchCatalog("search=$encodedQuery&skip=${(page - 1) * PAGE_SIZE}")
+        val extraParts = mutableListOf<String>()
+        if (query.isNotBlank()) {
+            // A blank query means "browse with filters only" (e.g. genre) — that only needs the
+            // filter's own extra name to be declared, not "search".
+            if ("search" !in catalog.extraNames) return CatalogPage(emptyList(), false)
+            extraParts += "search=${URLEncoder.encode(query, "UTF-8")}"
+        }
+        filters.forEach { filter ->
+            val value = filter.values.getOrNull(filter.selected) ?: return@forEach
+            extraParts += "${URLEncoder.encode(filter.name, "UTF-8")}=${URLEncoder.encode(value, "UTF-8")}"
+        }
+        extraParts += "skip=${(page - 1) * PAGE_SIZE}"
+        return fetchCatalog(extraParts.joinToString("&"))
     }
+
+    // Surfaces catalog extras that declare selectable options (e.g. genre) as generic filters —
+    // already parsed from the manifest, so this needs no network call despite being suspend.
+    override suspend fun getAvailableFilters(): List<SourceFilter> =
+        catalog.extras.mapNotNull { extra ->
+            val options = extra.options?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+            SourceFilter(name = extra.name, values = options)
+        }
 
     override suspend fun getMediaDetails(media: MediaItem): MediaDetails = withContext(Dispatchers.IO) {
         val (type, id) = splitTypeId(media.url)

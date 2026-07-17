@@ -7,14 +7,19 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -29,13 +34,16 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.otakustream.core.sources.api.SourceFilter
 
 private const val LOAD_MORE_THRESHOLD_ITEMS = 6
 
@@ -84,6 +92,20 @@ fun CatalogScreen(
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
             )
 
+            if (uiState.availableFilters.isNotEmpty()) {
+                LazyRow(modifier = Modifier.padding(horizontal = 16.dp)) {
+                    items(uiState.availableFilters, key = { it.name }) { filter ->
+                        val selected = uiState.selectedFilters.firstOrNull { it.name == filter.name }
+                        FilterChooserChip(
+                            filter = filter,
+                            selectedValue = selected?.values?.getOrNull(selected.selected),
+                            onSelect = { valueIndex -> viewModel.selectFilter(filter, valueIndex) },
+                            modifier = Modifier.padding(end = 8.dp),
+                        )
+                    }
+                }
+            }
+
             if (uiState.isLoading) {
                 CircularProgressIndicator(modifier = Modifier.padding(16.dp))
             }
@@ -103,6 +125,32 @@ fun CatalogScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FilterChooserChip(
+    filter: SourceFilter,
+    selectedValue: String?,
+    onSelect: (valueIndex: Int?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier = modifier) {
+        FilterChip(
+            selected = selectedValue != null,
+            onClick = { expanded = true },
+            label = { Text(selectedValue ?: filter.name) },
+        )
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            if (selectedValue != null) {
+                DropdownMenuItem(text = { Text("All") }, onClick = { onSelect(null); expanded = false })
+            }
+            filter.values.forEachIndexed { index, value ->
+                DropdownMenuItem(text = { Text(value) }, onClick = { onSelect(index); expanded = false })
             }
         }
     }
