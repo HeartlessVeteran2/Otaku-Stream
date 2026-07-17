@@ -51,15 +51,26 @@ class StremioVideoSource(
             // A blank query means "browse with filters only" (e.g. genre) — that only needs the
             // filter's own extra name to be declared, not "search".
             if ("search" !in catalog.extraNames) return CatalogPage(emptyList(), false)
-            extraParts += "search=${URLEncoder.encode(query, "UTF-8")}"
+            extraParts += "search=${encodeExtraValue(query)}"
         }
         filters.forEach { filter ->
             val value = filter.values.getOrNull(filter.selected) ?: return@forEach
-            extraParts += "${URLEncoder.encode(filter.name, "UTF-8")}=${URLEncoder.encode(value, "UTF-8")}"
+            // Filters are merged globally across every registered source in the UI, so this
+            // source may be handed a value from a filter it declares by name but doesn't
+            // actually offer this value for (e.g. another addon's genre list) — only forward
+            // values this catalog's own extra actually declared.
+            val extra = catalog.extras.find { it.name == filter.name } ?: return@forEach
+            if (value !in extra.options.orEmpty()) return@forEach
+            extraParts += "${encodeExtraValue(filter.name)}=${encodeExtraValue(value)}"
         }
         extraParts += "skip=${(page - 1) * PAGE_SIZE}"
         return fetchCatalog(extraParts.joinToString("&"))
     }
+
+    // URLEncoder.encode renders spaces as "+", which is correct for query strings but not
+    // reliably accepted by every addon server in a path segment (where Stremio's extra
+    // parameters live) — "%20" is the safer, more widely-compatible choice here.
+    private fun encodeExtraValue(value: String): String = URLEncoder.encode(value, "UTF-8").replace("+", "%20")
 
     // Surfaces catalog extras that declare selectable options (e.g. genre) as generic filters —
     // already parsed from the manifest, so this needs no network call despite being suspend.

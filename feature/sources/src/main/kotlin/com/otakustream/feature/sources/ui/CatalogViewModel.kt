@@ -55,15 +55,23 @@ class CatalogViewModel @Inject constructor(
 
     private val queryFlow = MutableStateFlow("")
     private var loadMoreJob: Job? = null
+    private var searchJob: Job? = null
 
     init {
         viewModelScope.launch {
             bootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic)
             stremioBootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic)
-            _uiState.value = _uiState.value.copy(availableFilters = fetchAvailableFilters(sourceRepository.getSources()))
             // Only start reacting to searches once bootstrapping has registered every persisted
             // source, so the very first catalog load can't race a still-loading source.
-            queryFlow.debounce(SEARCH_DEBOUNCE_MS).collectLatest { query -> runSearch(query) }
+            queryFlow.debounce(SEARCH_DEBOUNCE_MS).collect { query -> startSearch(query) }
+        }
+        // Separate from the query flow above: re-derive availableFilters whenever a source is
+        // registered/unregistered (e.g. installing/removing a Stremio addon), not just once at
+        // startup, so newly installed addons' filters actually show up without a restart.
+        viewModelScope.launch {
+            sourceRepository.observeSources().collectLatest { sources ->
+                _uiState.value = _uiState.value.copy(availableFilters = fetchAvailableFilters(sources))
+            }
         }
     }
 
@@ -80,7 +88,7 @@ class CatalogViewModel @Inject constructor(
         val remaining = _uiState.value.selectedFilters.filterNot { it.name == filter.name }
         val updated = if (valueIndex == null) remaining else remaining + filter.copy(selected = valueIndex)
         _uiState.value = _uiState.value.copy(selectedFilters = updated, isLoading = true)
-        viewModelScope.launch { runSearch(_uiState.value.query) }
+        startSearch(_uiState.value.query)
     }
 
     fun loadMore() {
@@ -102,6 +110,15 @@ class CatalogViewModel @Inject constructor(
                 exhaustedSources = current.exhaustedSources + results.filterNot { it.hasNextPage }.map { it.sourceId },
             )
         }
+    }
+
+    // Cancels any in-flight search or load-more before starting a new one, so a query typed (or
+    // a filter tapped) while an older search/loadMore is still resolving can't have that older
+    // call's stale results land after — and overwrite — the newer one's.
+    private fun startSearch(query: String) {
+        loadMoreJob?.cancel()
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch { runSearch(query) }
     }
 
     private suspend fun runSearch(query: String) {

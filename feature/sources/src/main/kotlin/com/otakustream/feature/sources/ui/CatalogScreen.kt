@@ -6,13 +6,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
@@ -146,11 +149,15 @@ private fun FilterChooserChip(
             label = { Text(selectedValue ?: filter.name) },
         )
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            if (selectedValue != null) {
-                DropdownMenuItem(text = { Text("All") }, onClick = { onSelect(null); expanded = false })
-            }
-            filter.values.forEachIndexed { index, value ->
-                DropdownMenuItem(text = { Text(value) }, onClick = { onSelect(index); expanded = false })
+            // Some Stremio catalogs declare huge option lists (e.g. a "year" filter spanning a
+            // century) — a plain, non-lazy DropdownMenu would instantiate every item at once.
+            LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
+                if (selectedValue != null) {
+                    item { DropdownMenuItem(text = { Text("All") }, onClick = { onSelect(null); expanded = false }) }
+                }
+                itemsIndexed(filter.values) { index, value ->
+                    DropdownMenuItem(text = { Text(value) }, onClick = { onSelect(index); expanded = false })
+                }
             }
         }
     }
