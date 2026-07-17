@@ -50,10 +50,7 @@ class StremioRepositoryImpl @Inject constructor(
         ),
     )
 
-    override suspend fun deleteAddon(manifestUrl: String) {
-        dao.deleteAddon(manifestUrl)
-        dao.deleteCatalogTogglesForAddon(manifestUrl)
-    }
+    override suspend fun deleteAddon(manifestUrl: String) = dao.deleteAddonAndToggles(manifestUrl)
 
     override suspend fun setAddonEnabled(manifestUrl: String, enabled: Boolean) = dao.setAddonEnabled(manifestUrl, enabled)
 

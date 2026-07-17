@@ -124,11 +124,17 @@ fun GestureOverlay(
                         pulseText = "2x"
                     },
                     onPress = {
-                        tryAwaitRelease()
-                        if (speedBoostActive) {
-                            speedBoostActive = false
-                            onLongPressSpeedEnd()
-                            if (pulseText == "2x") pulseText = null
+                        // A cancelled gesture scope (screen closed, overlay recomposed/hidden)
+                        // throws out of tryAwaitRelease() — finally ensures the boost is still
+                        // ended so playback doesn't get stuck at 2x.
+                        try {
+                            tryAwaitRelease()
+                        } finally {
+                            if (speedBoostActive) {
+                                speedBoostActive = false
+                                onLongPressSpeedEnd()
+                                if (pulseText == "2x") pulseText = null
+                            }
                         }
                     },
                 )
