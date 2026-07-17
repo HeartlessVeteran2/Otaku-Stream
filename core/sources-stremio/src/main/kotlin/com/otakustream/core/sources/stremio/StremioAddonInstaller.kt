@@ -14,7 +14,7 @@ class StremioAddonInstaller @Inject constructor(
     private val httpClient: OkHttpClient,
     private val stremioRepository: StremioRepository,
 ) {
-    suspend fun installFromUrl(manifestUrl: String): List<StremioVideoSource> = withContext(Dispatchers.IO) {
+    suspend fun installFromUrl(manifestUrl: String, priority: Int = 0): List<StremioVideoSource> = withContext(Dispatchers.IO) {
         val normalizedUrl = manifestUrl.trim().let { raw ->
             val withScheme = when {
                 raw.startsWith("stremio://", ignoreCase = true) -> raw.replaceFirst("stremio://", "https://")
@@ -30,7 +30,9 @@ class StremioAddonInstaller @Inject constructor(
         }
         val sources = buildSources(normalizedUrl, content)
         val manifest = parseManifest(content)
-        stremioRepository.saveAddon(StremioAddonRecord(manifestUrl = normalizedUrl, manifestJson = content, name = manifest.name))
+        stremioRepository.saveAddon(
+            StremioAddonRecord(manifestUrl = normalizedUrl, manifestJson = content, name = manifest.name, priority = priority),
+        )
         sources
     }
 
@@ -40,10 +42,14 @@ class StremioAddonInstaller @Inject constructor(
     // catalogs — they're still installable, they just don't register a browsable VideoSource
     // (catalog-less stream/subtitle resolution is a separate, larger piece of work; see
     // https://github.com/HeartlessVeteran2/Otaku-Stream/issues/12).
-    fun buildSources(manifestUrl: String, manifestJson: String): List<StremioVideoSource> {
+    fun buildSources(
+        manifestUrl: String,
+        manifestJson: String,
+        isCatalogEnabled: (type: String, id: String) -> Boolean = { _, _ -> true },
+    ): List<StremioVideoSource> {
         val manifest = parseManifest(manifestJson)
         val resources = manifest.resources.toSet()
-        return manifest.catalogs.map { catalog ->
+        return manifest.catalogs.filter { isCatalogEnabled(it.type, it.id) }.map { catalog ->
             StremioVideoSource(
                 httpClient = httpClient,
                 stremioRepository = stremioRepository,
