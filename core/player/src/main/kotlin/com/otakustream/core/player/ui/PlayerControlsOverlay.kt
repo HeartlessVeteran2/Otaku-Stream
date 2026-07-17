@@ -1,7 +1,6 @@
 package com.otakustream.core.player.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -14,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -80,30 +80,29 @@ fun PlayerControlsOverlay(
             Text(text = formatDurationMs(durationMs), color = MaterialTheme.colorScheme.onBackground)
         }
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Box(
+            IconButton(
+                onClick = onPlayPauseClick,
                 modifier = Modifier.size(56.dp).background(MaterialTheme.colorScheme.primary, CircleShape),
-                contentAlignment = Alignment.Center,
             ) {
-                IconButton(onClick = onPlayPauseClick) {
-                    Icon(
-                        imageVector = if (uiState.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = if (uiState.isPlaying) "Pause" else "Play",
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                    )
-                }
+                Icon(
+                    imageVector = if (uiState.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = if (uiState.isPlaying) "Pause" else "Play",
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                )
             }
             trailingControls()
             Spacer(modifier = Modifier.weight(1f))
+            val markButtonColors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.tertiary)
             if (uiState.isMarkingSegment) {
-                TextButton(onClick = { onMarkSegmentEnd(SkipSegmentType.INTRO) }) {
-                    Text("End: Intro", color = MaterialTheme.colorScheme.tertiary)
+                TextButton(onClick = { onMarkSegmentEnd(SkipSegmentType.INTRO) }, colors = markButtonColors) {
+                    Text("End: Intro")
                 }
-                TextButton(onClick = { onMarkSegmentEnd(SkipSegmentType.OUTRO) }) {
-                    Text("End: Outro", color = MaterialTheme.colorScheme.tertiary)
+                TextButton(onClick = { onMarkSegmentEnd(SkipSegmentType.OUTRO) }, colors = markButtonColors) {
+                    Text("End: Outro")
                 }
             } else {
-                TextButton(onClick = onMarkSegmentStart) {
-                    Text("Mark Start", color = MaterialTheme.colorScheme.tertiary)
+                TextButton(onClick = onMarkSegmentStart, colors = markButtonColors) {
+                    Text("Mark Start")
                 }
             }
             IconButton(onClick = onTracksClick) {
