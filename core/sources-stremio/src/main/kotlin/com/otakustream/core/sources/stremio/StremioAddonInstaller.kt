@@ -36,9 +36,12 @@ class StremioAddonInstaller @Inject constructor(
 
     suspend fun uninstall(manifestUrl: String) = stremioRepository.deleteAddon(manifestUrl)
 
+    // Stream/subtitle-only addons (e.g. Torrentio, OpenSubtitles) commonly declare zero
+    // catalogs — they're still installable, they just don't register a browsable VideoSource
+    // (catalog-less stream/subtitle resolution is a separate, larger piece of work; see
+    // https://github.com/HeartlessVeteran2/Otaku-Stream/issues/12).
     fun buildSources(manifestUrl: String, manifestJson: String): List<StremioVideoSource> {
         val manifest = parseManifest(manifestJson)
-        require(manifest.catalogs.isNotEmpty()) { "Addon declares no catalogs" }
         val resources = manifest.resources.toSet()
         return manifest.catalogs.map { catalog ->
             StremioVideoSource(

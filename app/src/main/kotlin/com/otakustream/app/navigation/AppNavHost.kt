@@ -130,7 +130,10 @@ fun AppNavHost(
                     },
                 ),
             ) { entry ->
-                val installUrl = Uri.decode(entry.arguments?.getString("installUrl").orEmpty()).ifEmpty { null }
+                // Navigation Compose already URL-decodes query-string arguments when populating
+                // this Bundle — decoding again here would corrupt any %-encoded characters in
+                // the manifest URL itself (unlike the path-segment args elsewhere in this file).
+                val installUrl = entry.arguments?.getString("installUrl").orEmpty().ifEmpty { null }
                 ManageStremioSourcesScreen(prefillInstallUrl = installUrl)
             }
             composable(

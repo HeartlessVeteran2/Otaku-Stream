@@ -17,6 +17,8 @@ import com.otakustream.core.sources.stremio.model.parseMetaResponse
 import com.otakustream.core.sources.stremio.model.parseStreamResponse
 import com.otakustream.core.sources.stremio.model.parseSubtitlesResponse
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -86,10 +88,16 @@ class StremioVideoSource(
 
     override suspend fun getVideoList(episode: Episode): List<Video> = withContext(Dispatchers.IO) {
         val (type, videoId) = splitTypeId(episode.url)
-        val streams = parseStreamResponse(get("$baseUrl/stream/$type/$videoId.json")).streams
-        val serverBaseUrl = stremioRepository.getServerBaseUrl()
-        val subtitleTracks = fetchSubtitleTracks(type, videoId)
-        streams.mapNotNull { stream -> stream.toVideo(serverBaseUrl, subtitleTracks) }
+        // Streams and subtitles are independent network calls — fetch them concurrently rather
+        // than paying their latency twice in sequence.
+        coroutineScope {
+            val streamsDeferred = async { parseStreamResponse(get("$baseUrl/stream/$type/$videoId.json")).streams }
+            val subtitleTracksDeferred = async { fetchSubtitleTracks(type, videoId) }
+            val serverBaseUrl = stremioRepository.getServerBaseUrl()
+            val streams = streamsDeferred.await()
+            val subtitleTracks = subtitleTracksDeferred.await()
+            streams.mapNotNull { stream -> stream.toVideo(serverBaseUrl, subtitleTracks) }
+        }
     }
 
     // The subtitles resource is a separate endpoint from /stream — only probe it when the

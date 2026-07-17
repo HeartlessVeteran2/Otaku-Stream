@@ -55,14 +55,17 @@ data class StremioSubtitle(val id: String, val url: String, val lang: String)
 
 data class StremioSubtitleResponse(val subtitles: List<StremioSubtitle>)
 
-// Android's JSONObject.optString returns the literal string "null" for JSON-null values.
+// Android's JSONObject/JSONArray optString return the literal string "null" for JSON-null
+// values — every array/object string read in this file goes through one of these two helpers
+// so a JSON null never turns into the four-character string "null".
 private fun JSONObject.stringOrEmpty(key: String): String = if (isNull(key)) "" else optString(key)
 private fun JSONObject.stringOrNull(key: String): String? = stringOrEmpty(key).ifEmpty { null }
 private fun JSONObject.intOrNull(key: String): Int? = if (has(key) && !isNull(key)) getInt(key) else null
 private fun JSONObject.stringListOrEmpty(key: String): List<String> {
     val array = optJSONArray(key) ?: return emptyList()
-    return (0 until array.length()).mapNotNull { array.optString(it).ifEmpty { null } }
+    return (0 until array.length()).mapNotNull { array.stringOrNull(it) }
 }
+private fun JSONArray.stringOrNull(index: Int): String? = if (isNull(index)) null else optString(index).ifEmpty { null }
 
 fun parseManifest(json: String): StremioManifest {
     val root = JSONObject(json)
@@ -71,7 +74,7 @@ fun parseManifest(json: String): StremioManifest {
     // field ({"name": "catalog", ...}) depending on the addon.
     val resources = (0 until resourcesArray.length()).mapNotNull { index ->
         val obj = resourcesArray.optJSONObject(index)
-        if (obj != null) obj.stringOrEmpty("name").ifEmpty { null } else resourcesArray.optString(index).ifEmpty { null }
+        if (obj != null) obj.stringOrEmpty("name").ifEmpty { null } else resourcesArray.stringOrNull(index)
     }
     val catalogsArray = root.optJSONArray("catalogs") ?: JSONArray()
     val catalogs = (0 until catalogsArray.length()).map { index ->
@@ -86,11 +89,11 @@ fun parseManifest(json: String): StremioManifest {
                 StremioExtra(
                     name = name,
                     isRequired = obj.optBoolean("isRequired", false),
-                    options = obj.optJSONArray("options")?.let { options -> (0 until options.length()).mapNotNull { options.optString(it).ifEmpty { null } } },
+                    options = obj.optJSONArray("options")?.let { options -> (0 until options.length()).mapNotNull { options.stringOrNull(it) } },
                     optionsLimit = obj.intOrNull("optionsLimit"),
                 )
             } else {
-                extraArray.optString(extraIndex).ifEmpty { null }?.let { StremioExtra(name = it) }
+                extraArray.stringOrNull(extraIndex)?.let { StremioExtra(name = it) }
             }
         }
         StremioCatalog(
@@ -180,7 +183,7 @@ fun parseSubtitlesResponse(json: String): StremioSubtitleResponse {
     val root = JSONObject(json)
     val subtitlesArray = root.optJSONArray("subtitles") ?: JSONArray()
     val subtitles = (0 until subtitlesArray.length()).mapNotNull { index ->
-        val entry = subtitlesArray.getJSONObject(index)
+        val entry = subtitlesArray.optJSONObject(index) ?: return@mapNotNull null
         val url = entry.stringOrNull("url") ?: return@mapNotNull null
         StremioSubtitle(
             id = entry.stringOrEmpty("id").ifEmpty { url },
