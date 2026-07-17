@@ -34,6 +34,8 @@ data class MediaDetailsUiState(
     val episodes: List<Episode> = emptyList(),
     val resolvedVideoUrl: String? = null,
     val error: String? = null,
+    val pendingVideoChoices: List<Video> = emptyList(),
+    val pendingEpisode: Episode? = null,
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -126,18 +128,36 @@ class MediaDetailsViewModel @Inject constructor(
         playJob = viewModelScope.launch {
             runCatching { source.getVideoList(episode) }
                 .onSuccess { videos ->
-                    val video = videos.firstOrNull()
-                    video?.let(PendingPlayback::stash)
-                    PlaybackQueue.setNextResolver { resolveNextVideo(sourceId, episode) }
-                    _uiState.value = _uiState.value.copy(resolvedVideoUrl = video?.url, error = if (video == null) "No video found" else null)
-                    if (video != null) {
-                        recordWatchAndSync(episode)
+                    when {
+                        videos.isEmpty() -> _uiState.value = _uiState.value.copy(error = "No video found")
+                        videos.size == 1 -> playVideo(sourceId, episode, videos.first())
+                        else -> _uiState.value = _uiState.value.copy(pendingVideoChoices = videos, pendingEpisode = episode)
                     }
                 }
                 .onFailure { error ->
                     _uiState.value = _uiState.value.copy(error = error.message)
                 }
         }
+    }
+
+    // Called once the user picks a stream from the picker sheet (or immediately by playEpisode
+    // when there's only one option, so there's nothing to choose).
+    fun selectVideo(video: Video) {
+        val episode = _uiState.value.pendingEpisode ?: return
+        val sourceId = currentSourceId
+        _uiState.value = _uiState.value.copy(pendingVideoChoices = emptyList(), pendingEpisode = null)
+        playVideo(sourceId, episode, video)
+    }
+
+    fun dismissVideoPicker() {
+        _uiState.value = _uiState.value.copy(pendingVideoChoices = emptyList(), pendingEpisode = null)
+    }
+
+    private fun playVideo(sourceId: Long, episode: Episode, video: Video) {
+        PendingPlayback.stash(video)
+        PlaybackQueue.setNextResolver { resolveNextVideo(sourceId, episode) }
+        _uiState.value = _uiState.value.copy(resolvedVideoUrl = video.url, error = null)
+        recordWatchAndSync(episode)
     }
 
     // Resolves the episode after currentEpisode (by list order, matching what's displayed) and
