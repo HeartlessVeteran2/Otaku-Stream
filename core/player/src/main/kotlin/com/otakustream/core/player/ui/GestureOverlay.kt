@@ -107,6 +107,7 @@ fun GestureOverlay(
             // gesture-recognition scope, so double-tap/long-press don't need to be threaded
             // into the drag/tap state machine above.
             .pointerInput(Unit) {
+                var speedBoostActive = false
                 detectTapGestures(
                     onDoubleTap = { offset ->
                         if (offset.x < size.width / 2f) {
@@ -118,14 +119,23 @@ fun GestureOverlay(
                         }
                     },
                     onLongPress = {
+                        speedBoostActive = true
                         onLongPressSpeedStart()
                         pulseText = "2x"
                     },
                     onPress = {
-                        val pressed = tryAwaitRelease()
-                        if (pressed) Unit
-                        onLongPressSpeedEnd()
-                        if (pulseText == "2x") pulseText = null
+                        // A cancelled gesture scope (screen closed, overlay recomposed/hidden)
+                        // throws out of tryAwaitRelease() — finally ensures the boost is still
+                        // ended so playback doesn't get stuck at 2x.
+                        try {
+                            tryAwaitRelease()
+                        } finally {
+                            if (speedBoostActive) {
+                                speedBoostActive = false
+                                onLongPressSpeedEnd()
+                                if (pulseText == "2x") pulseText = null
+                            }
+                        }
                     },
                 )
             },

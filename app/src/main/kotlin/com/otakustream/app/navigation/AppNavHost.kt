@@ -161,10 +161,13 @@ fun AppNavHost(
                 ),
             ) { entry ->
                 val args = entry.arguments
+                // Navigation Compose already URL-decodes query-string arguments when populating
+                // this Bundle — decoding again here would corrupt any %-encoded characters in
+                // the source URL/title themselves (unlike the path-segment args elsewhere in this file).
                 MediaDetailsScreen(
                     sourceId = args?.getLong("sourceId") ?: 0L,
-                    mediaUrl = Uri.decode(args?.getString("mediaUrl").orEmpty()),
-                    mediaTitle = Uri.decode(args?.getString("title").orEmpty()),
+                    mediaUrl = args?.getString("mediaUrl").orEmpty(),
+                    mediaTitle = args?.getString("title").orEmpty(),
                     onPlayVideo = { videoUrl -> navController.navigate("player?videoUrl=${Uri.encode(videoUrl)}") },
                 )
             }
@@ -178,7 +181,8 @@ fun AppNavHost(
                     },
                 ),
             ) { entry ->
-                val videoUrl = Uri.decode(entry.arguments?.getString("videoUrl").orEmpty())
+                // Navigation Compose already URL-decodes query-string arguments — see the note above.
+                val videoUrl = entry.arguments?.getString("videoUrl").orEmpty()
                 PlayerScreen(videoUrl = videoUrl)
             }
         }

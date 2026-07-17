@@ -2,6 +2,7 @@ package com.otakustream.core.database.stremio
 
 import androidx.room.Dao
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
@@ -16,8 +17,22 @@ interface StremioDao {
     @Upsert
     suspend fun upsertAddon(entity: StremioAddonEntity)
 
+    // Private to this interface's default method below — callers should always go through
+    // deleteAddon(manifestUrl), which also clears the addon's catalog toggles, to avoid
+    // reintroducing orphaned rows.
     @Query("DELETE FROM stremio_addons WHERE manifestUrl = :manifestUrl")
-    suspend fun deleteAddon(manifestUrl: String)
+    suspend fun deleteAddonRow(manifestUrl: String)
+
+    @Query("DELETE FROM stremio_catalog_toggles WHERE manifestUrl = :manifestUrl")
+    suspend fun deleteCatalogTogglesForAddon(manifestUrl: String)
+
+    // Runs both deletes in one transaction so a crash between them can't leave orphaned
+    // catalog-toggle rows behind.
+    @Transaction
+    suspend fun deleteAddon(manifestUrl: String) {
+        deleteAddonRow(manifestUrl)
+        deleteCatalogTogglesForAddon(manifestUrl)
+    }
 
     @Query("UPDATE stremio_addons SET enabled = :enabled WHERE manifestUrl = :manifestUrl")
     suspend fun setAddonEnabled(manifestUrl: String, enabled: Boolean)
