@@ -7,6 +7,7 @@ import com.otakustream.core.sources.api.MediaDetails
 import com.otakustream.core.sources.api.MediaItem
 import com.otakustream.core.sources.api.MediaStatus
 import com.otakustream.core.sources.api.SourceFilter
+import com.otakustream.core.sources.api.SubtitleTrack
 import com.otakustream.core.sources.api.Video
 import com.otakustream.core.sources.api.VideoSource
 import com.otakustream.core.sources.stremio.model.StremioCatalog
@@ -14,6 +15,7 @@ import com.otakustream.core.sources.stremio.model.StremioStream
 import com.otakustream.core.sources.stremio.model.parseCatalogResponse
 import com.otakustream.core.sources.stremio.model.parseMetaResponse
 import com.otakustream.core.sources.stremio.model.parseStreamResponse
+import com.otakustream.core.sources.stremio.model.parseSubtitlesResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -28,6 +30,7 @@ class StremioVideoSource(
     private val stremioRepository: StremioRepository,
     manifestUrl: String,
     private val catalog: StremioCatalog,
+    private val resources: Set<String>,
     override val id: Long,
     override val name: String,
     override val lang: String = "en",
@@ -49,7 +52,19 @@ class StremioVideoSource(
     override suspend fun getMediaDetails(media: MediaItem): MediaDetails = withContext(Dispatchers.IO) {
         val (type, id) = splitTypeId(media.url)
         val meta = parseMetaResponse(get("$baseUrl/meta/$type/$id.json"))
-        MediaDetails(media = media, description = meta.description, genres = meta.genres, status = MediaStatus.UNKNOWN)
+        MediaDetails(
+            media = media,
+            description = meta.description,
+            genres = meta.genres,
+            status = MediaStatus.UNKNOWN,
+            backgroundUrl = meta.background,
+            logoUrl = meta.logo,
+            imdbRating = meta.imdbRating,
+            runtime = meta.runtime,
+            cast = meta.cast,
+            director = meta.director,
+            trailerYoutubeId = meta.trailerYoutubeId,
+        )
     }
 
     override suspend fun getEpisodeList(media: MediaItem): List<Episode> = withContext(Dispatchers.IO) {
@@ -59,7 +74,12 @@ class StremioVideoSource(
             listOf(Episode(url = "$type|${meta.id}", name = meta.name, episodeNumber = 1f))
         } else {
             meta.videos.mapIndexed { index, video ->
-                Episode(url = "$type|${video.id}", name = video.title, episodeNumber = (video.episode ?: (index + 1)).toFloat())
+                Episode(
+                    url = "$type|${video.id}",
+                    name = video.title,
+                    episodeNumber = (video.episode ?: (index + 1)).toFloat(),
+                    season = video.season,
+                )
             }
         }
     }
@@ -68,13 +88,33 @@ class StremioVideoSource(
         val (type, videoId) = splitTypeId(episode.url)
         val streams = parseStreamResponse(get("$baseUrl/stream/$type/$videoId.json")).streams
         val serverBaseUrl = stremioRepository.getServerBaseUrl()
-        streams.mapNotNull { stream -> stream.toVideo(serverBaseUrl) }
+        val subtitleTracks = fetchSubtitleTracks(type, videoId)
+        streams.mapNotNull { stream -> stream.toVideo(serverBaseUrl, subtitleTracks) }
     }
 
-    private fun StremioStream.toVideo(serverBaseUrl: String?): Video? = when {
-        !url.isNullOrBlank() -> Video(url = url, quality = name ?: "default", isM3U8 = url.contains(".m3u8", ignoreCase = true))
-        !infoHash.isNullOrBlank() && !serverBaseUrl.isNullOrBlank() ->
-            Video(url = "${serverBaseUrl.trimEnd('/')}/$infoHash/${fileIdx ?: 0}", quality = name ?: "torrent")
+    // The subtitles resource is a separate endpoint from /stream — only probe it when the
+    // manifest actually declares support, and never let a failure break stream resolution.
+    private fun fetchSubtitleTracks(type: String, videoId: String): List<SubtitleTrack> {
+        if ("subtitles" !in resources) return emptyList()
+        return runCatching {
+            parseSubtitlesResponse(get("$baseUrl/subtitles/$type/$videoId.json")).subtitles.map {
+                SubtitleTrack(url = it.url, lang = it.lang, label = it.lang)
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun StremioStream.toVideo(serverBaseUrl: String?, subtitleTracks: List<SubtitleTrack>): Video? = when {
+        !url.isNullOrBlank() -> Video(
+            url = url,
+            quality = name ?: "default",
+            isM3U8 = url.contains(".m3u8", ignoreCase = true),
+            subtitleTracks = subtitleTracks,
+        )
+        !infoHash.isNullOrBlank() && !serverBaseUrl.isNullOrBlank() -> Video(
+            url = "${serverBaseUrl.trimEnd('/')}/$infoHash/${fileIdx ?: 0}",
+            quality = name ?: "torrent",
+            subtitleTracks = subtitleTracks,
+        )
         else -> null
     }
 

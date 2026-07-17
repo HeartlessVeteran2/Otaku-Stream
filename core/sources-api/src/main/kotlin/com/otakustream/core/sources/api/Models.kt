@@ -11,6 +11,13 @@ data class MediaDetails(
     val description: String?,
     val genres: List<String> = emptyList(),
     val status: MediaStatus = MediaStatus.UNKNOWN,
+    val backgroundUrl: String? = null,
+    val logoUrl: String? = null,
+    val imdbRating: String? = null,
+    val runtime: String? = null,
+    val cast: List<String> = emptyList(),
+    val director: List<String> = emptyList(),
+    val trailerYoutubeId: String? = null,
 )
 
 enum class MediaStatus { ONGOING, COMPLETED, UNKNOWN }
@@ -20,6 +27,7 @@ data class Episode(
     val name: String,
     val episodeNumber: Float,
     val dateUploadEpochMs: Long = 0L,
+    val season: Int? = null,
 )
 
 data class Video(

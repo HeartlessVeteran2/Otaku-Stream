@@ -39,12 +39,14 @@ class StremioAddonInstaller @Inject constructor(
     fun buildSources(manifestUrl: String, manifestJson: String): List<StremioVideoSource> {
         val manifest = parseManifest(manifestJson)
         require(manifest.catalogs.isNotEmpty()) { "Addon declares no catalogs" }
+        val resources = manifest.resources.toSet()
         return manifest.catalogs.map { catalog ->
             StremioVideoSource(
                 httpClient = httpClient,
                 stremioRepository = stremioRepository,
                 manifestUrl = manifestUrl,
                 catalog = catalog,
+                resources = resources,
                 id = stableSourceId(manifestUrl, catalog.type, catalog.id),
                 name = "${manifest.name} — ${catalog.name}",
             )
