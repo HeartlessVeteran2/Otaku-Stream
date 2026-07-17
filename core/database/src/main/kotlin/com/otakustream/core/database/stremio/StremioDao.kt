@@ -19,6 +19,9 @@ interface StremioDao {
     @Query("DELETE FROM stremio_addons WHERE manifestUrl = :manifestUrl")
     suspend fun deleteAddon(manifestUrl: String)
 
+    @Query("DELETE FROM stremio_catalog_toggles WHERE manifestUrl = :manifestUrl")
+    suspend fun deleteCatalogTogglesForAddon(manifestUrl: String)
+
     @Query("UPDATE stremio_addons SET enabled = :enabled WHERE manifestUrl = :manifestUrl")
     suspend fun setAddonEnabled(manifestUrl: String, enabled: Boolean)
 
