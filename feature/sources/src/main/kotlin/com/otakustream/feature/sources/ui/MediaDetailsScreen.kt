@@ -145,7 +145,9 @@ fun MediaDetailsScreen(
 
             val seasons = remember(uiState.episodes) { uiState.episodes.mapNotNull { it.season }.distinct().sorted() }
             var selectedSeason by remember(uiState.episodes) { mutableStateOf(seasons.firstOrNull()) }
-            val visibleEpisodes = if (seasons.isEmpty()) uiState.episodes else uiState.episodes.filter { it.season == selectedSeason }
+            val visibleEpisodes = remember(uiState.episodes, selectedSeason) {
+                if (seasons.isEmpty()) uiState.episodes else uiState.episodes.filter { it.season == selectedSeason }
+            }
 
             if (seasons.isNotEmpty()) {
                 LazyRow(modifier = Modifier.padding(top = 16.dp)) {
@@ -192,9 +194,11 @@ fun MediaDetailsScreen(
 @Composable
 private fun StreamPickerSheet(choices: List<Video>, onSelect: (Video) -> Unit, onDismiss: () -> Unit) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text(text = "Choose a stream", style = MaterialTheme.typography.titleMedium)
-            choices.forEach { video ->
+        LazyColumn(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+            item {
+                Text(text = "Choose a stream", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
+            }
+            items(choices) { video ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
