@@ -8,16 +8,21 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -34,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.otakustream.core.sources.api.Video
 import com.otakustream.feature.tracking.LinkAniListDialog
 
 @Composable
@@ -137,8 +143,25 @@ fun MediaDetailsScreen(
                 Text(text = error, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
             }
 
+            val seasons = remember(uiState.episodes) { uiState.episodes.mapNotNull { it.season }.distinct().sorted() }
+            var selectedSeason by remember(uiState.episodes) { mutableStateOf(seasons.firstOrNull()) }
+            val visibleEpisodes = if (seasons.isEmpty()) uiState.episodes else uiState.episodes.filter { it.season == selectedSeason }
+
+            if (seasons.isNotEmpty()) {
+                LazyRow(modifier = Modifier.padding(top = 16.dp)) {
+                    items(seasons, key = { it }) { season ->
+                        FilterChip(
+                            selected = season == selectedSeason,
+                            onClick = { selectedSeason = season },
+                            label = { Text("Season $season") },
+                            modifier = Modifier.padding(end = 8.dp),
+                        )
+                    }
+                }
+            }
+
             LazyColumn(modifier = Modifier.padding(top = 16.dp)) {
-                items(uiState.episodes, key = { it.url }) { episode ->
+                items(visibleEpisodes, key = { it.url }) { episode ->
                     ListItem(
                         headlineContent = { Text(episode.name) },
                         modifier = Modifier.clickable { viewModel.playEpisode(sourceId, episode) },
@@ -154,5 +177,35 @@ fun MediaDetailsScreen(
             defaultQuery = mediaTitle,
             onDismiss = { showLinkDialog = false },
         )
+    }
+
+    if (uiState.pendingVideoChoices.isNotEmpty()) {
+        StreamPickerSheet(
+            choices = uiState.pendingVideoChoices,
+            onSelect = viewModel::selectVideo,
+            onDismiss = viewModel::dismissVideoPicker,
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StreamPickerSheet(choices: List<Video>, onSelect: (Video) -> Unit, onDismiss: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(text = "Choose a stream", style = MaterialTheme.typography.titleMedium)
+            choices.forEach { video ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelect(video) }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(selected = false, onClick = { onSelect(video) })
+                    Text(text = video.quality)
+                }
+            }
+        }
     }
 }
