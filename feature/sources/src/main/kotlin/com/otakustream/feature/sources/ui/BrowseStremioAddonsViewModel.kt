@@ -70,9 +70,10 @@ class BrowseStremioAddonsViewModel @Inject constructor(
 
     fun install(listing: OfficialAddonListing) {
         installingUrl.value = listing.transportUrl
+        error.value = null
         viewModelScope.launch {
             runCatching {
-                val nextPriority = stremioRepository.getAllAddons().size
+                val nextPriority = (stremioRepository.getAllAddons().maxOfOrNull { it.priority } ?: -1) + 1
                 installer.installFromUrl(listing.transportUrl, priority = nextPriority)
             }
                 .onSuccess { sources -> sources.forEach(sourceRepository::registerDynamic) }

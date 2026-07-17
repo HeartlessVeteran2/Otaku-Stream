@@ -88,7 +88,7 @@ class ManageStremioSourcesViewModel @Inject constructor(
         error.value = null
         viewModelScope.launch {
             runCatching {
-                val nextPriority = stremioRepository.getAllAddons().size
+                val nextPriority = (stremioRepository.getAllAddons().maxOfOrNull { it.priority } ?: -1) + 1
                 installer.installFromUrl(url, priority = nextPriority)
             }
                 .onSuccess { sources ->

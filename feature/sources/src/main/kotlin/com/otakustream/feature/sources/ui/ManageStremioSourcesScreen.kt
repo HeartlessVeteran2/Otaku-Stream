@@ -8,7 +8,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -115,9 +115,11 @@ fun ManageStremioSourcesScreen(
             Text(text = "Installed addons", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 24.dp))
 
             LazyColumn {
-                items(uiState.addons, key = { it.record.manifestUrl }) { item ->
+                itemsIndexed(uiState.addons, key = { _, item -> item.record.manifestUrl }) { index, item ->
                     AddonRow(
                         item = item,
+                        canMoveUp = index > 0,
+                        canMoveDown = index < uiState.addons.lastIndex,
                         onToggleEnabled = { viewModel.toggleAddonEnabled(item) },
                         onMoveUp = { viewModel.moveAddon(item, -1) },
                         onMoveDown = { viewModel.moveAddon(item, 1) },
@@ -133,6 +135,8 @@ fun ManageStremioSourcesScreen(
 @Composable
 private fun AddonRow(
     item: StremioAddonItem,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
     onToggleEnabled: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
@@ -145,8 +149,8 @@ private fun AddonRow(
                 Text(text = item.record.name, style = MaterialTheme.typography.titleSmall)
                 Text(text = item.record.manifestUrl, style = MaterialTheme.typography.bodySmall)
             }
-            IconButton(onClick = onMoveUp) { Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Move up") }
-            IconButton(onClick = onMoveDown) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Move down") }
+            IconButton(onClick = onMoveUp, enabled = canMoveUp) { Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Move up") }
+            IconButton(onClick = onMoveDown, enabled = canMoveDown) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Move down") }
             Switch(checked = item.record.enabled, onCheckedChange = { onToggleEnabled() })
             TextButton(onClick = onRemove) { Text("Remove") }
         }

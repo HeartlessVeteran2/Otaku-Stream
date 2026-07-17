@@ -48,6 +48,7 @@ fun BrowseStremioAddonsScreen(
                         listing = listing,
                         isInstalled = listing.transportUrl in uiState.installedUrls,
                         isInstalling = uiState.installingUrl == listing.transportUrl,
+                        canInstall = uiState.installingUrl == null,
                         onInstall = { viewModel.install(listing) },
                     )
                 }
@@ -61,6 +62,7 @@ private fun AddonListingRow(
     listing: OfficialAddonListing,
     isInstalled: Boolean,
     isInstalling: Boolean,
+    canInstall: Boolean,
     onInstall: () -> Unit,
 ) {
     ListItem(
@@ -70,7 +72,7 @@ private fun AddonListingRow(
             when {
                 isInstalled -> Text("Installed", style = MaterialTheme.typography.bodySmall)
                 isInstalling -> CircularProgressIndicator(modifier = Modifier.padding(4.dp))
-                else -> Button(onClick = onInstall) { Text("Install") }
+                else -> Button(onClick = onInstall, enabled = canInstall) { Text("Install") }
             }
         },
     )
