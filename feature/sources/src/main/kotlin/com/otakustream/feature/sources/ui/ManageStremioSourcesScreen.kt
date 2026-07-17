@@ -19,6 +19,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,12 +31,22 @@ import androidx.hilt.navigation.compose.hiltViewModel
 
 @Composable
 fun ManageStremioSourcesScreen(
+    prefillInstallUrl: String? = null,
     modifier: Modifier = Modifier,
     viewModel: ManageStremioSourcesViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val serverBaseUrl by viewModel.serverBaseUrl.collectAsState()
     var serverUrlInput by remember { mutableStateOf("") }
+
+    // stremio:// deep links land here with the addon's manifest URL pre-resolved — install it
+    // right away rather than making the user paste it again.
+    LaunchedEffect(prefillInstallUrl) {
+        prefillInstallUrl?.let { url ->
+            viewModel.onUrlInputChange(url)
+            viewModel.install()
+        }
+    }
 
     Scaffold(modifier = modifier.fillMaxSize()) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {

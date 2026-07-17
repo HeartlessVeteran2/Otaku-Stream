@@ -16,6 +16,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
@@ -39,6 +40,7 @@ private const val ROUTE_SETTINGS = "settings"
 private const val ROUTE_MANAGE_SOURCES = "manage-sources"
 private const val ROUTE_TRACKING_SETTINGS = "tracking-settings"
 private const val ROUTE_MANAGE_STREMIO = "manage-stremio"
+private const val ROUTE_MANAGE_STREMIO_PATTERN = "manage-stremio?installUrl={installUrl}"
 private const val ROUTE_DETAILS = "details/{sourceId}?mediaUrl={mediaUrl}&title={title}"
 private const val ROUTE_PLAYER = "player?videoUrl={videoUrl}"
 
@@ -51,11 +53,21 @@ private val bottomTabs = listOf(
 )
 
 @Composable
-fun AppNavHost() {
+fun AppNavHost(
+    pendingStremioInstallUrl: String? = null,
+    onPendingStremioInstallUrlConsumed: () -> Unit = {},
+) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
     val showBottomBar = currentRoute == ROUTE_CATALOG || currentRoute == ROUTE_LIBRARY || currentRoute == ROUTE_SETTINGS
+
+    LaunchedEffect(pendingStremioInstallUrl) {
+        pendingStremioInstallUrl?.let { url ->
+            navController.navigate("manage-stremio?installUrl=${Uri.encode(url)}")
+            onPendingStremioInstallUrlConsumed()
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -108,8 +120,21 @@ fun AppNavHost() {
             composable(ROUTE_TRACKING_SETTINGS) {
                 TrackingSettingsScreen()
             }
-            composable(ROUTE_MANAGE_STREMIO) {
-                ManageStremioSourcesScreen()
+            composable(
+                ROUTE_MANAGE_STREMIO_PATTERN,
+                arguments = listOf(
+                    navArgument("installUrl") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = ""
+                    },
+                ),
+            ) { entry ->
+                // Navigation Compose already URL-decodes query-string arguments when populating
+                // this Bundle — decoding again here would corrupt any %-encoded characters in
+                // the manifest URL itself (unlike the path-segment args elsewhere in this file).
+                val installUrl = entry.arguments?.getString("installUrl").orEmpty().ifEmpty { null }
+                ManageStremioSourcesScreen(prefillInstallUrl = installUrl)
             }
             composable(
                 ROUTE_DETAILS,

@@ -65,7 +65,7 @@ fun MediaDetailsScreen(
     Scaffold(modifier = modifier.fillMaxSize()) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
             CoverImage(
-                url = uiState.details?.media?.coverUrl,
+                url = uiState.details?.backgroundUrl ?: uiState.details?.media?.coverUrl,
                 contentDescription = mediaTitle,
                 modifier = Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(12.dp)),
             )
@@ -108,8 +108,29 @@ fun MediaDetailsScreen(
                 CircularProgressIndicator(modifier = Modifier.padding(16.dp))
             }
 
+            uiState.details?.let { details ->
+                if (details.imdbRating != null || details.runtime != null) {
+                    Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                        details.imdbRating?.let { rating ->
+                            Text(text = "★ $rating", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(end = 12.dp))
+                        }
+                        details.runtime?.let { runtime ->
+                            Text(text = runtime, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+
             uiState.details?.description?.let { description ->
                 Text(text = description, modifier = Modifier.padding(top = 8.dp))
+            }
+
+            uiState.details?.cast?.takeIf { it.isNotEmpty() }?.let { cast ->
+                Text(
+                    text = "Cast: ${cast.joinToString(", ")}",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
             }
 
             uiState.error?.let { error ->

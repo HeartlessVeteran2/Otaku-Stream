@@ -1,6 +1,7 @@
 package com.otakustream.app
 
 import android.app.PictureInPictureParams
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.util.Rational
@@ -9,6 +10,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.otakustream.app.navigation.AppNavHost
 import com.otakustream.app.ui.theme.OtakuStreamTheme
@@ -25,17 +29,28 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var playerController: PlayerController
 
+    private var pendingStremioInstallUrl by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        pendingStremioInstallUrl = intent.stremioInstallUrl()
         setContent {
             OtakuStreamTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    AppNavHost()
+                    AppNavHost(pendingStremioInstallUrl = pendingStremioInstallUrl, onPendingStremioInstallUrlConsumed = { pendingStremioInstallUrl = null })
                 }
             }
         }
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingStremioInstallUrl = intent.stremioInstallUrl()
+    }
+
+    private fun Intent.stremioInstallUrl(): String? = data?.takeIf { it.scheme == "stremio" }?.toString()
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()

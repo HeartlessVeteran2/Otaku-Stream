@@ -3,8 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
+  # No branch filter here (unlike push, above): stacked PRs target each other's branches, not
+  # main, so restricting this to branches: [main] would leave those PRs with no CI at all.
   pull_request:
-    branches: [main]
 
 jobs:
   lint:
