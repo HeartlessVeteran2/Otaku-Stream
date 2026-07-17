@@ -1,6 +1,8 @@
 package com.otakustream.feature.sources.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -10,15 +12,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -37,6 +41,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.sources.api.Video
@@ -70,27 +77,41 @@ fun MediaDetailsScreen(
 
     Scaffold(modifier = modifier.fillMaxSize()) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-            CoverImage(
-                url = uiState.details?.backgroundUrl ?: uiState.details?.media?.coverUrl,
-                contentDescription = mediaTitle,
-                modifier = Modifier.fillMaxWidth().height(200.dp).clip(RoundedCornerShape(12.dp)),
-            )
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-            ) {
-                Text(
-                    text = mediaTitle,
-                    style = MaterialTheme.typography.headlineSmall,
-                    modifier = Modifier.weight(1f),
+            Box(modifier = Modifier.fillMaxWidth().height(280.dp).clip(MaterialTheme.shapes.large)) {
+                CoverImage(
+                    url = uiState.details?.backgroundUrl ?: uiState.details?.media?.coverUrl,
+                    contentDescription = mediaTitle,
+                    modifier = Modifier.fillMaxSize(),
                 )
-                IconButton(onClick = viewModel::toggleWatchlist) {
-                    Icon(
-                        imageVector = if (inLibrary) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-                        contentDescription = if (inLibrary) "Remove from watchlist" else "Add to watchlist",
-                        tint = MaterialTheme.colorScheme.primary,
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Brush.verticalGradient(listOf(Color.Transparent, MaterialTheme.colorScheme.background))),
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(12.dp),
+                ) {
+                    Text(
+                        text = mediaTitle,
+                        style = MaterialTheme.typography.headlineLarge.copy(
+                            color = MaterialTheme.colorScheme.onBackground,
+                            shadow = Shadow(color = Color.Black.copy(alpha = 0.6f), blurRadius = 8f),
+                        ),
+                        modifier = Modifier.weight(1f),
                     )
+                    IconButton(
+                        onClick = viewModel::toggleWatchlist,
+                        colors = IconButtonDefaults.iconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.5f),
+                        ),
+                    ) {
+                        Icon(
+                            imageVector = if (inLibrary) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                            contentDescription = if (inLibrary) "Remove from watchlist" else "Add to watchlist",
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
                 }
             }
 
@@ -118,7 +139,12 @@ fun MediaDetailsScreen(
                 if (details.imdbRating != null || details.runtime != null) {
                     Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
                         details.imdbRating?.let { rating ->
-                            Text(text = "★ $rating", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(end = 12.dp))
+                            Text(
+                                text = "★ $rating",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.tertiary,
+                                modifier = Modifier.padding(end = 12.dp),
+                            )
                         }
                         details.runtime?.let { runtime ->
                             Text(text = runtime, style = MaterialTheme.typography.bodySmall)
@@ -156,6 +182,10 @@ fun MediaDetailsScreen(
                             selected = season == selectedSeason,
                             onClick = { selectedSeason = season },
                             label = { Text("Season $season") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.tertiary,
+                                selectedLabelColor = MaterialTheme.colorScheme.onTertiary,
+                            ),
                             modifier = Modifier.padding(end = 8.dp),
                         )
                     }
@@ -168,6 +198,7 @@ fun MediaDetailsScreen(
                         headlineContent = { Text(episode.name) },
                         modifier = Modifier.clickable { viewModel.playEpisode(sourceId, episode) },
                     )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
             }
         }

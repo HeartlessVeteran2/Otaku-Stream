@@ -1,5 +1,7 @@
 package com.otakustream.feature.sources.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,12 +19,12 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -30,6 +32,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
@@ -43,6 +46,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -78,7 +83,12 @@ fun CatalogScreen(
         modifier = modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text("Otaku Stream") },
+                title = { Text("OTAKU STREAM") },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    actionIconContentColor = MaterialTheme.colorScheme.tertiary,
+                ),
                 actions = {
                     IconButton(onClick = onManageSourcesClick) {
                         Icon(imageVector = Icons.Filled.Settings, contentDescription = "Manage sources")
@@ -110,7 +120,7 @@ fun CatalogScreen(
             }
 
             if (uiState.isLoading) {
-                CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+                CircularProgressIndicator(modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.tertiary)
             }
 
             LazyVerticalGrid(columns = GridCells.Adaptive(minSize = 120.dp), state = gridState) {
@@ -124,7 +134,7 @@ fun CatalogScreen(
                 if (uiState.isLoadingMore) {
                     item(span = { GridItemSpan(maxLineSpan) }) {
                         Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator()
+                            CircularProgressIndicator(color = MaterialTheme.colorScheme.tertiary)
                         }
                     }
                 }
@@ -147,6 +157,10 @@ private fun FilterChooserChip(
             selected = selectedValue != null,
             onClick = { expanded = true },
             label = { Text(selectedValue ?: filter.name) },
+            colors = FilterChipDefaults.filterChipColors(
+                selectedContainerColor = MaterialTheme.colorScheme.tertiary,
+                selectedLabelColor = MaterialTheme.colorScheme.onTertiary,
+            ),
         )
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             // Some Stremio catalogs declare huge option lists (e.g. a "year" filter spanning a
@@ -165,18 +179,39 @@ private fun FilterChooserChip(
 
 @Composable
 private fun MediaCard(title: String, coverUrl: String?, onClick: () -> Unit) {
-    Column(modifier = Modifier.padding(8.dp).clickable(onClick = onClick)) {
+    val shape = MaterialTheme.shapes.medium
+    Box(
+        modifier = Modifier
+            .padding(8.dp)
+            .fillMaxWidth()
+            .aspectRatio(2f / 3f)
+            .clip(shape)
+            .border(1.dp, MaterialTheme.colorScheme.outline, shape)
+            .clickable(onClick = onClick),
+    ) {
         CoverImage(
             url = coverUrl,
             contentDescription = title,
-            modifier = Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(8.dp)),
+            modifier = Modifier.fillMaxSize(),
         )
-        Text(
-            text = title,
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 4.dp),
-        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, MaterialTheme.colorScheme.background.copy(alpha = 0.85f)),
+                    ),
+                )
+                .padding(8.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }

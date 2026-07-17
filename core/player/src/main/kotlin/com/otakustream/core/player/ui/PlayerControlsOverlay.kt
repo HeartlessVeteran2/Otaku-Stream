@@ -7,13 +7,18 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -47,7 +52,9 @@ fun PlayerControlsOverlay(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f))))
+            .background(
+                Brush.verticalGradient(listOf(Color.Transparent, MaterialTheme.colorScheme.background.copy(alpha = 0.9f))),
+            )
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
         Slider(
@@ -58,36 +65,52 @@ fun PlayerControlsOverlay(
                 draftPositionMs = null
             },
             valueRange = 0f..durationMs.toFloat().coerceAtLeast(1f),
+            colors = SliderDefaults.colors(
+                thumbColor = MaterialTheme.colorScheme.tertiary,
+                activeTrackColor = MaterialTheme.colorScheme.primary,
+                inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+            ),
         )
         Row(modifier = Modifier.fillMaxWidth()) {
-            Text(text = formatDurationMs(draftPositionMs?.toLong() ?: uiState.positionMs), color = Color.White)
+            Text(
+                text = formatDurationMs(draftPositionMs?.toLong() ?: uiState.positionMs),
+                color = MaterialTheme.colorScheme.onBackground,
+            )
             Spacer(modifier = Modifier.weight(1f))
-            Text(text = formatDurationMs(durationMs), color = Color.White)
+            Text(text = formatDurationMs(durationMs), color = MaterialTheme.colorScheme.onBackground)
         }
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            IconButton(onClick = onPlayPauseClick) {
+            IconButton(
+                onClick = onPlayPauseClick,
+                modifier = Modifier.size(56.dp).background(MaterialTheme.colorScheme.primary, CircleShape),
+            ) {
                 Icon(
                     imageVector = if (uiState.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                     contentDescription = if (uiState.isPlaying) "Pause" else "Play",
-                    tint = Color.White,
+                    tint = MaterialTheme.colorScheme.onPrimary,
                 )
             }
             trailingControls()
             Spacer(modifier = Modifier.weight(1f))
+            val markButtonColors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.tertiary)
             if (uiState.isMarkingSegment) {
-                TextButton(onClick = { onMarkSegmentEnd(SkipSegmentType.INTRO) }) {
-                    Text("End: Intro", color = Color.White)
+                TextButton(onClick = { onMarkSegmentEnd(SkipSegmentType.INTRO) }, colors = markButtonColors) {
+                    Text("End: Intro")
                 }
-                TextButton(onClick = { onMarkSegmentEnd(SkipSegmentType.OUTRO) }) {
-                    Text("End: Outro", color = Color.White)
+                TextButton(onClick = { onMarkSegmentEnd(SkipSegmentType.OUTRO) }, colors = markButtonColors) {
+                    Text("End: Outro")
                 }
             } else {
-                TextButton(onClick = onMarkSegmentStart) {
-                    Text("Mark Start", color = Color.White)
+                TextButton(onClick = onMarkSegmentStart, colors = markButtonColors) {
+                    Text("Mark Start")
                 }
             }
             IconButton(onClick = onTracksClick) {
-                Icon(imageVector = Icons.Filled.Settings, contentDescription = "Tracks", tint = Color.White)
+                Icon(
+                    imageVector = Icons.Filled.Settings,
+                    contentDescription = "Tracks",
+                    tint = MaterialTheme.colorScheme.onBackground,
+                )
             }
         }
     }
