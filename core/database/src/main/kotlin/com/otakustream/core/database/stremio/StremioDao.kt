@@ -17,8 +17,11 @@ interface StremioDao {
     @Upsert
     suspend fun upsertAddon(entity: StremioAddonEntity)
 
+    // Private to this interface's default method below — callers should always go through
+    // deleteAddon(manifestUrl), which also clears the addon's catalog toggles, to avoid
+    // reintroducing orphaned rows.
     @Query("DELETE FROM stremio_addons WHERE manifestUrl = :manifestUrl")
-    suspend fun deleteAddon(manifestUrl: String)
+    suspend fun deleteAddonRow(manifestUrl: String)
 
     @Query("DELETE FROM stremio_catalog_toggles WHERE manifestUrl = :manifestUrl")
     suspend fun deleteCatalogTogglesForAddon(manifestUrl: String)
@@ -26,8 +29,8 @@ interface StremioDao {
     // Runs both deletes in one transaction so a crash between them can't leave orphaned
     // catalog-toggle rows behind.
     @Transaction
-    suspend fun deleteAddonAndToggles(manifestUrl: String) {
-        deleteAddon(manifestUrl)
+    suspend fun deleteAddon(manifestUrl: String) {
+        deleteAddonRow(manifestUrl)
         deleteCatalogTogglesForAddon(manifestUrl)
     }
 
