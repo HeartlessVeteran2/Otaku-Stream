@@ -10,10 +10,17 @@ class StremioAddonBootstrapper @Inject constructor(
     private val installer: StremioAddonInstaller,
 ) {
     // Pure JSON parsing + object construction, no network — cold-start rehydration mirroring
-    // ScriptedSourceBootstrapper.
+    // ScriptedSourceBootstrapper. Disabled addons and disabled catalogs are skipped entirely so
+    // they're never queried; getAllAddons() is already priority-ordered, so sources register (and
+    // therefore display) in the user's configured order.
     suspend fun loadPersistedSources(): List<StremioVideoSource> = withContext(Dispatchers.Default) {
-        stremioRepository.getAllAddons().flatMap { record ->
-            runCatching { installer.buildSources(record.manifestUrl, record.manifestJson) }.getOrDefault(emptyList())
+        val disabledCatalogKeys = stremioRepository.getDisabledCatalogKeys()
+        stremioRepository.getAllAddons().filter { it.enabled }.flatMap { record ->
+            runCatching {
+                installer.buildSources(record.manifestUrl, record.manifestJson) { type, id ->
+                    Triple(record.manifestUrl, type, id) !in disabledCatalogKeys
+                }
+            }.getOrDefault(emptyList())
         }
     }
 }

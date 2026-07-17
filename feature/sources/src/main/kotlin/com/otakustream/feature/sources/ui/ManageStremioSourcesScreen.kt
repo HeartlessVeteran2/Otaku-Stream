@@ -8,14 +8,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.ListItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -25,6 +30,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -32,6 +38,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 @Composable
 fun ManageStremioSourcesScreen(
     prefillInstallUrl: String? = null,
+    onBrowseAddonsClick: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: ManageStremioSourcesViewModel = hiltViewModel(),
 ) {
@@ -80,7 +87,10 @@ fun ManageStremioSourcesScreen(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 24.dp))
 
-            Text(text = "Add an addon by manifest URL", style = MaterialTheme.typography.titleMedium)
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text(text = "Add an addon", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                TextButton(onClick = onBrowseAddonsClick) { Text("Browse addons") }
+            }
 
             Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
                 OutlinedTextField(
@@ -105,17 +115,56 @@ fun ManageStremioSourcesScreen(
             Text(text = "Installed addons", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 24.dp))
 
             LazyColumn {
-                items(uiState.addons, key = { it.manifestUrl }) { record ->
-                    ListItem(
-                        headlineContent = { Text(record.name) },
-                        supportingContent = { Text(record.manifestUrl) },
-                        trailingContent = {
-                            TextButton(onClick = { viewModel.remove(record) }) {
-                                Text("Remove")
-                            }
-                        },
+                itemsIndexed(uiState.addons, key = { _, item -> item.record.manifestUrl }) { index, item ->
+                    AddonRow(
+                        item = item,
+                        canMoveUp = index > 0,
+                        canMoveDown = index < uiState.addons.lastIndex,
+                        onToggleEnabled = { viewModel.toggleAddonEnabled(item) },
+                        onMoveUp = { viewModel.moveAddon(item, -1) },
+                        onMoveDown = { viewModel.moveAddon(item, 1) },
+                        onToggleCatalog = { catalog -> viewModel.toggleCatalogEnabled(item, catalog) },
+                        onRemove = { viewModel.remove(item.record) },
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AddonRow(
+    item: StremioAddonItem,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    onToggleEnabled: () -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+    onToggleCatalog: (StremioCatalogItem) -> Unit,
+    onRemove: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = item.record.name, style = MaterialTheme.typography.titleSmall)
+                Text(text = item.record.manifestUrl, style = MaterialTheme.typography.bodySmall)
+            }
+            IconButton(onClick = onMoveUp, enabled = canMoveUp) { Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Move up") }
+            IconButton(onClick = onMoveDown, enabled = canMoveDown) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Move down") }
+            Switch(checked = item.record.enabled, onCheckedChange = { onToggleEnabled() })
+            TextButton(onClick = onRemove) { Text("Remove") }
+        }
+        item.catalogs.forEach { catalog ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 4.dp),
+            ) {
+                Text(text = catalog.name, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                Switch(
+                    checked = catalog.enabled,
+                    onCheckedChange = { onToggleCatalog(catalog) },
+                    enabled = item.record.enabled,
+                )
             }
         }
     }

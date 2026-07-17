@@ -13,6 +13,7 @@ import com.otakustream.core.database.scripted.ScriptedSourceEntity
 import com.otakustream.core.database.skip.SkipSegmentDao
 import com.otakustream.core.database.skip.SkipSegmentEntity
 import com.otakustream.core.database.stremio.StremioAddonEntity
+import com.otakustream.core.database.stremio.StremioCatalogToggleEntity
 import com.otakustream.core.database.stremio.StremioDao
 import com.otakustream.core.database.stremio.StremioServerConfigEntity
 import com.otakustream.core.database.tracking.TrackerLink
@@ -30,8 +31,9 @@ import com.otakustream.core.database.tracking.TrackingDao
         TrackerToken::class,
         StremioAddonEntity::class,
         StremioServerConfigEntity::class,
+        StremioCatalogToggleEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = false,
 )
 abstract class AppDatabase : RoomDatabase() {
