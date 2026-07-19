@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.Icon
@@ -35,6 +36,7 @@ import com.otakustream.feature.sources.ui.ManageStremioSourcesScreen
 import com.otakustream.feature.sources.ui.MediaDetailsScreen
 import com.otakustream.feature.tracking.TrackingSettingsScreen
 
+private const val ROUTE_PLAY = "play"
 private const val ROUTE_CATALOG = "catalog"
 private const val ROUTE_LIBRARY = "library"
 private const val ROUTE_SETTINGS = "settings"
@@ -49,7 +51,8 @@ private const val ROUTE_PLAYER = "player?videoUrl={videoUrl}"
 private data class BottomTab(val route: String, val label: String, val icon: @Composable () -> Unit)
 
 private val bottomTabs = listOf(
-    BottomTab(ROUTE_CATALOG, "Home") { Icon(Icons.Filled.Home, contentDescription = null) },
+    BottomTab(ROUTE_PLAY, "Play") { Icon(Icons.Filled.PlayCircle, contentDescription = null) },
+    BottomTab(ROUTE_CATALOG, "Catalog") { Icon(Icons.Filled.Home, contentDescription = null) },
     BottomTab(ROUTE_LIBRARY, "Library") { Icon(Icons.Filled.VideoLibrary, contentDescription = null) },
     BottomTab(ROUTE_SETTINGS, "Settings") { Icon(Icons.Filled.Settings, contentDescription = null) },
 )
@@ -58,16 +61,28 @@ private val bottomTabs = listOf(
 fun AppNavHost(
     pendingStremioInstallUrl: String? = null,
     onPendingStremioInstallUrlConsumed: () -> Unit = {},
+    pendingPlayUrl: String? = null,
+    onPendingPlayUrlConsumed: () -> Unit = {},
 ) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-    val showBottomBar = currentRoute == ROUTE_CATALOG || currentRoute == ROUTE_LIBRARY || currentRoute == ROUTE_SETTINGS
+    val showBottomBar = currentRoute == ROUTE_PLAY || currentRoute == ROUTE_CATALOG ||
+        currentRoute == ROUTE_LIBRARY || currentRoute == ROUTE_SETTINGS
 
     LaunchedEffect(pendingStremioInstallUrl) {
         pendingStremioInstallUrl?.let { url ->
             navController.navigate("manage-stremio?installUrl=${Uri.encode(url)}")
             onPendingStremioInstallUrlConsumed()
+        }
+    }
+
+    // A file/video-link opened via "Open with" should land straight in the player, not the Play
+    // tab — same as how the stremio:// deep link above skips Settings and goes to manage-stremio.
+    LaunchedEffect(pendingPlayUrl) {
+        pendingPlayUrl?.let { url ->
+            navController.navigate("player?videoUrl=${Uri.encode(url)}")
+            onPendingPlayUrlConsumed()
         }
     }
 
@@ -80,7 +95,7 @@ fun AppNavHost(
                             selected = currentRoute == tab.route,
                             onClick = {
                                 navController.navigate(tab.route) {
-                                    popUpTo(ROUTE_CATALOG) { saveState = true }
+                                    popUpTo(ROUTE_PLAY) { saveState = true }
                                     launchSingleTop = true
                                     restoreState = true
                                 }
@@ -95,9 +110,15 @@ fun AppNavHost(
     ) { padding ->
         NavHost(
             navController = navController,
-            startDestination = ROUTE_CATALOG,
+            startDestination = ROUTE_PLAY,
             modifier = Modifier.padding(padding),
         ) {
+            composable(ROUTE_PLAY) {
+                PlayScreen(
+                    onPlayVideo = { url -> navController.navigate("player?videoUrl=${Uri.encode(url)}") },
+                    onBrowseAddons = { navController.navigate(ROUTE_BROWSE_STREMIO) },
+                )
+            }
             composable(ROUTE_CATALOG) {
                 CatalogScreen(
                     onMediaClick = { sourceId, mediaUrl, title -> navController.navigateToDetails(sourceId, mediaUrl, title) },

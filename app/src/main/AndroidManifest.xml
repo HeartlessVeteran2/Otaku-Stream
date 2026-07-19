@@ -29,6 +29,19 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="stremio" />
             </intent-filter>
+            <!-- Lets a file manager's "Open with" or a browser's direct video-link handling
+                 launch straight into the player, VLC-style. Not an App Link (no domain to
+                 verify) — it appears as a chooser option for video/* content. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
         </activity>
     </application>
 
