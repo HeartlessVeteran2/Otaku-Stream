@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -30,10 +31,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Extension
+import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -60,6 +65,7 @@ private const val LOAD_MORE_THRESHOLD_ITEMS = 6
 fun CatalogScreen(
     onMediaClick: (sourceId: Long, mediaUrl: String, title: String) -> Unit,
     onManageSourcesClick: () -> Unit,
+    onBrowseAddons: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: CatalogViewModel = hiltViewModel(),
 ) {
@@ -91,7 +97,7 @@ fun CatalogScreen(
                 ),
                 actions = {
                     IconButton(onClick = onManageSourcesClick) {
-                        Icon(imageVector = Icons.Filled.Settings, contentDescription = "Manage sources")
+                        Icon(imageVector = Icons.Filled.Settings, contentDescription = "Manage add-ons & sources")
                     }
                 },
             )
@@ -119,26 +125,76 @@ fun CatalogScreen(
                 }
             }
 
-            if (uiState.isLoading) {
-                CircularProgressIndicator(modifier = Modifier.padding(16.dp), color = MaterialTheme.colorScheme.tertiary)
+            if (uiState.failedSourceCount > 0) {
+                SourceErrorBanner(
+                    count = uiState.failedSourceCount,
+                    onRetry = viewModel::retry,
+                    onDismiss = viewModel::dismissSourceError,
+                )
             }
 
-            LazyVerticalGrid(columns = GridCells.Adaptive(minSize = 120.dp), state = gridState) {
-                items(uiState.entries, key = { "${it.sourceId}:${it.media.url}" }) { entry ->
-                    MediaCard(
-                        title = entry.media.title,
-                        coverUrl = entry.media.coverUrl,
-                        onClick = { onMediaClick(entry.sourceId, entry.media.url, entry.media.title) },
+            val stillLoadingFirstPage = uiState.entries.isEmpty() && (uiState.isLoading || !uiState.hasLoadedOnce)
+            when {
+                stillLoadingFirstPage -> {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.tertiary)
+                    }
+                }
+                uiState.entries.isEmpty() && !uiState.hasAnySources -> {
+                    EmptyState(
+                        icon = Icons.Filled.Extension,
+                        title = "No sources yet",
+                        message = "Install an add-on to fill your catalog with things to watch.",
+                        actionLabel = "Browse add-ons",
+                        onAction = onBrowseAddons,
                     )
                 }
-                if (uiState.isLoadingMore) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(color = MaterialTheme.colorScheme.tertiary)
+                uiState.entries.isEmpty() -> {
+                    EmptyState(
+                        icon = Icons.Filled.SearchOff,
+                        title = "No matches",
+                        message = "Nothing here for that search. Try a different title or clear your filters.",
+                    )
+                }
+                else -> {
+                    LazyVerticalGrid(columns = GridCells.Adaptive(minSize = 120.dp), state = gridState) {
+                        items(uiState.entries, key = { "${it.sourceId}:${it.media.url}" }) { entry ->
+                            MediaCard(
+                                title = entry.media.title,
+                                coverUrl = entry.media.coverUrl,
+                                onClick = { onMediaClick(entry.sourceId, entry.media.url, entry.media.title) },
+                            )
+                        }
+                        if (uiState.isLoadingMore) {
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                    CircularProgressIndicator(color = MaterialTheme.colorScheme.tertiary)
+                                }
+                            }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun SourceErrorBanner(count: Int, onRetry: () -> Unit, onDismiss: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 12.dp)) {
+            Text(
+                text = if (count == 1) "1 source couldn't load" else "$count sources couldn't load",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onRetry) { Text("Retry") }
+            TextButton(onClick = onDismiss) { Text("Dismiss") }
         }
     }
 }

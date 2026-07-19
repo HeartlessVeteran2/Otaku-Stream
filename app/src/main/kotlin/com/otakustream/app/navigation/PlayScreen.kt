@@ -76,6 +76,13 @@ fun PlayScreen(
             modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
         ) {
+            Text(text = "Welcome to Otaku Stream", style = MaterialTheme.typography.headlineSmall)
+            Text(
+                text = "Play a video from your device or a link — or install an add-on to browse " +
+                    "in the Catalog tab.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Button(
                 onClick = { filePicker.launch(arrayOf("video/*")) },
                 modifier = Modifier.fillMaxWidth(),
@@ -117,20 +124,24 @@ fun PlayScreen(
 @Composable
 private fun PasteUrlDialog(onDismiss: () -> Unit, onPlay: (String) -> Unit) {
     var url by remember { mutableStateOf("") }
+    val trimmed = url.trim()
+    // Only allow schemes the player can actually open, so a typo can't navigate into a dead player.
+    val isPlayable = listOf("http://", "https://", "content://", "file://").any { trimmed.startsWith(it) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Play a URL") },
+        title = { Text("Play from a link") },
         text = {
             OutlinedTextField(
                 value = url,
                 onValueChange = { url = it },
-                label = { Text("Video URL (http, https, .m3u8, …)") },
+                label = { Text("Paste a video link") },
+                supportingText = { Text("Works with direct video or stream links.") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
         },
         confirmButton = {
-            TextButton(onClick = { onPlay(url.trim()) }, enabled = url.isNotBlank()) { Text("Play") }
+            TextButton(onClick = { onPlay(trimmed) }, enabled = isPlayable) { Text("Play") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )

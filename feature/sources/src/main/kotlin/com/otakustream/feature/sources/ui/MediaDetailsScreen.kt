@@ -12,8 +12,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -131,7 +133,7 @@ fun MediaDetailsScreen(
                 Switch(checked = autoPlayEnabled, onCheckedChange = viewModel::setAutoPlayEnabled)
             }
 
-            if (uiState.isLoading) {
+            if (uiState.isLoading && uiState.details == null) {
                 CircularProgressIndicator(modifier = Modifier.padding(16.dp))
             }
 
@@ -166,7 +168,18 @@ fun MediaDetailsScreen(
             }
 
             uiState.error?.let { error ->
-                Text(text = error, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                ) {
+                    Text(
+                        text = error,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = viewModel::retryLoad) { Text("Retry") }
+                }
             }
 
             val seasons = remember(uiState.episodes) { uiState.episodes.mapNotNull { it.season }.distinct().sorted() }
@@ -190,6 +203,14 @@ fun MediaDetailsScreen(
                         )
                     }
                 }
+            }
+
+            if (!uiState.isLoading && visibleEpisodes.isEmpty()) {
+                EmptyState(
+                    icon = Icons.Filled.Movie,
+                    title = "No episodes listed",
+                    message = "This source didn't return anything to play for this title.",
+                )
             }
 
             LazyColumn(modifier = Modifier.padding(top = 16.dp)) {
@@ -227,9 +248,9 @@ private fun StreamPickerSheet(choices: List<Video>, onSelect: (Video) -> Unit, o
     ModalBottomSheet(onDismissRequest = onDismiss) {
         LazyColumn(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             item {
-                Text(text = "Choose a stream", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
+                Text(text = "Pick a quality", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
             }
-            items(choices) { video ->
+            itemsIndexed(choices) { index, video ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -238,9 +259,19 @@ private fun StreamPickerSheet(choices: List<Video>, onSelect: (Video) -> Unit, o
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     RadioButton(selected = false, onClick = { onSelect(video) })
-                    Text(text = video.quality)
+                    Text(text = prettyQuality(video.quality, index))
                 }
             }
         }
+    }
+}
+
+// Source quality strings are free-form (often "720p", sometimes a filename or opaque token).
+// Trim/tidy it; fall back to a simple ordinal when it's blank or unhelpfully long.
+private fun prettyQuality(raw: String, index: Int): String {
+    val trimmed = raw.trim()
+    return when {
+        trimmed.isEmpty() || trimmed.length > 40 -> "Stream ${index + 1}"
+        else -> trimmed
     }
 }

@@ -18,6 +18,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -31,13 +32,21 @@ fun ManageSourcesScreen(
 
     Scaffold(modifier = modifier.fillMaxSize()) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-            Text(text = "Add a source by script URL", style = MaterialTheme.typography.titleMedium)
+            Text(text = "Add a custom source", style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = "Advanced: add-ons (recommended) come from the directory. Custom sources are " +
+                    "script-based and for advanced users.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
 
             Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
                 OutlinedTextField(
                     value = uiState.urlInput,
                     onValueChange = viewModel::onUrlInputChange,
-                    label = { Text("Script URL") },
+                    label = { Text("Source script link") },
+                    supportingText = { Text("A link to a source script (.js).") },
                     modifier = Modifier.weight(1f),
                 )
                 Button(onClick = viewModel::install, enabled = !uiState.isInstalling) {
@@ -50,10 +59,27 @@ fun ManageSourcesScreen(
             }
 
             uiState.error?.let { error ->
-                Text(text = error, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    Text(
+                        text = error,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = viewModel::install, enabled = !uiState.isInstalling) { Text("Retry") }
+                }
             }
 
             Text(text = "Installed sources", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 24.dp))
+
+            if (uiState.installed.isEmpty()) {
+                Text(
+                    text = "No custom sources yet.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
 
             LazyColumn {
                 items(uiState.installed, key = { it.scriptUrl }) { record ->

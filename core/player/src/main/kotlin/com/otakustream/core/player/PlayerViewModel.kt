@@ -10,9 +10,14 @@ import javax.inject.Inject
 @HiltViewModel
 class PlayerViewModel @Inject constructor(
     val controller: PlayerController,
+    private val onboardingPrefs: PlayerOnboardingPrefs,
 ) : ViewModel() {
 
     val uiState: StateFlow<PlayerUiState> = controller.uiState
+
+    val hasSeenGestureCoach: Boolean get() = onboardingPrefs.hasSeenGestureCoach
+
+    fun markGestureCoachSeen() { onboardingPrefs.hasSeenGestureCoach = true }
 
     fun play(url: String) = controller.play(url)
 

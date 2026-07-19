@@ -123,6 +123,7 @@ fun AppNavHost(
                 CatalogScreen(
                     onMediaClick = { sourceId, mediaUrl, title -> navController.navigateToDetails(sourceId, mediaUrl, title) },
                     onManageSourcesClick = { navController.navigate(ROUTE_MANAGE_SOURCES) },
+                    onBrowseAddons = { navController.navigate(ROUTE_BROWSE_STREMIO) },
                 )
             }
             composable(ROUTE_LIBRARY) {
@@ -222,9 +223,9 @@ private fun SettingsScreen(
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         ListItem(
-            headlineContent = { Text("Manage sources") },
-            supportingContent = { Text("Add or remove scripted video sources") },
-            modifier = Modifier.clickable(onClick = onManageSourcesClick),
+            headlineContent = { Text("Add-ons") },
+            supportingContent = { Text("Install add-ons that fill your catalog") },
+            modifier = Modifier.clickable(onClick = onManageStremioClick),
         )
         ListItem(
             headlineContent = { Text("AniList tracking") },
@@ -232,9 +233,9 @@ private fun SettingsScreen(
             modifier = Modifier.clickable(onClick = onTrackingClick),
         )
         ListItem(
-            headlineContent = { Text("Stremio addons") },
-            supportingContent = { Text("Add addons and configure a streaming server") },
-            modifier = Modifier.clickable(onClick = onManageStremioClick),
+            headlineContent = { Text("Custom sources") },
+            supportingContent = { Text("Advanced: add script-based video sources") },
+            modifier = Modifier.clickable(onClick = onManageSourcesClick),
         )
     }
 }

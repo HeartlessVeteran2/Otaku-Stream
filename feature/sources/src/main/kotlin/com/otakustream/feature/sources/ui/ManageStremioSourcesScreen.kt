@@ -55,48 +55,21 @@ fun ManageStremioSourcesScreen(
         }
     }
 
+    var showAdvanced by remember(serverBaseUrl) { mutableStateOf(serverBaseUrl != null) }
+
     Scaffold(modifier = modifier.fillMaxSize()) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-            Text(text = "Streaming server", style = MaterialTheme.typography.titleMedium)
-            Text(
-                text = "Only needed for addons that return torrent-based streams. Point this at a " +
-                    "self-hosted Stremio streaming server, e.g. http://100.x.x.x:11470.",
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-
-            if (serverBaseUrl != null) {
-                Text(
-                    text = "✓ Server configured: $serverBaseUrl",
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-                TextButton(onClick = viewModel::clearServerUrl) { Text("Remove") }
-            } else {
-                OutlinedTextField(
-                    value = serverUrlInput,
-                    onValueChange = { serverUrlInput = it },
-                    label = { Text("Streaming server URL") },
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                )
-                Row(modifier = Modifier.padding(top = 8.dp)) {
-                    Button(onClick = { viewModel.saveServerUrl(serverUrlInput); serverUrlInput = "" }) { Text("Save") }
-                    Spacer(modifier = Modifier.width(8.dp))
-                }
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 24.dp))
-
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Text(text = "Add an addon", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                TextButton(onClick = onBrowseAddonsClick) { Text("Browse addons") }
+                Text(text = "Add an add-on", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                TextButton(onClick = onBrowseAddonsClick) { Text("Browse add-ons") }
             }
 
             Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
                 OutlinedTextField(
                     value = uiState.urlInput,
                     onValueChange = viewModel::onUrlInputChange,
-                    label = { Text("Manifest URL") },
+                    label = { Text("Add-on link") },
+                    supportingText = { Text("Paste an add-on's install link, or tap Browse add-ons.") },
                     modifier = Modifier.weight(1f),
                 )
                 Button(onClick = viewModel::install, enabled = !uiState.isInstalling) {
@@ -109,12 +82,29 @@ fun ManageStremioSourcesScreen(
             }
 
             uiState.error?.let { error ->
-                Text(text = error, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    Text(
+                        text = error,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = viewModel::install, enabled = !uiState.isInstalling) { Text("Retry") }
+                }
             }
 
-            Text(text = "Installed addons", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 24.dp))
+            Text(text = "Installed add-ons", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 24.dp))
 
-            LazyColumn {
+            if (uiState.addons.isEmpty()) {
+                Text(
+                    text = "No add-ons installed yet. Browse the directory or paste an add-on link above.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+
+            LazyColumn(modifier = Modifier.weight(1f)) {
                 itemsIndexed(uiState.addons, key = { _, item -> item.record.manifestUrl }) { index, item ->
                     AddonRow(
                         item = item,
@@ -126,6 +116,42 @@ fun ManageStremioSourcesScreen(
                         onToggleCatalog = { catalog -> viewModel.toggleCatalogEnabled(item, catalog) },
                         onRemove = { viewModel.remove(item.record) },
                     )
+                }
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+            // Streaming server is a power-user setting most people never touch — tuck it behind an
+            // "Advanced" toggle so it doesn't clutter the main add-on flow.
+            TextButton(onClick = { showAdvanced = !showAdvanced }) {
+                Text(if (showAdvanced) "Hide advanced" else "Advanced (streaming server)")
+            }
+            if (showAdvanced) {
+                Text(
+                    text = "Only some add-ons need this. If an add-on tells you to set a streaming " +
+                        "server address, paste it here.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (serverBaseUrl != null) {
+                    Text(
+                        text = "✓ Server set: $serverBaseUrl",
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    TextButton(onClick = viewModel::clearServerUrl) { Text("Remove") }
+                } else {
+                    OutlinedTextField(
+                        value = serverUrlInput,
+                        onValueChange = { serverUrlInput = it },
+                        label = { Text("Streaming server address") },
+                        supportingText = { Text("e.g. http://100.x.x.x:11470") },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    )
+                    Row(modifier = Modifier.padding(top = 8.dp)) {
+                        Button(onClick = { viewModel.saveServerUrl(serverUrlInput); serverUrlInput = "" }) { Text("Save") }
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
                 }
             }
         }

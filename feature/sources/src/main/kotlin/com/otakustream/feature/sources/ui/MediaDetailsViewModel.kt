@@ -84,11 +84,11 @@ class MediaDetailsViewModel @Inject constructor(
 
         val source = sourceRepository.getSource(sourceId)
         if (source == null) {
-            _uiState.value = _uiState.value.copy(error = "Source not found")
+            _uiState.value = _uiState.value.copy(error = "This source is no longer available.")
             return
         }
 
-        _uiState.value = _uiState.value.copy(isLoading = true)
+        _uiState.value = _uiState.value.copy(isLoading = true, error = null)
         loadJob = viewModelScope.launch {
             runCatching {
                 val media = MediaItem(url = mediaUrl, title = mediaTitle)
@@ -97,10 +97,20 @@ class MediaDetailsViewModel @Inject constructor(
                 details to episodes
             }.onSuccess { (details, episodes) ->
                 _uiState.value = _uiState.value.copy(isLoading = false, details = details, episodes = episodes)
-            }.onFailure { error ->
-                _uiState.value = _uiState.value.copy(isLoading = false, error = error.message)
+            }.onFailure {
+                _uiState.value = _uiState.value.copy(
+                    isLoading = false,
+                    error = "Couldn't load this title. Check your connection and try again.",
+                )
             }
         }
+    }
+
+    // Re-run the last load() after a failure (the "Retry" affordance on the details error state).
+    fun retryLoad() {
+        val url = currentMediaUrl.value ?: return
+        loadedFor = null
+        load(currentSourceId, url, currentTitle)
     }
 
     fun toggleWatchlist() {
@@ -129,13 +139,14 @@ class MediaDetailsViewModel @Inject constructor(
             runCatching { source.getVideoList(episode) }
                 .onSuccess { videos ->
                     when {
-                        videos.isEmpty() -> _uiState.value = _uiState.value.copy(error = "No video found")
+                        videos.isEmpty() ->
+                            _uiState.value = _uiState.value.copy(error = "No playable stream was found for this episode.")
                         videos.size == 1 -> playVideo(sourceId, episode, videos.first())
                         else -> _uiState.value = _uiState.value.copy(pendingVideoChoices = videos, pendingEpisode = episode)
                     }
                 }
-                .onFailure { error ->
-                    _uiState.value = _uiState.value.copy(error = error.message)
+                .onFailure {
+                    _uiState.value = _uiState.value.copy(error = "Something went wrong starting playback. Please try again.")
                 }
         }
     }

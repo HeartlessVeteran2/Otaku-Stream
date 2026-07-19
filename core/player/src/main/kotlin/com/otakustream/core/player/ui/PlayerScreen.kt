@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Equalizer
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -57,6 +58,7 @@ fun PlayerScreen(
     var controlsVisible by remember { mutableStateOf(true) }
     var showTrackSheet by remember { mutableStateOf(false) }
     var showEqualizerSheet by remember { mutableStateOf(false) }
+    var showGestureCoach by remember { mutableStateOf(!viewModel.hasSeenGestureCoach) }
 
     LaunchedEffect(videoUrl) {
         viewModel.play(videoUrl)
@@ -130,11 +132,39 @@ fun PlayerScreen(
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
             }
 
-            uiState.error?.let { message ->
-                Text(
-                    text = message,
-                    color = Color.Red,
-                    modifier = Modifier.align(Alignment.Center).padding(16.dp),
+            uiState.error?.let {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.align(Alignment.Center).padding(32.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.ErrorOutline,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                    Text(
+                        text = "Playback failed",
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        text = "This video couldn't be played. It may be unavailable or in an unsupported format.",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+            }
+
+            // Surface the hidden gestures once, over the first playback.
+            if (showGestureCoach) {
+                GestureCoachOverlay(
+                    onDismiss = {
+                        viewModel.markGestureCoachSeen()
+                        showGestureCoach = false
+                    },
+                    modifier = Modifier.align(Alignment.Center),
                 )
             }
 

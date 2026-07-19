@@ -1,7 +1,9 @@
 package com.otakustream.feature.sources.ui
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,9 +13,11 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -28,9 +32,9 @@ fun BrowseStremioAddonsScreen(
 
     Scaffold(modifier = modifier.fillMaxSize()) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-            Text(text = "Official Stremio addons", style = MaterialTheme.typography.titleMedium)
+            Text(text = "Add-on directory", style = MaterialTheme.typography.titleMedium)
             Text(
-                text = "Curated directly from Stremio's own addon collection.",
+                text = "Browse add-ons and tap Install to add them to your catalog.",
                 style = MaterialTheme.typography.bodySmall,
             )
 
@@ -39,7 +43,24 @@ fun BrowseStremioAddonsScreen(
             }
 
             uiState.error?.let { error ->
-                Text(text = error, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    Text(
+                        text = error,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = viewModel::load) { Text("Retry") }
+                }
+            }
+
+            if (!uiState.isLoading && uiState.error == null && uiState.listings.isEmpty()) {
+                Text(
+                    text = "Couldn't find any add-ons right now.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 16.dp),
+                )
             }
 
             LazyColumn(modifier = Modifier.padding(top = 16.dp)) {
