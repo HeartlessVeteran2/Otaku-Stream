@@ -149,7 +149,10 @@ fun ManageStremioSourcesScreen(
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                     )
                     Row(modifier = Modifier.padding(top = 8.dp)) {
-                        Button(onClick = { viewModel.saveServerUrl(serverUrlInput); serverUrlInput = "" }) { Text("Save") }
+                        Button(
+                            onClick = { viewModel.saveServerUrl(serverUrlInput); serverUrlInput = "" },
+                            enabled = serverUrlInput.isNotBlank(),
+                        ) { Text("Save") }
                         Spacer(modifier = Modifier.width(8.dp))
                     }
                 }

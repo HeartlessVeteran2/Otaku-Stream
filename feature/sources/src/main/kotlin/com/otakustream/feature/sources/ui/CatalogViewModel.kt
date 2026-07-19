@@ -9,6 +9,7 @@ import com.otakustream.core.sources.scripting.ScriptedSourceBootstrapper
 import com.otakustream.core.sources.stremio.StremioAddonBootstrapper
 import com.otakustream.feature.sources.SourceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -188,7 +189,12 @@ class CatalogViewModel @Inject constructor(
                 runCatching {
                     val result = if (query.isBlank() && filters.isEmpty()) source.getPopular(page) else source.search(query, filters, page)
                     SourceFetch(source.id, result.items.map { CatalogEntry(source.id, it) }, result.hasNextPage)
-                }.getOrElse { SourceFetch(source.id, emptyList(), hasNextPage = false, failed = true) }
+                }.getOrElse { error ->
+                    // Don't swallow cancellation — a newer search cancels this fan-out, and eating
+                    // the CancellationException would break structured concurrency.
+                    if (error is CancellationException) throw error
+                    SourceFetch(source.id, emptyList(), hasNextPage = false, failed = true)
+                }
             }
         }.awaitAll()
     }

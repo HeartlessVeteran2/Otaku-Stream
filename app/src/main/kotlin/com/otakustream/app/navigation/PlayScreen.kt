@@ -126,7 +126,7 @@ private fun PasteUrlDialog(onDismiss: () -> Unit, onPlay: (String) -> Unit) {
     var url by remember { mutableStateOf("") }
     val trimmed = url.trim()
     // Only allow schemes the player can actually open, so a typo can't navigate into a dead player.
-    val isPlayable = listOf("http://", "https://", "content://", "file://").any { trimmed.startsWith(it) }
+    val isPlayable = listOf("http://", "https://", "content://", "file://").any { trimmed.startsWith(it, ignoreCase = true) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Play from a link") },

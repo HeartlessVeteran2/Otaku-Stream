@@ -16,6 +16,7 @@ import com.otakustream.core.sources.api.Video
 import com.otakustream.feature.sources.SourceRepository
 import com.otakustream.feature.tracking.TrackingManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -97,7 +98,10 @@ class MediaDetailsViewModel @Inject constructor(
                 details to episodes
             }.onSuccess { (details, episodes) ->
                 _uiState.value = _uiState.value.copy(isLoading = false, details = details, episodes = episodes)
-            }.onFailure {
+            }.onFailure { error ->
+                // A newer load() cancels this job — let cancellation propagate rather than
+                // showing a stale error over the new load.
+                if (error is CancellationException) throw error
                 _uiState.value = _uiState.value.copy(
                     isLoading = false,
                     error = "Couldn't load this title. Check your connection and try again.",
@@ -145,7 +149,8 @@ class MediaDetailsViewModel @Inject constructor(
                         else -> _uiState.value = _uiState.value.copy(pendingVideoChoices = videos, pendingEpisode = episode)
                     }
                 }
-                .onFailure {
+                .onFailure { error ->
+                    if (error is CancellationException) throw error
                     _uiState.value = _uiState.value.copy(error = "Something went wrong starting playback. Please try again.")
                 }
         }
