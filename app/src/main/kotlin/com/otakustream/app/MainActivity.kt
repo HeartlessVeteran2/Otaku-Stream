@@ -36,8 +36,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        pendingStremioInstallUrl = intent.stremioInstallUrl()
-        pendingPlayUrl = intent.playableVideoUri()
+        // Only consume the launch intent on a fresh start — on an activity recreation
+        // (e.g. process-death restore) the nav state is already restored, so re-reading it
+        // would spuriously re-navigate to the player/install screen.
+        if (savedInstanceState == null) {
+            pendingStremioInstallUrl = intent.stremioInstallUrl()
+            pendingPlayUrl = intent.playableVideoUri()
+        }
         setContent {
             OtakuStreamTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {

@@ -5,9 +5,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.FolderOpen
@@ -79,21 +81,24 @@ fun PlayScreen(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(Icons.Filled.FolderOpen, contentDescription = null)
-                Text(text = "  Open local file")
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(text = "Open local file")
             }
             Button(
                 onClick = { showUrlDialog = true },
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(Icons.Filled.Link, contentDescription = null)
-                Text(text = "  Paste a URL")
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(text = "Paste a URL")
             }
             OutlinedButton(
                 onClick = onBrowseAddons,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Icon(Icons.Filled.Extension, contentDescription = null)
-                Text(text = "  Browse add-ons")
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(text = "Browse add-ons")
             }
         }
     }
