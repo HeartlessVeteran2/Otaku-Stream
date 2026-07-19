@@ -31,15 +31,27 @@ class MainActivity : ComponentActivity() {
     lateinit var playerController: PlayerController
 
     private var pendingStremioInstallUrl by mutableStateOf<String?>(null)
+    private var pendingPlayUrl by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        pendingStremioInstallUrl = intent.stremioInstallUrl()
+        // Only consume the launch intent on a fresh start — on an activity recreation
+        // (e.g. process-death restore) the nav state is already restored, so re-reading it
+        // would spuriously re-navigate to the player/install screen.
+        if (savedInstanceState == null) {
+            pendingStremioInstallUrl = intent.stremioInstallUrl()
+            pendingPlayUrl = intent.playableVideoUri()
+        }
         setContent {
             OtakuStreamTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    AppNavHost(pendingStremioInstallUrl = pendingStremioInstallUrl, onPendingStremioInstallUrlConsumed = { pendingStremioInstallUrl = null })
+                    AppNavHost(
+                        pendingStremioInstallUrl = pendingStremioInstallUrl,
+                        onPendingStremioInstallUrlConsumed = { pendingStremioInstallUrl = null },
+                        pendingPlayUrl = pendingPlayUrl,
+                        onPendingPlayUrlConsumed = { pendingPlayUrl = null },
+                    )
                 }
             }
         }
@@ -49,9 +61,18 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         pendingStremioInstallUrl = intent.stremioInstallUrl()
+        pendingPlayUrl = intent.playableVideoUri()
     }
 
     private fun Intent.stremioInstallUrl(): String? = data?.takeIf { it.scheme == "stremio" }?.toString()
+
+    // A video opened via "Open with" / a browser video link arrives as ACTION_VIEW with an
+    // http(s)/content/file data URI — hand it straight to the player.
+    private fun Intent.playableVideoUri(): String? =
+        takeIf { it.action == Intent.ACTION_VIEW }
+            ?.data
+            ?.takeIf { it.scheme in setOf("http", "https", "content", "file") }
+            ?.toString()
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()

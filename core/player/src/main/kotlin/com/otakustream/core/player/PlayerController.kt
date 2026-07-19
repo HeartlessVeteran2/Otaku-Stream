@@ -15,6 +15,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlayer
@@ -213,9 +214,13 @@ class PlayerController @Inject constructor(
             // per-video — build a fresh DataSource.Factory per call rather than baking one
             // into the player at construction time.
             val headers = pending?.headers.orEmpty()
-            val dataSourceFactory = DefaultHttpDataSource.Factory().apply {
+            val httpDataSourceFactory = DefaultHttpDataSource.Factory().apply {
                 if (headers.isNotEmpty()) setDefaultRequestProperties(headers)
             }
+            // DefaultDataSource delegates to file/content/asset data sources by URI scheme and
+            // falls back to the HTTP factory (headers intact) for http(s) — so local files and
+            // content:// URIs from the file picker / "Open with" play, not just remote URLs.
+            val dataSourceFactory = DefaultDataSource.Factory(appContext, httpDataSourceFactory)
             val mediaSource = DefaultMediaSourceFactory(dataSourceFactory).createMediaSource(mediaItem)
 
             player.setMediaSource(mediaSource, resumeMs)
