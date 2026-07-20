@@ -18,6 +18,15 @@ private fun guessSubtitleMimeType(url: String): String = when {
     else -> MimeTypes.TEXT_VTT
 }
 
+// For user-picked subtitle FILES (matched by display name, not URL): unknown extensions fall
+// back to SubRip rather than VTT — local subtitle files are overwhelmingly .srt, while the VTT
+// fallback above stays for addon-supplied stream URLs.
+internal fun subtitleMimeTypeForName(name: String): String = when {
+    name.endsWith(".vtt", ignoreCase = true) -> MimeTypes.TEXT_VTT
+    name.endsWith(".ass", ignoreCase = true) || name.endsWith(".ssa", ignoreCase = true) -> MimeTypes.TEXT_SSA
+    else -> MimeTypes.APPLICATION_SUBRIP
+}
+
 internal fun SubtitleTrack.toMedia3Config(): MediaItem.SubtitleConfiguration =
     MediaItem.SubtitleConfiguration.Builder(Uri.parse(url))
         .setMimeType(mimeType)

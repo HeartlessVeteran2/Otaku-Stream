@@ -43,6 +43,11 @@ class PlayerViewModel @Inject constructor(
 
     fun setSubtitlesEnabled(enabled: Boolean) = controller.setSubtitlesEnabled(enabled)
 
+    // A user-picked subtitle file: MIME guessed from the display name (SubRip fallback — local
+    // subtitle files are overwhelmingly .srt).
+    fun loadSubtitleFile(uri: String, displayName: String) =
+        controller.addExternalSubtitle(uri, displayName, subtitleMimeTypeForName(displayName))
+
     fun markSegmentStart() = controller.markSegmentStart()
 
     fun markSegmentEnd(type: SkipSegmentType) = controller.markSegmentEnd(type)

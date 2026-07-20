@@ -17,6 +17,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DecoderReuseEvaluation
@@ -97,6 +98,10 @@ class PlayerController @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private var currentMediaUrl: String? = null
+    // Kept so addExternalSubtitle can rebuild the current item (same headers/factory) with an
+    // extra subtitle track mid-playback.
+    private var currentMediaItem: MediaItem? = null
+    private var currentDataSourceFactory: DataSource.Factory? = null
     private var lastPersistAtMs = 0L
     private var segmentsJob: Job? = null
     private var currentSegments: List<SkipSegment> = emptyList()
@@ -239,10 +244,35 @@ class PlayerController @Inject constructor(
             val dataSourceFactory = DefaultDataSource.Factory(appContext, httpDataSourceFactory)
             val mediaSource = DefaultMediaSourceFactory(dataSourceFactory).createMediaSource(mediaItem)
 
+            currentMediaItem = mediaItem
+            currentDataSourceFactory = dataSourceFactory
+
             player.setMediaSource(mediaSource, resumeMs)
             player.prepare()
             player.playWhenReady = true
         }
+    }
+
+    // Adds a user-picked subtitle file to the current playback: rebuild the media item with the
+    // extra track (same data source factory, headers intact) and re-prepare at the current
+    // position. A brief rebuffer at the same spot is the accepted cost.
+    fun addExternalSubtitle(uri: String, label: String, mimeType: String) {
+        val item = currentMediaItem ?: return
+        val factory = currentDataSourceFactory ?: return
+        val existing = item.localConfiguration?.subtitleConfigurations.orEmpty()
+        val added = MediaItem.SubtitleConfiguration.Builder(Uri.parse(uri))
+            .setMimeType(mimeType)
+            .setLabel(label)
+            .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+            .build()
+        val rebuilt = item.buildUpon().setSubtitleConfigurations(existing + added).build()
+        currentMediaItem = rebuilt
+
+        val position = player.currentPosition.coerceAtLeast(0L)
+        val wasPlaying = player.playWhenReady
+        player.setMediaSource(DefaultMediaSourceFactory(factory).createMediaSource(rebuilt), position)
+        player.prepare()
+        player.playWhenReady = wasPlaying
     }
 
     private suspend fun playNext() {

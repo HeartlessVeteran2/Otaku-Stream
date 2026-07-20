@@ -30,6 +30,7 @@ android {
 
 dependencies {
     implementation(project(":core:database"))
+    implementation(project(":core:sources-api"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
