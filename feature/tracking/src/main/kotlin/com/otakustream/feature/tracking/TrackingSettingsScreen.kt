@@ -1,5 +1,6 @@
 package com.otakustream.feature.tracking
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.ViewModel
@@ -15,6 +16,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -67,6 +71,7 @@ fun TrackingSettingsScreen(
     val hasToken by viewModel.hasToken.collectAsState()
     val justSignedIn by viewModel.justSignedIn.collectAsState()
     val context = LocalContext.current
+    var browserMissing by remember { mutableStateOf(false) }
 
     // A completed sign-in redirect lands here with the token still pending — persist it once.
     LaunchedEffect(pendingOAuthToken) {
@@ -94,7 +99,12 @@ fun TrackingSettingsScreen(
         } else if (AniListAuth.isConfigured) {
             Button(
                 onClick = {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(AniListAuth.authorizeUrl())))
+                    // Some devices (TV boxes, stripped emulators) have no browser at all.
+                    try {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(AniListAuth.authorizeUrl())))
+                    } catch (_: ActivityNotFoundException) {
+                        browserMissing = true
+                    }
                 },
                 modifier = Modifier.padding(top = 16.dp),
             ) {
@@ -106,6 +116,14 @@ fun TrackingSettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 8.dp),
             )
+            if (browserMissing) {
+                Text(
+                    text = "No browser found to open the sign-in page.",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
         } else {
             Text(
                 text = "AniList sign-in isn't set up in this build.",

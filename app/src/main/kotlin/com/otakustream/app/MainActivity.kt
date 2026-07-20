@@ -82,9 +82,11 @@ class MainActivity : ComponentActivity() {
 
     // AniList's implicit-grant redirect puts the token in the URL fragment:
     // otakustream://anilist-auth#access_token=...&token_type=Bearer&expires_in=...
+    // encodedFragment, not fragment: getFragment() pre-decodes, so a token containing %26/%3D
+    // would be corrupted before the split — split the raw fragment, then decode the value once.
     private fun Intent.aniListToken(): String? =
         data?.takeIf { it.scheme == "otakustream" && it.host == "anilist-auth" }
-            ?.fragment
+            ?.encodedFragment
             ?.split("&")
             ?.firstOrNull { it.startsWith("access_token=") }
             ?.removePrefix("access_token=")
