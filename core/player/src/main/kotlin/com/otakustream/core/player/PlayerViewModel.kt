@@ -4,16 +4,27 @@ import androidx.lifecycle.ViewModel
 import androidx.media3.common.C
 import com.otakustream.core.database.skip.SkipSegmentType
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import javax.inject.Inject
 
 @HiltViewModel
 class PlayerViewModel @Inject constructor(
     val controller: PlayerController,
     private val onboardingPrefs: PlayerOnboardingPrefs,
+    private val subtitleStylePrefs: SubtitleStylePrefs,
 ) : ViewModel() {
 
     val uiState: StateFlow<PlayerUiState> = controller.uiState
+
+    private val _subtitleStyle = MutableStateFlow(subtitleStylePrefs.load())
+    val subtitleStyle: StateFlow<SubtitleStyle> = _subtitleStyle.asStateFlow()
+
+    fun setSubtitleStyle(style: SubtitleStyle) {
+        subtitleStylePrefs.save(style)
+        _subtitleStyle.value = style
+    }
 
     val hasSeenGestureCoach: Boolean get() = onboardingPrefs.hasSeenGestureCoach
 

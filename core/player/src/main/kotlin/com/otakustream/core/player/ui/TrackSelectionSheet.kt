@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FileOpen
+import androidx.compose.material.icons.filled.FormatColorText
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -31,6 +32,7 @@ fun TrackSelectionSheet(
     onSelectQuality: (TrackInfo) -> Unit,
     onSubtitlesEnabledChange: (Boolean) -> Unit,
     onLoadSubtitleFile: () -> Unit,
+    onOpenSubtitleStyle: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -67,6 +69,17 @@ fun TrackSelectionSheet(
                 Icon(imageVector = Icons.Filled.FileOpen, contentDescription = null)
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(text = "Load subtitle file…")
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onOpenSubtitleStyle)
+                    .padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(imageVector = Icons.Filled.FormatColorText, contentDescription = null)
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(text = "Subtitle style")
             }
             if (uiState.videoQualityTracks.isNotEmpty()) {
                 TrackSection(title = "Quality", tracks = uiState.videoQualityTracks, onSelect = onSelectQuality)
