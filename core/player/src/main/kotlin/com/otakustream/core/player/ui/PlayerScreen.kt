@@ -46,9 +46,13 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.SubtitleView
 import com.otakustream.core.player.PlayerViewModel
 import com.otakustream.core.player.ResizeMode
+import com.otakustream.core.player.SubtitleEdgeStyle
+import com.otakustream.core.player.SubtitleStyle
 
 private const val PLAYER_SCREEN_TAG = "PlayerScreen"
 
@@ -60,6 +64,7 @@ fun PlayerScreen(
     viewModel: PlayerViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val subtitleStyle by viewModel.subtitleStyle.collectAsState()
     val context = LocalContext.current
     val activity = context.findActivity()
     val isInPip by rememberIsInPictureInPictureMode()
@@ -82,6 +87,7 @@ fun PlayerScreen(
     var controlsVisible by remember { mutableStateOf(true) }
     var showTrackSheet by remember { mutableStateOf(false) }
     var showEqualizerSheet by remember { mutableStateOf(false) }
+    var showSubtitleStyleSheet by remember { mutableStateOf(false) }
     var showGestureCoach by remember { mutableStateOf(!viewModel.hasSeenGestureCoach) }
 
     LaunchedEffect(videoUrl) {
@@ -115,7 +121,10 @@ fun PlayerScreen(
                     player = viewModel.controller.player
                 }
             },
-            update = { it.resizeMode = uiState.resizeMode.toAndroidXResizeMode() },
+            update = { view ->
+                view.resizeMode = uiState.resizeMode.toAndroidXResizeMode()
+                view.applySubtitleStyle(subtitleStyle)
+            },
         )
 
         if (!isInPip) {
@@ -224,7 +233,19 @@ fun PlayerScreen(
                     onSelectQuality = viewModel::selectVideoQuality,
                     onSubtitlesEnabledChange = viewModel::setSubtitlesEnabled,
                     onLoadSubtitleFile = { subtitlePicker.launch(arrayOf("*/*")) },
+                    onOpenSubtitleStyle = {
+                        showTrackSheet = false
+                        showSubtitleStyleSheet = true
+                    },
                     onDismiss = { showTrackSheet = false },
+                )
+            }
+
+            if (showSubtitleStyleSheet) {
+                SubtitleStyleSheet(
+                    style = subtitleStyle,
+                    onStyleChange = viewModel::setSubtitleStyle,
+                    onDismiss = { showSubtitleStyleSheet = false },
                 )
             }
 
@@ -257,4 +278,29 @@ private fun ResizeMode.toAndroidXResizeMode(): Int = when (this) {
     ResizeMode.FIT -> AspectRatioFrameLayout.RESIZE_MODE_FIT
     ResizeMode.ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
     ResizeMode.STRETCH -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+}
+
+@androidx.annotation.OptIn(UnstableApi::class)
+private fun PlayerView.applySubtitleStyle(style: SubtitleStyle) {
+    val view = subtitleView ?: return
+    view.setStyle(
+        CaptionStyleCompat(
+            style.textColor.argb,
+            style.background.argb,
+            android.graphics.Color.TRANSPARENT,
+            style.edgeStyle.toEdgeType(),
+            android.graphics.Color.BLACK,
+            null,
+        ),
+    )
+    view.setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * style.textScale)
+    view.setBottomPaddingFraction(style.bottomMarginFraction)
+}
+
+@androidx.annotation.OptIn(UnstableApi::class)
+private fun SubtitleEdgeStyle.toEdgeType(): Int = when (this) {
+    SubtitleEdgeStyle.NONE -> CaptionStyleCompat.EDGE_TYPE_NONE
+    SubtitleEdgeStyle.OUTLINE -> CaptionStyleCompat.EDGE_TYPE_OUTLINE
+    SubtitleEdgeStyle.DROP_SHADOW -> CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW
+    SubtitleEdgeStyle.RAISED -> CaptionStyleCompat.EDGE_TYPE_RAISED
 }
