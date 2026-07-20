@@ -26,7 +26,7 @@ interface WatchHistoryDao {
     @Query("SELECT * FROM watch_history ORDER BY watchedAtEpochMs DESC LIMIT 100")
     fun observeRecent(): Flow<List<WatchHistoryEntry>>
 
-    @Query("SELECT episodeUrl FROM watch_history WHERE mediaUrl = :mediaUrl")
+    @Query("SELECT DISTINCT episodeUrl FROM watch_history WHERE mediaUrl = :mediaUrl")
     fun observeWatchedEpisodeUrls(mediaUrl: String): Flow<List<String>>
 
     @Insert
