@@ -12,8 +12,11 @@ import com.otakustream.core.sources.api.MediaDetails
 import com.otakustream.core.sources.api.MediaItem
 import com.otakustream.core.sources.api.PendingPlayback
 import com.otakustream.core.sources.api.PlaybackQueue
+import com.otakustream.core.sources.api.SkipMark
 import com.otakustream.core.sources.api.Video
 import com.otakustream.feature.sources.SourceRepository
+import com.otakustream.feature.tracking.AniListClient
+import com.otakustream.feature.tracking.AniSkipClient
 import com.otakustream.feature.tracking.TrackingManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -47,6 +50,8 @@ class MediaDetailsViewModel @Inject constructor(
     private val libraryRepository: LibraryRepository,
     private val trackingRepository: TrackingRepository,
     private val trackingManager: TrackingManager,
+    private val aniListClient: AniListClient,
+    private val aniSkipClient: AniSkipClient,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(MediaDetailsUiState())
@@ -186,10 +191,39 @@ class MediaDetailsViewModel @Inject constructor(
     }
 
     private fun playVideo(sourceId: Long, episode: Episode, video: Video) {
-        PendingPlayback.stash(video)
+        PendingPlayback.stash(video, skipLookup = buildSkipLookup(episode))
         PlaybackQueue.setNextResolver { resolveNextVideo(sourceId, episode) }
         _uiState.value = _uiState.value.copy(resolvedVideoUrl = video.url, error = null)
         recordWatchAndSync(episode)
+    }
+
+    // For AniList-linked shows, hand the player a closure that resolves AniSkip intro/outro/recap
+    // timings once the real duration is known. Best-effort: no link or no episode number → null
+    // (the player just falls back to any manual skip markers).
+    private fun buildSkipLookup(episode: Episode): (suspend (Long) -> List<SkipMark>)? {
+        val link = trackerLink.value ?: return null
+        val episodeNumber = episode.episodeNumber.toInt()
+        if (episodeNumber < 1) return null
+        // Capture only the singletons and primitives the lookup needs — never `this`. The
+        // singleton PlayerController holds this closure for the life of the playback, so
+        // capturing the ViewModel would leak it. AniListClient caches the MAL id internally.
+        val aniList = aniListClient
+        val aniSkip = aniSkipClient
+        val trackerMediaId = link.trackerMediaId
+        return { durationMs ->
+            runCatching {
+                val malId = aniList.getMalId(trackerMediaId)
+                if (malId == null) {
+                    emptyList()
+                } else {
+                    aniSkip.fetch(malId, episodeNumber, durationMs / 1000)
+                        .map { SkipMark(it.startMs, it.endMs, it.kind) }
+                }
+            }.getOrElse { error ->
+                if (error is CancellationException) throw error
+                emptyList()
+            }
+        }
     }
 
     // Resolves the episode after currentEpisode (by list order, matching what's displayed) and

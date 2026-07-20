@@ -1,6 +1,8 @@
 package com.otakustream.core.player.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -28,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -57,20 +60,42 @@ fun PlayerControlsOverlay(
             )
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
-        Slider(
-            value = (draftPositionMs ?: uiState.positionMs.toFloat()).coerceIn(0f, durationMs.toFloat().coerceAtLeast(1f)),
-            onValueChange = { draftPositionMs = it },
-            onValueChangeFinished = {
-                draftPositionMs?.let { onSeekTo(it.toLong()) }
-                draftPositionMs = null
-            },
-            valueRange = 0f..durationMs.toFloat().coerceAtLeast(1f),
-            colors = SliderDefaults.colors(
-                thumbColor = MaterialTheme.colorScheme.tertiary,
-                activeTrackColor = MaterialTheme.colorScheme.primary,
-                inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
-            ),
-        )
+        val highlightColor = MaterialTheme.colorScheme.tertiary
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Slider(
+                value = (draftPositionMs ?: uiState.positionMs.toFloat()).coerceIn(0f, durationMs.toFloat().coerceAtLeast(1f)),
+                onValueChange = { draftPositionMs = it },
+                onValueChangeFinished = {
+                    draftPositionMs?.let { onSeekTo(it.toLong()) }
+                    draftPositionMs = null
+                },
+                valueRange = 0f..durationMs.toFloat().coerceAtLeast(1f),
+                colors = SliderDefaults.colors(
+                    thumbColor = MaterialTheme.colorScheme.tertiary,
+                    activeTrackColor = MaterialTheme.colorScheme.primary,
+                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant,
+                ),
+            )
+            // AniSkip/manual segments drawn as short marks just beneath the track so their
+            // position on the timeline is visible before you reach them.
+            if (durationMs > 0 && uiState.skipSegments.isNotEmpty()) {
+                Canvas(modifier = Modifier.matchParentSize()) {
+                    val inset = 10.dp.toPx()
+                    val trackWidth = (size.width - inset * 2).coerceAtLeast(0f)
+                    val y = size.height / 2f + 6.dp.toPx()
+                    uiState.skipSegments.forEach { segment ->
+                        val startX = inset + trackWidth * (segment.startMs.toFloat() / durationMs).coerceIn(0f, 1f)
+                        val endX = inset + trackWidth * (segment.endMs.toFloat() / durationMs).coerceIn(0f, 1f)
+                        drawLine(
+                            color = highlightColor,
+                            start = Offset(startX, y),
+                            end = Offset(endX, y),
+                            strokeWidth = 4.dp.toPx(),
+                        )
+                    }
+                }
+            }
+        }
         Row(modifier = Modifier.fillMaxWidth()) {
             Text(
                 text = formatDurationMs(draftPositionMs?.toLong() ?: uiState.positionMs),

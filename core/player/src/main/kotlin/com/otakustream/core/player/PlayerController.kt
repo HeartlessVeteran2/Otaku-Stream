@@ -33,6 +33,8 @@ import com.otakustream.core.database.skip.SkipSegmentRepository
 import com.otakustream.core.database.skip.SkipSegmentType
 import com.otakustream.core.sources.api.PendingPlayback
 import com.otakustream.core.sources.api.PlaybackQueue
+import com.otakustream.core.sources.api.SkipMark
+import kotlinx.coroutines.CancellationException
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -70,7 +72,9 @@ data class PlayerUiState(
     val subtitlesEnabled: Boolean = true,
     val videoWidth: Int = 0,
     val videoHeight: Int = 0,
-    val activeSkipSegment: SkipSegment? = null,
+    val activeSkipSegment: PlayerSkipSegment? = null,
+    val skipSegments: List<PlayerSkipSegment> = emptyList(),
+    val autoSkipEnabled: Boolean = false,
     val isMarkingSegment: Boolean = false,
     val resizeMode: ResizeMode = ResizeMode.FIT,
     val statsOverlayVisible: Boolean = false,
@@ -87,6 +91,7 @@ class PlayerController @Inject constructor(
     private val progressRepository: PlaybackProgressRepository,
     private val skipSegmentRepository: SkipSegmentRepository,
     private val libraryRepository: LibraryRepository,
+    private val playerSettingsPrefs: PlayerSettingsPrefs,
 ) {
     val player: ExoPlayer = ExoPlayer.Builder(appContext, PlayerRenderersFactory(appContext)).build()
 
@@ -104,12 +109,19 @@ class PlayerController @Inject constructor(
     private var currentDataSourceFactory: DataSource.Factory? = null
     private var lastPersistAtMs = 0L
     private var segmentsJob: Job? = null
-    private var currentSegments: List<SkipSegment> = emptyList()
+    // Manual (database) and AniSkip-fetched segments are tracked separately, then merged into
+    // currentSegments with AniSkip winning on overlap.
+    private var manualSegments: List<PlayerSkipSegment> = emptyList()
+    private var aniSkipSegments: List<PlayerSkipSegment> = emptyList()
+    private var currentSegments: List<PlayerSkipSegment> = emptyList()
+    private var currentSkipLookup: (suspend (durationMs: Long) -> List<SkipMark>)? = null
+    private var aniSkipFetched = false
     private var pendingSegmentStartMs: Long? = null
     private var speedBeforeBoost: Float? = null
     private var equalizer: Equalizer? = null
 
     init {
+        _uiState.value = _uiState.value.copy(autoSkipEnabled = playerSettingsPrefs.autoSkipEnabled)
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 _uiState.value = _uiState.value.copy(isPlaying = isPlaying)
@@ -123,6 +135,9 @@ class PlayerController @Inject constructor(
                     isBuffering = playbackState == Player.STATE_BUFFERING,
                     durationMs = player.duration.coerceAtLeast(0L),
                 )
+                if (playbackState == Player.STATE_READY) {
+                    maybeFetchAniSkip()
+                }
                 if (playbackState == Player.STATE_ENDED && PlaybackQueue.autoPlayEnabled) {
                     scope.launch { playNext() }
                 }
@@ -174,11 +189,22 @@ class PlayerController @Inject constructor(
         scope.launch {
             while (isActive) {
                 val position = player.currentPosition.coerceAtLeast(0L)
-                _uiState.value = _uiState.value.copy(
-                    positionMs = position,
-                    durationMs = player.duration.coerceAtLeast(0L),
-                    activeSkipSegment = currentSegments.firstOrNull { position in it.startMs until it.endMs },
-                )
+                val active = currentSegments.firstOrNull { position in it.startMs until it.endMs }
+                if (active != null && _uiState.value.autoSkipEnabled && player.isPlaying) {
+                    // Auto-skip jumps past the segment instead of surfacing the manual button.
+                    seekTo(active.endMs)
+                    _uiState.value = _uiState.value.copy(
+                        positionMs = active.endMs,
+                        durationMs = player.duration.coerceAtLeast(0L),
+                        activeSkipSegment = null,
+                    )
+                } else {
+                    _uiState.value = _uiState.value.copy(
+                        positionMs = position,
+                        durationMs = player.duration.coerceAtLeast(0L),
+                        activeSkipSegment = active,
+                    )
+                }
                 maybePersistProgress(position, force = false)
                 delay(500)
             }
@@ -206,13 +232,23 @@ class PlayerController @Inject constructor(
         pendingSegmentStartMs = null
         _uiState.value = _uiState.value.copy(isMarkingSegment = false)
 
+        // Reset skip state for the new media before either source repopulates it.
+        manualSegments = emptyList()
+        aniSkipSegments = emptyList()
+        aniSkipFetched = false
+        recomputeSegments()
+
         segmentsJob?.cancel()
         segmentsJob = scope.launch {
-            skipSegmentRepository.observeForMedia(url).collect { segments -> currentSegments = segments }
+            skipSegmentRepository.observeForMedia(url).collect { segments ->
+                manualSegments = segments.map { it.toPlayerSegment() }
+                recomputeSegments()
+            }
         }
 
         val stashed = PendingPlayback.consume(url)
         val pending = stashed?.video
+        currentSkipLookup = stashed?.skipLookup
 
         // No stash (file picker, pasted link, "Open with") — or a stash that explicitly left
         // history to us: record the play here, and drop any auto-play resolver left over from
@@ -387,6 +423,36 @@ class PlayerController @Inject constructor(
         _uiState.value.activeSkipSegment?.let { seekTo(it.endMs) }
     }
 
+    fun setAutoSkipEnabled(enabled: Boolean) {
+        playerSettingsPrefs.autoSkipEnabled = enabled
+        _uiState.value = _uiState.value.copy(autoSkipEnabled = enabled)
+    }
+
+    // AniSkip is fetched once per playback, after the real duration is known (STATE_READY).
+    private fun maybeFetchAniSkip() {
+        if (aniSkipFetched) return
+        val lookup = currentSkipLookup ?: return
+        val duration = player.duration
+        if (duration <= 0) return
+        aniSkipFetched = true
+        scope.launch {
+            val marks = runCatching { lookup(duration) }.getOrElse { error ->
+                if (error is CancellationException) throw error
+                emptyList()
+            }
+            aniSkipSegments = marks.mapNotNull { it.toPlayerSegment() }
+            recomputeSegments()
+        }
+    }
+
+    // AniSkip segments take precedence; manual markers fill in only where AniSkip has nothing.
+    private fun recomputeSegments() {
+        val merged = aniSkipSegments +
+            manualSegments.filterNot { manual -> aniSkipSegments.any { it.overlaps(manual) } }
+        currentSegments = merged.sortedBy { it.startMs }
+        _uiState.value = _uiState.value.copy(skipSegments = currentSegments)
+    }
+
     fun beginTemporarySpeedBoost() {
         if (speedBeforeBoost != null) return
         speedBeforeBoost = _uiState.value.playbackSpeed
@@ -437,4 +503,23 @@ class PlayerController @Inject constructor(
             eq.setBandLevel(band.toShort(), level)
         }
     }
+}
+
+private fun SkipSegment.toPlayerSegment(): PlayerSkipSegment = PlayerSkipSegment(
+    startMs = startMs,
+    endMs = endMs,
+    kind = when (type) {
+        SkipSegmentType.INTRO -> SkipKind.INTRO
+        SkipSegmentType.OUTRO -> SkipKind.OUTRO
+    },
+)
+
+private fun SkipMark.toPlayerSegment(): PlayerSkipSegment? {
+    val kind = when (type) {
+        SkipMark.TYPE_INTRO -> SkipKind.INTRO
+        SkipMark.TYPE_OUTRO -> SkipKind.OUTRO
+        SkipMark.TYPE_RECAP -> SkipKind.RECAP
+        else -> return null
+    }
+    return PlayerSkipSegment(startMs, endMs, kind)
 }

@@ -152,12 +152,12 @@ fun PlayerScreen(
                 }
             }
 
-            uiState.activeSkipSegment?.let {
+            uiState.activeSkipSegment?.let { segment ->
                 Button(
                     onClick = viewModel::skipActiveSegment,
                     modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
                 ) {
-                    Text("Skip")
+                    Text(segment.label)
                 }
             }
 
@@ -237,6 +237,7 @@ fun PlayerScreen(
                         showTrackSheet = false
                         showSubtitleStyleSheet = true
                     },
+                    onAutoSkipChange = viewModel::setAutoSkipEnabled,
                     onDismiss = { showTrackSheet = false },
                 )
             }
