@@ -9,6 +9,7 @@ import com.otakustream.core.sources.scripting.ScriptedSourceBootstrapper
 import com.otakustream.core.sources.stremio.StremioAddonBootstrapper
 import com.otakustream.feature.sources.SourceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -35,9 +36,23 @@ data class CatalogUiState(
     // sources that don't recognize a given filter simply ignore it when it's passed to search().
     val availableFilters: List<SourceFilter> = emptyList(),
     val selectedFilters: List<SourceFilter> = emptyList(),
+    // Whether any source is registered at all — drives the "install your first add-on" first-run
+    // state vs. a genuine "no results" state.
+    val hasAnySources: Boolean = false,
+    // Set once the first fan-out completes, so the UI can tell "still loading the first page" from
+    // "loaded and genuinely empty."
+    val hasLoadedOnce: Boolean = false,
+    // How many sources failed on the last fetch (network down, dead addon). Surfaced as a
+    // dismissible "some sources couldn't load" banner rather than silently dropping their results.
+    val failedSourceCount: Int = 0,
 )
 
-private data class SourceFetch(val sourceId: Long, val entries: List<CatalogEntry>, val hasNextPage: Boolean)
+private data class SourceFetch(
+    val sourceId: Long,
+    val entries: List<CatalogEntry>,
+    val hasNextPage: Boolean,
+    val failed: Boolean = false,
+)
 
 private const val SEARCH_DEBOUNCE_MS = 300L
 private const val FIRST_LOAD_MORE_PAGE = 2
@@ -70,7 +85,10 @@ class CatalogViewModel @Inject constructor(
         // startup, so newly installed addons' filters actually show up without a restart.
         viewModelScope.launch {
             sourceRepository.observeSources().collectLatest { sources ->
-                _uiState.value = _uiState.value.copy(availableFilters = fetchAvailableFilters(sources))
+                _uiState.value = _uiState.value.copy(
+                    availableFilters = fetchAvailableFilters(sources),
+                    hasAnySources = sources.isNotEmpty(),
+                )
             }
         }
     }
@@ -91,6 +109,16 @@ class CatalogViewModel @Inject constructor(
         startSearch(_uiState.value.query)
     }
 
+    // Re-run the current search — used by the "some sources couldn't load" retry affordance.
+    fun retry() {
+        _uiState.value = _uiState.value.copy(isLoading = true, failedSourceCount = 0)
+        startSearch(_uiState.value.query)
+    }
+
+    fun dismissSourceError() {
+        _uiState.value = _uiState.value.copy(failedSourceCount = 0)
+    }
+
     fun loadMore() {
         val state = _uiState.value
         if (state.isLoadingMore) return
@@ -108,6 +136,7 @@ class CatalogViewModel @Inject constructor(
                     it.sourceId to (current.nextPageBySource[it.sourceId] ?: FIRST_LOAD_MORE_PAGE) + 1
                 },
                 exhaustedSources = current.exhaustedSources + results.filterNot { it.hasNextPage }.map { it.sourceId },
+                failedSourceCount = results.count { it.failed },
             )
         }
     }
@@ -127,6 +156,8 @@ class CatalogViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(
             entries = results.flatMap { it.entries },
             isLoading = false,
+            hasLoadedOnce = true,
+            failedSourceCount = results.count { it.failed },
             nextPageBySource = results.associate { it.sourceId to FIRST_LOAD_MORE_PAGE },
             exhaustedSources = results.filterNot { it.hasNextPage }.map { it.sourceId }.toSet(),
         )
@@ -158,7 +189,12 @@ class CatalogViewModel @Inject constructor(
                 runCatching {
                     val result = if (query.isBlank() && filters.isEmpty()) source.getPopular(page) else source.search(query, filters, page)
                     SourceFetch(source.id, result.items.map { CatalogEntry(source.id, it) }, result.hasNextPage)
-                }.getOrDefault(SourceFetch(source.id, emptyList(), hasNextPage = false))
+                }.getOrElse { error ->
+                    // Don't swallow cancellation — a newer search cancels this fan-out, and eating
+                    // the CancellationException would break structured concurrency.
+                    if (error is CancellationException) throw error
+                    SourceFetch(source.id, emptyList(), hasNextPage = false, failed = true)
+                }
             }
         }.awaitAll()
     }

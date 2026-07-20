@@ -95,14 +95,14 @@ fun PlayerControlsOverlay(
             val markButtonColors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.tertiary)
             if (uiState.isMarkingSegment) {
                 TextButton(onClick = { onMarkSegmentEnd(SkipSegmentType.INTRO) }, colors = markButtonColors) {
-                    Text("End: Intro")
+                    Text("Intro ends here")
                 }
                 TextButton(onClick = { onMarkSegmentEnd(SkipSegmentType.OUTRO) }, colors = markButtonColors) {
-                    Text("End: Outro")
+                    Text("Outro ends here")
                 }
             } else {
                 TextButton(onClick = onMarkSegmentStart, colors = markButtonColors) {
-                    Text("Mark Start")
+                    Text("Mark intro/outro start")
                 }
             }
             IconButton(onClick = onTracksClick) {
