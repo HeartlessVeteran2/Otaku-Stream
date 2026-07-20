@@ -61,5 +61,5 @@ Rebuild (`./gradlew :app:assembleDebug`) and the sign-in button goes live.
 | --- | --- |
 | Button says sign-in isn't configured | `CLIENT_ID` is still the placeholder — do the steps above. |
 | Browser opens but never returns to the app | Redirect URL on the AniList client doesn't exactly match `otakustream://anilist-auth`. |
-| "No browser found" message | The device has no browser app installed; install one or paste a token manually via ADB is not supported — a browser is required. |
+| "No browser found" message | The device has no browser app installed. Install one — sign-in requires a browser; there is no manual token entry. |
 | Signed in but "Link to AniList" is missing on details pages | The token didn't save — sign out and in again, and check Logcat for `TrackingManager` warnings. |
