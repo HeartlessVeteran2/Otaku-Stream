@@ -3,7 +3,9 @@ package com.otakustream.core.player
 import android.content.Context
 import android.content.Intent
 import android.media.audiofx.Equalizer
+import android.net.Uri
 import android.os.SystemClock
+import android.provider.OpenableColumns
 import androidx.annotation.OptIn
 import androidx.core.content.ContextCompat
 import androidx.media3.common.C
@@ -21,6 +23,9 @@ import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import com.otakustream.core.database.library.DIRECT_PLAY_SOURCE_ID
+import com.otakustream.core.database.library.LibraryRepository
+import com.otakustream.core.database.library.WatchHistoryEntry
 import com.otakustream.core.database.playback.PlaybackProgressRepository
 import com.otakustream.core.database.skip.SkipSegment
 import com.otakustream.core.database.skip.SkipSegmentRepository
@@ -38,6 +43,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -79,6 +85,7 @@ class PlayerController @Inject constructor(
     @ApplicationContext private val appContext: Context,
     private val progressRepository: PlaybackProgressRepository,
     private val skipSegmentRepository: SkipSegmentRepository,
+    private val libraryRepository: LibraryRepository,
 ) {
     val player: ExoPlayer = ExoPlayer.Builder(appContext, PlayerRenderersFactory(appContext)).build()
 
@@ -199,7 +206,16 @@ class PlayerController @Inject constructor(
             skipSegmentRepository.observeForMedia(url).collect { segments -> currentSegments = segments }
         }
 
-        val pending = PendingPlayback.consume(url)
+        val stashed = PendingPlayback.consume(url)
+        val pending = stashed?.video
+
+        // No stash (file picker, pasted link, "Open with") — or a stash that explicitly left
+        // history to us: record the play here, and drop any auto-play resolver left over from
+        // an earlier catalog session so finishing this video can't chain into a stale episode.
+        if (stashed == null || !stashed.historyHandled) {
+            PlaybackQueue.clear()
+            recordDirectPlay(url)
+        }
 
         scope.launch {
             val resumeMs = startPositionMs ?: progressRepository.getSavedPositionMs(url) ?: 0L
@@ -233,6 +249,40 @@ class PlayerController @Inject constructor(
         val next = PlaybackQueue.resolveNext() ?: return
         PendingPlayback.stash(next)
         play(next.url)
+    }
+
+    // A play that arrived outside the catalog flow (local file, pasted URL, "Open with") still
+    // belongs in watch history / continue watching — recorded here since play() is the one
+    // choke point every path funnels through.
+    private fun recordDirectPlay(url: String) {
+        scope.launch {
+            libraryRepository.recordWatch(
+                WatchHistoryEntry(
+                    sourceId = DIRECT_PLAY_SOURCE_ID,
+                    mediaUrl = url,
+                    mediaTitle = deriveDisplayTitle(url),
+                    episodeUrl = url,
+                    episodeName = "",
+                    episodeNumber = 0f,
+                    watchedAtEpochMs = System.currentTimeMillis(),
+                ),
+            )
+        }
+    }
+
+    // Best human-readable name available without any caller plumbing: content:// resolves its
+    // provider display name (covers SAF picks and MediaStore items alike); other schemes fall
+    // back to the decoded filename, then the host, then the raw URL.
+    private suspend fun deriveDisplayTitle(url: String): String = withContext(Dispatchers.IO) {
+        val uri = Uri.parse(url)
+        if (uri.scheme == "content") {
+            val resolved = runCatching {
+                appContext.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                    ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
+            }.getOrNull()
+            if (!resolved.isNullOrBlank()) return@withContext resolved
+        }
+        uri.lastPathSegment?.takeUnless { it.isBlank() } ?: uri.host ?: url
     }
 
     fun pause() {

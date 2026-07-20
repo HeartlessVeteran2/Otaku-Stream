@@ -140,6 +140,7 @@ fun AppNavHost(
             composable(ROUTE_LIBRARY) {
                 LibraryScreen(
                     onMediaClick = { sourceId, mediaUrl, title -> navController.navigateToDetails(sourceId, mediaUrl, title) },
+                    onPlayDirect = { url -> navController.navigate("player?videoUrl=${Uri.encode(url)}") },
                 )
             }
             composable(ROUTE_SETTINGS) {
