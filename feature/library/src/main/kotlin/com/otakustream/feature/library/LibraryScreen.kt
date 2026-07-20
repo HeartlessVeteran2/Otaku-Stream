@@ -38,7 +38,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.database.library.DIRECT_PLAY_SOURCE_ID
 import com.otakustream.core.database.library.WatchHistoryEntry
+import com.otakustream.core.sources.api.PendingPlayback
+import com.otakustream.core.sources.api.Video
 import com.otakustream.feature.library.local.LocalVideosViewModel
+import com.otakustream.feature.library.local.findSidecarSubtitles
 import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
@@ -232,7 +235,20 @@ private fun OnDeviceTab(
                             val duration = formatDurationMs(video.durationMs)
                             Text(if (video.bucketName.isBlank()) duration else "${video.bucketName} · $duration")
                         },
-                        modifier = Modifier.clickable { onPlayDirect(video.uri.toString()) },
+                        modifier = Modifier.clickable {
+                            val url = video.uri.toString()
+                            // VLC-style sidecar subtitles: hand any same-basename .srt/.ass/.ssa/.vtt
+                            // next to the file to the player. historyHandled = false keeps the
+                            // player recording this as a direct play as usual.
+                            val sidecars = findSidecarSubtitles(video.dataPath)
+                            if (sidecars.isNotEmpty()) {
+                                PendingPlayback.stash(
+                                    Video(url = url, quality = "", subtitleTracks = sidecars),
+                                    historyHandled = false,
+                                )
+                            }
+                            onPlayDirect(url)
+                        },
                     )
                 }
             }

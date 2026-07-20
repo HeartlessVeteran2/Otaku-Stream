@@ -3,9 +3,14 @@ package com.otakustream.core.player.ui
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.RadioButton
@@ -25,6 +30,7 @@ fun TrackSelectionSheet(
     onSelectSubtitle: (TrackInfo) -> Unit,
     onSelectQuality: (TrackInfo) -> Unit,
     onSubtitlesEnabledChange: (Boolean) -> Unit,
+    onLoadSubtitleFile: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -32,8 +38,9 @@ fun TrackSelectionSheet(
             if (uiState.audioTracks.isNotEmpty()) {
                 TrackSection(title = "Audio", tracks = uiState.audioTracks, onSelect = onSelectAudio)
             }
+            // Always visible — even with no embedded/addon tracks, the user can load a file.
+            Text(text = "Subtitles", style = MaterialTheme.typography.titleMedium)
             if (uiState.subtitleTracks.isNotEmpty()) {
-                Text(text = "Subtitles", style = MaterialTheme.typography.titleMedium)
                 TrackRow(
                     label = "Off",
                     isSelected = !uiState.subtitlesEnabled,
@@ -49,6 +56,17 @@ fun TrackSelectionSheet(
                         },
                     )
                 }
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onLoadSubtitleFile)
+                    .padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(imageVector = Icons.Filled.FileOpen, contentDescription = null)
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(text = "Load subtitle file…")
             }
             if (uiState.videoQualityTracks.isNotEmpty()) {
                 TrackSection(title = "Quality", tracks = uiState.videoQualityTracks, onSelect = onSelectQuality)
