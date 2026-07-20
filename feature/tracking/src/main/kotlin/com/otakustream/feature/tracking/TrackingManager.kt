@@ -2,6 +2,7 @@ package com.otakustream.feature.tracking
 
 import android.util.Log
 import com.otakustream.core.database.tracking.TrackingRepository
+import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -19,6 +20,9 @@ class TrackingManager @Inject constructor(
         val link = trackingRepository.getLink(mediaUrl) ?: return
         runCatching {
             aniListClient.saveProgress(token, link.trackerMediaId, episodeNumber.toInt().coerceAtLeast(1))
-        }.onFailure { Log.w(TAG, "AniList progress update failed", it) }
+        }.onFailure {
+            if (it is CancellationException) throw it
+            Log.w(TAG, "AniList progress update failed", it)
+        }
     }
 }
