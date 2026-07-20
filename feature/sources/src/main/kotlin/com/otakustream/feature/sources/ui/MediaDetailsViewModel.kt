@@ -60,6 +60,15 @@ class MediaDetailsViewModel @Inject constructor(
         .flatMapLatest { url -> if (url == null) flowOf(false) else libraryRepository.observeInLibrary(url) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
+    // Episodes the user has started (recordWatch fires at play start) — drives the checkmarks
+    // on episode rows. Reactive, so returning from playback updates the list with no extra wiring.
+    val watchedEpisodeUrls: StateFlow<Set<String>> = currentMediaUrl
+        .flatMapLatest { url ->
+            if (url == null) flowOf(emptyList()) else libraryRepository.observeWatchedEpisodeUrls(url)
+        }
+        .map { it.toSet() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
     val trackerLink: StateFlow<TrackerLink?> = currentMediaUrl
         .flatMapLatest { url -> if (url == null) flowOf(null) else trackingRepository.observeLink(url) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)

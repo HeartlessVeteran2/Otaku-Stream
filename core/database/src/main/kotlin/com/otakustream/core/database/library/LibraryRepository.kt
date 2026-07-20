@@ -10,6 +10,7 @@ interface LibraryRepository {
     suspend fun remove(mediaUrl: String)
 
     fun observeHistory(): Flow<List<WatchHistoryEntry>>
+    fun observeWatchedEpisodeUrls(mediaUrl: String): Flow<List<String>>
     suspend fun recordWatch(entry: WatchHistoryEntry)
     suspend fun clearHistory()
 }
@@ -24,6 +25,8 @@ class LibraryRepositoryImpl @Inject constructor(
     override suspend fun remove(mediaUrl: String) = libraryDao.delete(mediaUrl)
 
     override fun observeHistory(): Flow<List<WatchHistoryEntry>> = historyDao.observeRecent()
+    override fun observeWatchedEpisodeUrls(mediaUrl: String): Flow<List<String>> =
+        historyDao.observeWatchedEpisodeUrls(mediaUrl)
     override suspend fun recordWatch(entry: WatchHistoryEntry) = historyDao.insert(entry)
     override suspend fun clearHistory() = historyDao.clear()
 }
