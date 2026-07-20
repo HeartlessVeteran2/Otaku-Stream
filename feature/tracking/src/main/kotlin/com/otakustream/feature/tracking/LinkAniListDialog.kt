@@ -29,6 +29,7 @@ import androidx.lifecycle.viewModelScope
 import com.otakustream.core.database.tracking.TrackerLink
 import com.otakustream.core.database.tracking.TrackingRepository
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.isActive
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -60,10 +61,16 @@ class LinkAniListViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(isSearching = true, error = null)
         searchJob = viewModelScope.launch {
             runCatching { aniListClient.searchAnime(query) }
-                .onSuccess { _uiState.value = _uiState.value.copy(results = it, isSearching = false) }
+                .onSuccess {
+                    // A newer search cancels this job; if the request had already finished there's
+                    // no suspension point left to throw, so check isActive before touching state.
+                    if (!isActive) return@launch
+                    _uiState.value = _uiState.value.copy(results = it, isSearching = false)
+                }
                 .onFailure {
                     // A newer search cancels this job — don't overwrite its state with a stale error.
                     if (it is CancellationException) throw it
+                    if (!isActive) return@launch
                     _uiState.value = _uiState.value.copy(error = it.message, isSearching = false)
                 }
         }
