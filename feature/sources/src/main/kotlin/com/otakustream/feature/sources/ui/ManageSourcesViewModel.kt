@@ -8,6 +8,7 @@ import com.otakustream.core.sources.scripting.ScriptSourceInstaller
 import com.otakustream.core.sources.scripting.stableSourceId
 import com.otakustream.feature.sources.SourceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -58,7 +59,10 @@ class ManageSourcesViewModel @Inject constructor(
                     sourceRepository.registerDynamic(source)
                     urlInput.value = ""
                 }
-                .onFailure { failure -> error.value = failure.message ?: "Failed to install source" }
+                .onFailure { failure ->
+                    if (failure is CancellationException) throw failure
+                    error.value = failure.message ?: "Failed to install source"
+                }
             isInstalling.value = false
         }
     }

@@ -8,6 +8,7 @@ import com.otakustream.core.sources.stremio.StremioAddonInstaller
 import com.otakustream.core.sources.stremio.model.OfficialAddonListing
 import com.otakustream.feature.sources.SourceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -63,7 +64,10 @@ class BrowseStremioAddonsViewModel @Inject constructor(
         viewModelScope.launch {
             runCatching { directoryClient.fetchOfficialAddons() }
                 .onSuccess { listings.value = it }
-                .onFailure { failure -> error.value = failure.message ?: "Failed to load addon catalog" }
+                .onFailure { failure ->
+                    if (failure is CancellationException) throw failure
+                    error.value = failure.message ?: "Failed to load addon catalog"
+                }
             isLoading.value = false
         }
     }
@@ -77,7 +81,10 @@ class BrowseStremioAddonsViewModel @Inject constructor(
                 installer.installFromUrl(listing.transportUrl, priority = nextPriority)
             }
                 .onSuccess { sources -> sources.forEach(sourceRepository::registerDynamic) }
-                .onFailure { failure -> error.value = failure.message ?: "Failed to install addon" }
+                .onFailure { failure ->
+                    if (failure is CancellationException) throw failure
+                    error.value = failure.message ?: "Failed to install addon"
+                }
             installingUrl.value = null
         }
     }

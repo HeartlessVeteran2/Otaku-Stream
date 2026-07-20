@@ -9,6 +9,7 @@ import com.otakustream.core.sources.stremio.StremioAddonInstaller
 import com.otakustream.core.sources.stremio.model.parseManifest
 import com.otakustream.feature.sources.SourceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -95,7 +96,10 @@ class ManageStremioSourcesViewModel @Inject constructor(
                     sources.forEach(sourceRepository::registerDynamic)
                     urlInput.value = ""
                 }
-                .onFailure { failure -> error.value = failure.message ?: "Failed to install addon" }
+                .onFailure { failure ->
+                    if (failure is CancellationException) throw failure
+                    error.value = failure.message ?: "Failed to install addon"
+                }
             isInstalling.value = false
         }
     }
