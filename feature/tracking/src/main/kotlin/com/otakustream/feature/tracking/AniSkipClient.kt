@@ -32,7 +32,9 @@ class AniSkipClient @Inject constructor(
             val request = Request.Builder().url(url).get().build()
             httpClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return@withContext emptyList()
-                val root = JSONObject(response.body?.string().orEmpty())
+                val bodyString = response.body?.string()
+                if (bodyString.isNullOrBlank()) return@withContext emptyList()
+                val root = JSONObject(bodyString)
                 if (!root.optBoolean("found", false)) return@withContext emptyList()
                 val results = root.optJSONArray("results") ?: return@withContext emptyList()
                 (0 until results.length()).mapNotNull { index ->

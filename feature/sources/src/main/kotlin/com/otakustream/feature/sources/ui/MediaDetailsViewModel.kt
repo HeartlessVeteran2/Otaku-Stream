@@ -54,9 +54,6 @@ class MediaDetailsViewModel @Inject constructor(
     private val aniSkipClient: AniSkipClient,
 ) : ViewModel() {
 
-    // Resolved lazily on first AniSkip lookup for the current title, then reused per episode.
-    private var cachedMalId: Long? = null
-
     private val _uiState = MutableStateFlow(MediaDetailsUiState())
     val uiState: StateFlow<MediaDetailsUiState> = _uiState.asStateFlow()
 
@@ -100,7 +97,6 @@ class MediaDetailsViewModel @Inject constructor(
     }
 
     fun load(sourceId: Long, mediaUrl: String, mediaTitle: String) {
-        if (currentMediaUrl.value != mediaUrl) cachedMalId = null
         currentMediaUrl.value = mediaUrl
         currentTitle = mediaTitle
         currentSourceId = sourceId
@@ -208,14 +204,19 @@ class MediaDetailsViewModel @Inject constructor(
         val link = trackerLink.value ?: return null
         val episodeNumber = episode.episodeNumber.toInt()
         if (episodeNumber < 1) return null
+        // Capture only the singletons and primitives the lookup needs — never `this`. The
+        // singleton PlayerController holds this closure for the life of the playback, so
+        // capturing the ViewModel would leak it. AniListClient caches the MAL id internally.
+        val aniList = aniListClient
+        val aniSkip = aniSkipClient
+        val trackerMediaId = link.trackerMediaId
         return { durationMs ->
             runCatching {
-                val malId = cachedMalId
-                    ?: aniListClient.getMalId(link.trackerMediaId)?.also { cachedMalId = it }
+                val malId = aniList.getMalId(trackerMediaId)
                 if (malId == null) {
                     emptyList()
                 } else {
-                    aniSkipClient.fetch(malId, episodeNumber, durationMs / 1000)
+                    aniSkip.fetch(malId, episodeNumber, durationMs / 1000)
                         .map { SkipMark(it.startMs, it.endMs, it.kind) }
                 }
             }.getOrElse { error ->

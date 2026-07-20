@@ -8,6 +8,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -44,8 +45,13 @@ class AniListClient @Inject constructor(
         }
     }
 
-    // AniList id → MyAnimeList id, needed to query AniSkip. Public field, no auth.
+    // AniList id → MyAnimeList id, needed to query AniSkip. Public field, no auth. Cached on this
+    // singleton so the mapping is resolved once per anime across every screen/playback (and the
+    // short-lived callers never have to hold it).
+    private val malIdCache = ConcurrentHashMap<Long, Long>()
+
     suspend fun getMalId(aniListId: Long): Long? = withContext(Dispatchers.IO) {
+        malIdCache[aniListId]?.let { return@withContext it }
         val gql = """
             query (${'$'}id: Int) {
               Media(id: ${'$'}id, type: ANIME) { idMal }
@@ -53,6 +59,7 @@ class AniListClient @Inject constructor(
         """.trimIndent()
         val data = execute(gql, JSONObject().put("id", aniListId), token = null)
         data.optJSONObject("Media")?.optInt("idMal", 0)?.toLong()?.takeIf { it > 0 }
+            ?.also { malIdCache[aniListId] = it }
     }
 
     // Sets the entry to CURRENT with the given progress (creates it if absent).
