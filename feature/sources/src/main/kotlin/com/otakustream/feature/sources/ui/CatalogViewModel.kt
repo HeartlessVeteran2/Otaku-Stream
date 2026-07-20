@@ -167,7 +167,14 @@ class CatalogViewModel @Inject constructor(
     // a filter later passed to its search() call is expected to just ignore it (already true for
     // every existing VideoSource implementation).
     private suspend fun fetchAvailableFilters(sources: List<VideoSource>): List<SourceFilter> = coroutineScope {
-        sources.map { source -> async { runCatching { source.getAvailableFilters() }.getOrDefault(emptyList()) } }
+        sources.map { source ->
+            async {
+                runCatching { source.getAvailableFilters() }.getOrElse { error ->
+                    if (error is CancellationException) throw error
+                    emptyList()
+                }
+            }
+        }
             .awaitAll()
             .flatten()
             .groupBy { it.name }

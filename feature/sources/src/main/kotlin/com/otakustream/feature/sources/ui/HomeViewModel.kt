@@ -63,7 +63,9 @@ class HomeViewModel @Inject constructor(
             // coroutine before observeSources() collection starts — that would leave the home
             // stuck loading forever.
             runCatching { bootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic) }
+                .onFailure { if (it is CancellationException) throw it }
             runCatching { stremioBootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic) }
+                .onFailure { if (it is CancellationException) throw it }
             // React to every registration change (bootstrap above, addon install/removal later)
             // so a newly installed add-on populates the home without a restart.
             sourceRepository.observeSources().collectLatest { sources ->
