@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.provider.OpenableColumns
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -49,6 +50,8 @@ import androidx.media3.ui.PlayerView
 import com.otakustream.core.player.PlayerViewModel
 import com.otakustream.core.player.ResizeMode
 
+private const val PLAYER_SCREEN_TAG = "PlayerScreen"
+
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 fun PlayerScreen(
@@ -68,11 +71,12 @@ fun PlayerScreen(
         uri ?: return@rememberLauncherForActivityResult
         runCatching {
             context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
+        }.onFailure { Log.w(PLAYER_SCREEN_TAG, "Could not persist read permission for subtitle uri", it) }
         val displayName = runCatching {
             context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
                 ?.use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
-        }.getOrNull() ?: uri.lastPathSegment ?: "Subtitle"
+        }.onFailure { Log.w(PLAYER_SCREEN_TAG, "Could not resolve display name for subtitle uri", it) }
+            .getOrNull() ?: uri.lastPathSegment ?: "Subtitle"
         viewModel.loadSubtitleFile(uri.toString(), displayName)
     }
     var controlsVisible by remember { mutableStateOf(true) }
