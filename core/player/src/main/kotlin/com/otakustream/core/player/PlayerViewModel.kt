@@ -85,6 +85,8 @@ class PlayerViewModel @Inject constructor(
 
     fun skipActiveSegment() = controller.skipActiveSegment()
 
+    fun setAutoSkipEnabled(enabled: Boolean) = controller.setAutoSkipEnabled(enabled)
+
     fun beginSpeedBoost() = controller.beginTemporarySpeedBoost()
 
     fun endSpeedBoost() = controller.endTemporarySpeedBoost()

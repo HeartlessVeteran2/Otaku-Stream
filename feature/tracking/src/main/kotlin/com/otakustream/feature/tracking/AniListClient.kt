@@ -44,6 +44,17 @@ class AniListClient @Inject constructor(
         }
     }
 
+    // AniList id → MyAnimeList id, needed to query AniSkip. Public field, no auth.
+    suspend fun getMalId(aniListId: Long): Long? = withContext(Dispatchers.IO) {
+        val gql = """
+            query (${'$'}id: Int) {
+              Media(id: ${'$'}id, type: ANIME) { idMal }
+            }
+        """.trimIndent()
+        val data = execute(gql, JSONObject().put("id", aniListId), token = null)
+        data.optJSONObject("Media")?.optInt("idMal", 0)?.toLong()?.takeIf { it > 0 }
+    }
+
     // Sets the entry to CURRENT with the given progress (creates it if absent).
     suspend fun saveProgress(token: String, mediaId: Long, progress: Int) {
         withContext(Dispatchers.IO) {
