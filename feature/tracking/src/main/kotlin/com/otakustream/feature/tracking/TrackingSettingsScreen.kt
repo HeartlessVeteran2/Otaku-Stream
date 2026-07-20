@@ -1,32 +1,30 @@
 package com.otakustream.feature.tracking
 
+import android.content.Intent
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.database.tracking.TrackingRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -41,12 +39,20 @@ class TrackingSettingsViewModel @Inject constructor(
         .map { !it.isNullOrBlank() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
-    fun saveToken(token: String) {
+    // One-shot "you just signed in" confirmation, flipped when an OAuth redirect lands.
+    private val _justSignedIn = MutableStateFlow(false)
+    val justSignedIn: StateFlow<Boolean> = _justSignedIn.asStateFlow()
+
+    fun onOAuthToken(token: String) {
         if (token.isBlank()) return
-        viewModelScope.launch { trackingRepository.saveToken(token.trim()) }
+        viewModelScope.launch {
+            trackingRepository.saveToken(token.trim())
+            _justSignedIn.value = true
+        }
     }
 
     fun clearToken() {
+        _justSignedIn.value = false
         viewModelScope.launch { trackingRepository.clearToken() }
     }
 }
@@ -54,39 +60,59 @@ class TrackingSettingsViewModel @Inject constructor(
 @Composable
 fun TrackingSettingsScreen(
     modifier: Modifier = Modifier,
+    pendingOAuthToken: String? = null,
+    onPendingOAuthTokenConsumed: () -> Unit = {},
     viewModel: TrackingSettingsViewModel = hiltViewModel(),
 ) {
     val hasToken by viewModel.hasToken.collectAsState()
-    var tokenInput by remember { mutableStateOf("") }
+    val justSignedIn by viewModel.justSignedIn.collectAsState()
+    val context = LocalContext.current
+
+    // A completed sign-in redirect lands here with the token still pending — persist it once.
+    LaunchedEffect(pendingOAuthToken) {
+        pendingOAuthToken?.let { token ->
+            viewModel.onOAuthToken(token)
+            onPendingOAuthTokenConsumed()
+        }
+    }
 
     Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
-        Text(text = "AniList tracking", style = MaterialTheme.typography.titleLarge)
+        Text(text = "AniList", style = MaterialTheme.typography.titleLarge)
         Text(
-            text = "Create an API client at anilist.co/settings/developer, open its authorize URL " +
-                "(https://anilist.co/api/v2/oauth/authorize?client_id=YOUR_ID&response_type=token), " +
-                "and paste the access token here. Linked shows then auto-update as you watch.",
+            text = "Sign in to sync your watch progress automatically.",
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.padding(top = 8.dp),
         )
 
         if (hasToken) {
             Text(
-                text = "✓ Token saved — tracking is active.",
+                text = if (justSignedIn) "Signed in! Tracking is active." else "✓ Signed in — tracking is active.",
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(top = 16.dp),
             )
-            TextButton(onClick = viewModel::clearToken) { Text("Remove token") }
-        } else {
-            OutlinedTextField(
-                value = tokenInput,
-                onValueChange = { tokenInput = it },
-                label = { Text("AniList access token") },
-                modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-            )
-            Row(modifier = Modifier.padding(top = 8.dp)) {
-                Button(onClick = { viewModel.saveToken(tokenInput); tokenInput = "" }) { Text("Save") }
-                Spacer(modifier = Modifier.width(8.dp))
+            TextButton(onClick = viewModel::clearToken) { Text("Sign out") }
+        } else if (AniListAuth.isConfigured) {
+            Button(
+                onClick = {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(AniListAuth.authorizeUrl())))
+                },
+                modifier = Modifier.padding(top = 16.dp),
+            ) {
+                Text("Sign in with AniList")
             }
+            Text(
+                text = "You'll approve access in your browser and come right back.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+        } else {
+            Text(
+                text = "AniList sign-in isn't set up in this build.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 16.dp),
+            )
         }
     }
 }

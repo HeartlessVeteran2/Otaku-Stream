@@ -42,6 +42,14 @@
                 <data android:scheme="file" />
                 <data android:mimeType="video/*" />
             </intent-filter>
+            <!-- AniList OAuth redirect: the authorize page sends the user back here with the
+                 access token in the URL fragment (implicit grant). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="otakustream" android:host="anilist-auth" />
+            </intent-filter>
         </activity>
     </application>
 

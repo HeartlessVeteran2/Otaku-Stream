@@ -63,6 +63,7 @@ fun MediaDetailsScreen(
     val uiState by viewModel.uiState.collectAsState()
     val inLibrary by viewModel.inLibrary.collectAsState()
     val trackerLink by viewModel.trackerLink.collectAsState()
+    val hasTrackerToken by viewModel.hasTrackerToken.collectAsState()
     val autoPlayEnabled by viewModel.autoPlayEnabled.collectAsState()
     var showLinkDialog by remember { mutableStateOf(false) }
 
@@ -126,7 +127,17 @@ fun MediaDetailsScreen(
                     )
                     TextButton(onClick = viewModel::unlinkTracker) { Text("Unlink") }
                 }
-            } ?: TextButton(onClick = { showLinkDialog = true }) { Text("Link to AniList") }
+            } ?: if (hasTrackerToken) {
+                TextButton(onClick = { showLinkDialog = true }) { Text("Link to AniList") }
+            } else {
+                // Not signed in — a link dialog would only fail, so point at Settings instead.
+                Text(
+                    text = "Sign in to AniList in Settings to track this show.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 4.dp),
+                )
+            }
 
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
                 Text(text = "Auto-play next episode", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
