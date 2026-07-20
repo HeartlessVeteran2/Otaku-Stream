@@ -23,6 +23,13 @@ android {
     }
 }
 
+kapt {
+    arguments {
+        // Export schema JSONs (committed) so future migrations are authored against a baseline.
+        arg("room.schemaLocation", "$projectDir/schemas")
+    }
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
 

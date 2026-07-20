@@ -38,7 +38,11 @@ object DatabaseProvidesModule {
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "otaku_stream.db")
-            .fallbackToDestructiveMigration()
+            // Destructive only on downgrade — an upgrade without an explicit Migration now
+            // fails fast instead of silently wiping the user's library, addons, and tokens.
+            // Schema JSONs under core/database/schemas are the baseline migrations are
+            // authored against.
+            .fallbackToDestructiveMigrationOnDowngrade(true)
             .build()
 
     @Provides

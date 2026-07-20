@@ -34,7 +34,7 @@ import com.otakustream.core.database.tracking.TrackingDao
         StremioCatalogToggleEntity::class,
     ],
     version = 6,
-    exportSchema = false,
+    exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun playbackProgressDao(): PlaybackProgressDao
