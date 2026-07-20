@@ -63,6 +63,8 @@ fun AppNavHost(
     onPendingStremioInstallUrlConsumed: () -> Unit = {},
     pendingPlayUrl: String? = null,
     onPendingPlayUrlConsumed: () -> Unit = {},
+    pendingAniListToken: String? = null,
+    onPendingAniListTokenConsumed: () -> Unit = {},
 ) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -83,6 +85,15 @@ fun AppNavHost(
         pendingPlayUrl?.let { url ->
             navController.navigate("player?videoUrl=${Uri.encode(url)}")
             onPendingPlayUrlConsumed()
+        }
+    }
+
+    // Returning from the AniList sign-in page: land on the tracking screen, which reads the
+    // token (still held here) and persists it. The token is consumed by that screen, not here,
+    // so it can't be lost between the navigate and the screen's first composition.
+    LaunchedEffect(pendingAniListToken) {
+        if (pendingAniListToken != null) {
+            navController.navigate(ROUTE_TRACKING_SETTINGS) { launchSingleTop = true }
         }
     }
 
@@ -142,7 +153,10 @@ fun AppNavHost(
                 ManageSourcesScreen()
             }
             composable(ROUTE_TRACKING_SETTINGS) {
-                TrackingSettingsScreen()
+                TrackingSettingsScreen(
+                    pendingOAuthToken = pendingAniListToken,
+                    onPendingOAuthTokenConsumed = onPendingAniListTokenConsumed,
+                )
             }
             composable(
                 ROUTE_MANAGE_STREMIO_PATTERN,

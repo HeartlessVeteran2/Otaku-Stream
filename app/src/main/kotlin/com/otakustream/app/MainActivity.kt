@@ -2,6 +2,7 @@ package com.otakustream.app
 
 import android.app.PictureInPictureParams
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Rational
@@ -32,6 +33,7 @@ class MainActivity : ComponentActivity() {
 
     private var pendingStremioInstallUrl by mutableStateOf<String?>(null)
     private var pendingPlayUrl by mutableStateOf<String?>(null)
+    private var pendingAniListToken by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -42,6 +44,7 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) {
             pendingStremioInstallUrl = intent.stremioInstallUrl()
             pendingPlayUrl = intent.playableVideoUri()
+            pendingAniListToken = intent.aniListToken()
         }
         setContent {
             OtakuStreamTheme {
@@ -51,6 +54,8 @@ class MainActivity : ComponentActivity() {
                         onPendingStremioInstallUrlConsumed = { pendingStremioInstallUrl = null },
                         pendingPlayUrl = pendingPlayUrl,
                         onPendingPlayUrlConsumed = { pendingPlayUrl = null },
+                        pendingAniListToken = pendingAniListToken,
+                        onPendingAniListTokenConsumed = { pendingAniListToken = null },
                     )
                 }
             }
@@ -62,6 +67,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         pendingStremioInstallUrl = intent.stremioInstallUrl()
         pendingPlayUrl = intent.playableVideoUri()
+        pendingAniListToken = intent.aniListToken()
     }
 
     private fun Intent.stremioInstallUrl(): String? = data?.takeIf { it.scheme == "stremio" }?.toString()
@@ -73,6 +79,19 @@ class MainActivity : ComponentActivity() {
             ?.data
             ?.takeIf { it.scheme in setOf("http", "https", "content", "file") }
             ?.toString()
+
+    // AniList's implicit-grant redirect puts the token in the URL fragment:
+    // otakustream://anilist-auth#access_token=...&token_type=Bearer&expires_in=...
+    // encodedFragment, not fragment: getFragment() pre-decodes, so a token containing %26/%3D
+    // would be corrupted before the split — split the raw fragment, then decode the value once.
+    private fun Intent.aniListToken(): String? =
+        data?.takeIf { it.scheme == "otakustream" && it.host == "anilist-auth" }
+            ?.encodedFragment
+            ?.split("&")
+            ?.firstOrNull { it.startsWith("access_token=") }
+            ?.removePrefix("access_token=")
+            ?.ifEmpty { null }
+            ?.let { Uri.decode(it) }
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()

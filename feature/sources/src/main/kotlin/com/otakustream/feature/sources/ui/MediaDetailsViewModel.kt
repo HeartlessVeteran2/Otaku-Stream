@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -62,6 +63,12 @@ class MediaDetailsViewModel @Inject constructor(
     val trackerLink: StateFlow<TrackerLink?> = currentMediaUrl
         .flatMapLatest { url -> if (url == null) flowOf(null) else trackingRepository.observeLink(url) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    // Whether the user is signed in to AniList at all — the "Link to AniList" affordance only
+    // makes sense once they are.
+    val hasTrackerToken: StateFlow<Boolean> = trackingRepository.observeToken()
+        .map { !it.isNullOrBlank() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     private var loadedFor: Pair<Long, String>? = null
     private var loadJob: Job? = null
