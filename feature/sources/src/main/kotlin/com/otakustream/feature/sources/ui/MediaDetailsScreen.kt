@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material3.CircularProgressIndicator
@@ -62,6 +63,7 @@ fun MediaDetailsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val inLibrary by viewModel.inLibrary.collectAsState()
+    val watchedEpisodeUrls by viewModel.watchedEpisodeUrls.collectAsState()
     val trackerLink by viewModel.trackerLink.collectAsState()
     val hasTrackerToken by viewModel.hasTrackerToken.collectAsState()
     val autoPlayEnabled by viewModel.autoPlayEnabled.collectAsState()
@@ -216,6 +218,18 @@ fun MediaDetailsScreen(
                 }
             }
 
+            val watchedCount = remember(visibleEpisodes, watchedEpisodeUrls) {
+                visibleEpisodes.count { it.url in watchedEpisodeUrls }
+            }
+            if (watchedCount > 0) {
+                Text(
+                    text = "$watchedCount of ${visibleEpisodes.size} watched",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+
             if (!uiState.isLoading && visibleEpisodes.isEmpty()) {
                 EmptyState(
                     icon = Icons.Filled.Movie,
@@ -226,8 +240,30 @@ fun MediaDetailsScreen(
 
             LazyColumn(modifier = Modifier.padding(top = 16.dp)) {
                 items(visibleEpisodes, key = { it.url }) { episode ->
+                    val watched = episode.url in watchedEpisodeUrls
                     ListItem(
-                        headlineContent = { Text(episode.name) },
+                        headlineContent = {
+                            Text(
+                                text = episode.name,
+                                // Watched episodes recede so the next unwatched one stands out.
+                                color = if (watched) {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                            )
+                        },
+                        trailingContent = if (watched) {
+                            {
+                                Icon(
+                                    imageVector = Icons.Filled.CheckCircle,
+                                    contentDescription = "Watched",
+                                    tint = MaterialTheme.colorScheme.tertiary,
+                                )
+                            }
+                        } else {
+                            null
+                        },
                         modifier = Modifier.clickable { viewModel.playEpisode(sourceId, episode) },
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
