@@ -32,7 +32,15 @@ data class SubtitleStyle(
     val background: SubtitleBackground = SubtitleBackground.TRANSPARENT,
     // 0.08 is Media3 SubtitleView's own default bottom padding.
     val bottomMarginFraction: Float = 0.08f,
-)
+) {
+    // Adjustment ranges live on the model, not the persistence class, so the UI can bound its
+    // controls without depending on SubtitleStylePrefs.
+    companion object {
+        const val MIN_TEXT_SCALE = 0.5f
+        const val MAX_TEXT_SCALE = 2f
+        const val MAX_BOTTOM_MARGIN = 0.3f
+    }
+}
 
 // SharedPreferences keeps subtitle appearance out of the Room schema, same as
 // PlayerOnboardingPrefs — a handful of scalars doesn't warrant a migration.
@@ -40,13 +48,19 @@ data class SubtitleStyle(
 class SubtitleStylePrefs @Inject constructor(@ApplicationContext context: Context) {
     private val prefs = context.getSharedPreferences("subtitle_style", Context.MODE_PRIVATE)
 
-    fun load(): SubtitleStyle = SubtitleStyle(
-        textScale = prefs.getFloat(KEY_TEXT_SCALE, 1f).coerceIn(MIN_TEXT_SCALE, MAX_TEXT_SCALE),
-        edgeStyle = enumFromPrefs(KEY_EDGE_STYLE, SubtitleEdgeStyle.OUTLINE),
-        textColor = enumFromPrefs(KEY_TEXT_COLOR, SubtitleTextColor.WHITE),
-        background = enumFromPrefs(KEY_BACKGROUND, SubtitleBackground.TRANSPARENT),
-        bottomMarginFraction = prefs.getFloat(KEY_BOTTOM_MARGIN, 0.08f).coerceIn(0f, MAX_BOTTOM_MARGIN),
-    )
+    fun load(): SubtitleStyle {
+        // Reference the data class's own defaults so there's a single source of truth.
+        val default = SubtitleStyle()
+        return SubtitleStyle(
+            textScale = prefs.getFloat(KEY_TEXT_SCALE, default.textScale)
+                .coerceIn(SubtitleStyle.MIN_TEXT_SCALE, SubtitleStyle.MAX_TEXT_SCALE),
+            edgeStyle = enumFromPrefs(KEY_EDGE_STYLE, default.edgeStyle),
+            textColor = enumFromPrefs(KEY_TEXT_COLOR, default.textColor),
+            background = enumFromPrefs(KEY_BACKGROUND, default.background),
+            bottomMarginFraction = prefs.getFloat(KEY_BOTTOM_MARGIN, default.bottomMarginFraction)
+                .coerceIn(0f, SubtitleStyle.MAX_BOTTOM_MARGIN),
+        )
+    }
 
     fun save(style: SubtitleStyle) {
         prefs.edit()
@@ -63,15 +77,11 @@ class SubtitleStylePrefs @Inject constructor(@ApplicationContext context: Contex
         return runCatching { enumValueOf<T>(stored) }.getOrDefault(default)
     }
 
-    companion object {
-        const val MIN_TEXT_SCALE = 0.5f
-        const val MAX_TEXT_SCALE = 2f
-        const val MAX_BOTTOM_MARGIN = 0.3f
-
-        private const val KEY_TEXT_SCALE = "text_scale"
-        private const val KEY_EDGE_STYLE = "edge_style"
-        private const val KEY_TEXT_COLOR = "text_color"
-        private const val KEY_BACKGROUND = "background"
-        private const val KEY_BOTTOM_MARGIN = "bottom_margin"
+    private companion object {
+        const val KEY_TEXT_SCALE = "text_scale"
+        const val KEY_EDGE_STYLE = "edge_style"
+        const val KEY_TEXT_COLOR = "text_color"
+        const val KEY_BACKGROUND = "background"
+        const val KEY_BOTTOM_MARGIN = "bottom_margin"
     }
 }

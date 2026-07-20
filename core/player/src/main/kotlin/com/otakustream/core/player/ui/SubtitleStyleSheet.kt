@@ -17,14 +17,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.otakustream.core.player.SubtitleBackground
 import com.otakustream.core.player.SubtitleEdgeStyle
 import com.otakustream.core.player.SubtitleStyle
-import com.otakustream.core.player.SubtitleStylePrefs
 import com.otakustream.core.player.SubtitleTextColor
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -55,7 +56,7 @@ fun SubtitleStyleSheet(
                         text = "The quick brown fox",
                         color = Color(style.textColor.argb),
                         fontSize = (18 * style.textScale).sp,
-                        fontWeight = if (style.edgeStyle == SubtitleEdgeStyle.NONE) FontWeight.Normal else FontWeight.Bold,
+                        style = TextStyle(shadow = style.edgeStyle.previewShadow()),
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                     )
                 }
@@ -65,7 +66,7 @@ fun SubtitleStyleSheet(
             Slider(
                 value = style.textScale,
                 onValueChange = { onStyleChange(style.copy(textScale = it)) },
-                valueRange = SubtitleStylePrefs.MIN_TEXT_SCALE..SubtitleStylePrefs.MAX_TEXT_SCALE,
+                valueRange = SubtitleStyle.MIN_TEXT_SCALE..SubtitleStyle.MAX_TEXT_SCALE,
             )
 
             Text(text = "Outline", style = MaterialTheme.typography.labelLarge)
@@ -96,10 +97,19 @@ fun SubtitleStyleSheet(
             Slider(
                 value = style.bottomMarginFraction,
                 onValueChange = { onStyleChange(style.copy(bottomMarginFraction = it)) },
-                valueRange = 0f..SubtitleStylePrefs.MAX_BOTTOM_MARGIN,
+                valueRange = 0f..SubtitleStyle.MAX_BOTTOM_MARGIN,
             )
         }
     }
+}
+
+// Approximate each Media3 edge type in the preview so the choice is legible before playback:
+// Compose text can't stroke an outline, but a tight vs. offset shadow reads the difference.
+private fun SubtitleEdgeStyle.previewShadow(): Shadow? = when (this) {
+    SubtitleEdgeStyle.NONE -> null
+    SubtitleEdgeStyle.OUTLINE -> Shadow(color = Color.Black, blurRadius = 3f)
+    SubtitleEdgeStyle.DROP_SHADOW -> Shadow(color = Color.Black, offset = Offset(4f, 4f), blurRadius = 4f)
+    SubtitleEdgeStyle.RAISED -> Shadow(color = Color.Black, offset = Offset(-2f, -2f), blurRadius = 1f)
 }
 
 @OptIn(ExperimentalLayoutApi::class)

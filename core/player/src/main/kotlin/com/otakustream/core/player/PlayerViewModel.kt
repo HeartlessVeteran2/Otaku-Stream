@@ -1,12 +1,16 @@
 package com.otakustream.core.player
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import androidx.media3.common.C
 import com.otakustream.core.database.skip.SkipSegmentType
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
@@ -20,10 +24,26 @@ class PlayerViewModel @Inject constructor(
 
     private val _subtitleStyle = MutableStateFlow(subtitleStylePrefs.load())
     val subtitleStyle: StateFlow<SubtitleStyle> = _subtitleStyle.asStateFlow()
+    private var saveStyleJob: Job? = null
 
     fun setSubtitleStyle(style: SubtitleStyle) {
-        subtitleStylePrefs.save(style)
+        // Slider drags emit many updates: keep the live preview/apply instant but debounce the
+        // disk write so we don't flood QueuedWork with SharedPreferences commits.
         _subtitleStyle.value = style
+        saveStyleJob?.cancel()
+        saveStyleJob = viewModelScope.launch {
+            delay(SUBTITLE_STYLE_SAVE_DEBOUNCE_MS)
+            subtitleStylePrefs.save(style)
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        // Flush a still-pending debounced change before viewModelScope is cancelled.
+        if (saveStyleJob?.isActive == true) {
+            saveStyleJob?.cancel()
+            subtitleStylePrefs.save(_subtitleStyle.value)
+        }
     }
 
     val hasSeenGestureCoach: Boolean get() = onboardingPrefs.hasSeenGestureCoach
@@ -74,4 +94,8 @@ class PlayerViewModel @Inject constructor(
     fun toggleStatsOverlay() = controller.toggleStatsOverlay()
 
     fun setEqualizerPreset(preset: EqualizerPreset) = controller.setEqualizerPreset(preset)
+
+    private companion object {
+        const val SUBTITLE_STYLE_SAVE_DEBOUNCE_MS = 300L
+    }
 }
