@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -14,7 +15,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Link
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -31,19 +31,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.otakustream.feature.sources.ui.HomeContent
 
-// The app's "front door": a VLC-style launch screen. Open any local video via the system
-// document picker, paste a direct URL, or jump to the Stremio-style add-on directory to install
-// plugins that feed the catalog. All three funnel into the same player as the catalog flow does.
+// The app's "front door": a content-forward home in the Stremio mold. Quick actions up top
+// (open a local file, paste a link, browse add-ons), then Continue Watching and Popular/Latest
+// rails fanned out across the installed sources.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlayScreen(
     onPlayVideo: (String) -> Unit,
     onBrowseAddons: () -> Unit,
+    onMediaClick: (sourceId: Long, mediaUrl: String, title: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -72,41 +73,33 @@ fun PlayScreen(
             )
         },
     ) { padding ->
-        Column(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
-        ) {
-            Text(text = "Welcome to Otaku Stream", style = MaterialTheme.typography.headlineSmall)
-            Text(
-                text = "Play a video from your device or a link — or install an add-on to browse " +
-                    "in the Catalog tab.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+        Column(modifier = Modifier.fillMaxSize().padding(padding)) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                OutlinedButton(onClick = { filePicker.launch(arrayOf("video/*")) }, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Filled.FolderOpen, contentDescription = null)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Open file")
+                }
+                OutlinedButton(onClick = { showUrlDialog = true }, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Filled.Link, contentDescription = null)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Play link")
+                }
+                OutlinedButton(onClick = onBrowseAddons, modifier = Modifier.weight(1f)) {
+                    Icon(Icons.Filled.Extension, contentDescription = null)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Add-ons")
+                }
+            }
+
+            HomeContent(
+                onMediaClick = onMediaClick,
+                onPlayDirect = onPlayVideo,
+                onBrowseAddons = onBrowseAddons,
             )
-            Button(
-                onClick = { filePicker.launch(arrayOf("video/*")) },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(Icons.Filled.FolderOpen, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(text = "Open local file")
-            }
-            Button(
-                onClick = { showUrlDialog = true },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(Icons.Filled.Link, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(text = "Paste a URL")
-            }
-            OutlinedButton(
-                onClick = onBrowseAddons,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Icon(Icons.Filled.Extension, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(text = "Browse add-ons")
-            }
         }
     }
 
