@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -77,7 +78,10 @@ fun HomeContent(
                 }
             }
             uiState.isLoading && !uiState.hasLoadedOnce -> {
-                Box(modifier = Modifier.fillMaxWidth().padding(32.dp)) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier.fillMaxWidth().padding(32.dp),
+                ) {
                     CircularProgressIndicator(
                         modifier = Modifier.padding(8.dp),
                         color = MaterialTheme.colorScheme.tertiary,
@@ -146,7 +150,7 @@ private fun PosterTile(title: String, coverUrl: String?, onClick: () -> Unit) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .align(androidx.compose.ui.Alignment.BottomCenter)
+                .align(Alignment.BottomCenter)
                 .background(
                     Brush.verticalGradient(
                         listOf(Color.Transparent, MaterialTheme.colorScheme.background.copy(alpha = 0.85f)),

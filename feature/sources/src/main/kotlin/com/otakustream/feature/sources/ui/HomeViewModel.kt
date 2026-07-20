@@ -59,8 +59,11 @@ class HomeViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            bootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic)
-            stremioBootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic)
+            // A failed bootstrap (corrupt persisted source, I/O error) must not kill this
+            // coroutine before observeSources() collection starts — that would leave the home
+            // stuck loading forever.
+            runCatching { bootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic) }
+            runCatching { stremioBootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic) }
             // React to every registration change (bootstrap above, addon install/removal later)
             // so a newly installed add-on populates the home without a restart.
             sourceRepository.observeSources().collectLatest { sources ->
@@ -78,14 +81,17 @@ class HomeViewModel @Inject constructor(
         railsJob?.cancel()
         railsJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true)
-            val popular = fetchRail(sources) { it.getPopular(1) }
-            val latest = fetchRail(sources) { it.getLatest(1) }
-            _uiState.value = _uiState.value.copy(
-                popular = popular,
-                latest = latest,
-                isLoading = false,
-                hasLoadedOnce = true,
-            )
+            // The two rails are independent — fetch them concurrently.
+            coroutineScope {
+                val popular = async { fetchRail(sources) { it.getPopular(1) } }
+                val latest = async { fetchRail(sources) { it.getLatest(1) } }
+                _uiState.value = _uiState.value.copy(
+                    popular = popular.await(),
+                    latest = latest.await(),
+                    isLoading = false,
+                    hasLoadedOnce = true,
+                )
+            }
         }
     }
 
