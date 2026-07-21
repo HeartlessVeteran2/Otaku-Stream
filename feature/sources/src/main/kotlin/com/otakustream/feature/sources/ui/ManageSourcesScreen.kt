@@ -25,6 +25,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 
 @Composable
 fun ManageSourcesScreen(
+    onBrowseCatalogClick: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: ManageSourcesViewModel = hiltViewModel(),
 ) {
@@ -32,6 +33,16 @@ fun ManageSourcesScreen(
 
     Scaffold(modifier = modifier.fillMaxSize()) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
+            Button(onClick = onBrowseCatalogClick, modifier = Modifier.fillMaxWidth()) {
+                Text("Browse source catalog")
+            }
+            Text(
+                text = "Install sources one-tap from a directory.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
+            )
+
             Text(text = "Add a custom source", style = MaterialTheme.typography.titleMedium)
             Text(
                 text = "Advanced: add-ons (recommended) come from the directory. Custom sources are " +
