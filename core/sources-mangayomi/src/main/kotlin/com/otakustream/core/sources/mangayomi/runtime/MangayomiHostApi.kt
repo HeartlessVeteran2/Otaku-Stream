@@ -88,10 +88,12 @@ internal const val MANGAYOMI_HOST_BOOTSTRAP = """
   MProvider.prototype.extractPackedStreams = function (html) {
     var unpacked = unpackJs(html);
     var out = [];
-    var re = /(https?:\/\/[^"'\s\\]+\.(?:m3u8|mp4)[^"'\s\\]*)/g;
+    // Hosts often escape the slashes in their playlist URL (https:\/\/...); match optional
+    // backslashes and strip them from the captured URL.
+    var re = /(https?:\\?\/\\?\/[^"'\s]+\.(?:m3u8|mp4)[^"'\s]*)/g;
     var m;
     while ((m = re.exec(unpacked)) !== null) {
-      out.push({ url: m[1], quality: 'default', headers: {} });
+      out.push({ url: m[1].replace(/\\/g, ''), quality: 'default', headers: {} });
     }
     return out;
   };
