@@ -19,7 +19,7 @@ class MangayomiBootstrapper @Inject constructor(
 ) {
     suspend fun loadPersistedSources(): List<MangayomiVideoSource> = withContext(Dispatchers.Default) {
         repository.getAll().mapNotNull { record ->
-            runCatching { factory.create(record.scriptContent, override = record.toMetadata()) }
+            runCatching { factory.create(record.scriptContent, override = record.toMetadata(), prefsJson = record.prefsJson) }
                 .getOrElse { error ->
                     if (error is CancellationException) throw error
                     // Log rather than silently drop, so a broken persisted extension is diagnosable.

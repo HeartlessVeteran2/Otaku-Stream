@@ -1,5 +1,6 @@
 package com.otakustream.core.sources.mangayomi
 
+import com.otakustream.core.database.mangayomi.MangayomiSourceRecord
 import com.otakustream.core.sources.api.stableSourceId
 import com.otakustream.core.sources.mangayomi.runtime.MangayomiRuntime
 import okhttp3.OkHttpClient
@@ -16,8 +17,12 @@ class MangayomiSourceFactory @Inject constructor(
     private val httpClient: OkHttpClient,
 ) {
 
-    suspend fun create(source: String, override: MangayomiSourceMetadata? = null): MangayomiVideoSource {
-        val runtime = MangayomiRuntime(source, httpClient)
+    suspend fun create(
+        source: String,
+        override: MangayomiSourceMetadata? = null,
+        prefsJson: String? = null,
+    ): MangayomiVideoSource {
+        val runtime = MangayomiRuntime(source, httpClient, prefsJson)
         return try {
             // Force bringup so a malformed extension fails now (install/bootstrap), not on first use.
             runtime.ensureLoaded()
@@ -30,6 +35,22 @@ class MangayomiSourceFactory @Inject constructor(
             throw t
         }
     }
+
+    // Rebuilds a source from its persisted record (script + metadata + resolved preferences) — used
+    // to reload an extension after its preferences change and at cold-start bootstrap.
+    suspend fun createFromRecord(record: MangayomiSourceRecord): MangayomiVideoSource = create(
+        source = record.scriptContent,
+        override = MangayomiSourceMetadata(
+            id = record.id,
+            name = record.name,
+            lang = record.lang,
+            baseUrl = record.baseUrl,
+            iconUrl = record.iconUrl,
+            version = record.version,
+            isNsfw = record.isNsfw,
+        ),
+        prefsJson = record.prefsJson,
+    )
 
     private suspend fun readSelfMetadata(runtime: MangayomiRuntime): MangayomiSourceMetadata {
         val json = runtime.readGlobalJson("mangayomiSources[0]")

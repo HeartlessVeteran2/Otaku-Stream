@@ -60,10 +60,42 @@ internal const val MANGAYOMI_HOST_BOOTSTRAP = """
   Document.prototype = Object.create(Element.prototype);
   Document.prototype.constructor = Document;
 
+  // Base64 (QuickJS has no DOM atob/btoa). ISO-8859-1 round-trips bytes 1:1 through the bridge.
+  global.atob = function (s) { return __b64_decode(s); };
+  global.btoa = function (s) { return __b64_encode(s); };
+
+  // Crypto / deobfuscation, matching the Mangayomi host API names.
+  global.encryptAESCryptoJS = function (text, password) { return __crypto_encrypt_cryptojs(text, password); };
+  global.decryptAESCryptoJS = function (cipher, password) { return __crypto_decrypt_cryptojs(cipher, password); };
+  global.cryptoHandler = function (text, iv, key, encrypt) {
+    return __crypto_handler(text, iv, key, encrypt === undefined ? true : encrypt);
+  };
+  global.unpackJs = function (source) { return __unpack_js(source); };
+
   function MProvider() {}
   MProvider.prototype.getPreference = function (key) {
     var raw = __pref_get(key);
-    return raw == null ? null : JSON.parse(raw).value;
+    if (raw == null) return null;
+    try { return JSON.parse(raw).value; } catch (e) { return null; }
+  };
+  // Also expose the crypto/unpack helpers as methods, since some extensions call them via `this`.
+  MProvider.prototype.encryptAESCryptoJS = global.encryptAESCryptoJS;
+  MProvider.prototype.decryptAESCryptoJS = global.decryptAESCryptoJS;
+  MProvider.prototype.cryptoHandler = global.cryptoHandler;
+  MProvider.prototype.unpackJs = global.unpackJs;
+  // Generic extractor for the large family of hosts (Filemoon, StreamWish, VidHide, …) that hide
+  // their playlist inside a p.a.c.k.e.r'd `eval(...)`: unpack, then pull the first m3u8/mp4.
+  MProvider.prototype.extractPackedStreams = function (html) {
+    var unpacked = unpackJs(html);
+    var out = [];
+    // Hosts often escape the slashes in their playlist URL (https:\/\/...); match optional
+    // backslashes and strip them from the captured URL.
+    var re = /(https?:\\?\/\\?\/[^"'\s]+\.(?:m3u8|mp4)[^"'\s]*)/g;
+    var m;
+    while ((m = re.exec(unpacked)) !== null) {
+      out.push({ url: m[1].replace(/\\/g, ''), quality: 'default', headers: {} });
+    }
+    return out;
   };
   MProvider.prototype.substringBefore = function (s, d) { var i = s.indexOf(d); return i < 0 ? s : s.substring(0, i); };
   MProvider.prototype.substringBeforeLast = function (s, d) { var i = s.lastIndexOf(d); return i < 0 ? s : s.substring(0, i); };

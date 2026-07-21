@@ -108,6 +108,18 @@ class MangayomiVideoSource(
         }
     }
 
+    // The extension's declared preferences (list/switch/editText descriptors) as a JSON array, for
+    // the per-source settings screen. Guarded: many extensions don't implement getSourcePreferences
+    // at all, and invoking a missing method would throw a JS TypeError — treat "no method" as "no
+    // preferences" so the screen shows the empty state, not an error.
+    suspend fun getSourcePreferences(): String {
+        val hasMethod = runtime.readGlobalJson(
+            "typeof globalThis.__om_instance.getSourcePreferences === 'function'",
+        ) == "true"
+        if (!hasMethod) return "[]"
+        return runtime.invoke("getSourcePreferences", emptyList()) ?: "[]"
+    }
+
     private suspend fun detailFor(url: String): String = coroutineScope {
         // computeIfAbsent is atomic, so concurrent callers share one getDetail job. A failed job
         // is evicted so a transient error doesn't get cached and block every later open.
