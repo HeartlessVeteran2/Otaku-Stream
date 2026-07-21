@@ -33,6 +33,7 @@ import com.otakustream.feature.sources.ui.BrowseSourceCatalogScreen
 import com.otakustream.feature.sources.ui.BrowseStremioAddonsScreen
 import com.otakustream.feature.sources.ui.CatalogScreen
 import com.otakustream.feature.sources.ui.MangayomiExtensionsScreen
+import com.otakustream.feature.sources.ui.MangayomiPreferencesScreen
 import com.otakustream.feature.sources.ui.ManageSourcesScreen
 import com.otakustream.feature.sources.ui.ManageStremioSourcesScreen
 import com.otakustream.feature.sources.ui.MediaDetailsScreen
@@ -49,6 +50,7 @@ private const val ROUTE_MANAGE_STREMIO_PATTERN = "manage-stremio?installUrl={ins
 private const val ROUTE_BROWSE_STREMIO = "browse-stremio"
 private const val ROUTE_BROWSE_SOURCE_CATALOG = "browse-source-catalog"
 private const val ROUTE_ANYMEX_EXTENSIONS = "anymex-extensions"
+private const val ROUTE_ANYMEX_EXTENSION_PREFS = "anymex-extension-prefs/{sourceId}"
 private const val ROUTE_DETAILS = "details/{sourceId}?mediaUrl={mediaUrl}&title={title}"
 private const val ROUTE_PLAYER = "player?videoUrl={videoUrl}"
 
@@ -165,7 +167,15 @@ fun AppNavHost(
                 BrowseSourceCatalogScreen()
             }
             composable(ROUTE_ANYMEX_EXTENSIONS) {
-                MangayomiExtensionsScreen()
+                MangayomiExtensionsScreen(
+                    onConfigure = { sourceId -> navController.navigate("anymex-extension-prefs/$sourceId") },
+                )
+            }
+            composable(
+                ROUTE_ANYMEX_EXTENSION_PREFS,
+                arguments = listOf(navArgument("sourceId") { type = NavType.StringType }),
+            ) {
+                MangayomiPreferencesScreen()
             }
             composable(ROUTE_TRACKING_SETTINGS) {
                 TrackingSettingsScreen(

@@ -1,5 +1,6 @@
 package com.otakustream.core.sources.mangayomi.runtime
 
+import android.util.Base64
 import android.util.Log
 import com.whl.quickjs.android.QuickJSLoader
 import com.whl.quickjs.wrapper.JSCallFunction
@@ -25,6 +26,9 @@ import java.util.concurrent.Executors
 class MangayomiRuntime(
     private val extensionSource: String,
     private val httpClient: OkHttpClient,
+    // Resolved per-source preference values as a JSON object (getSourcePreferences key -> value),
+    // fed back to the extension via getPreference()/__pref_get. Null = no stored preferences.
+    prefsJson: String? = null,
 ) : Closeable {
 
     private val executor = Executors.newSingleThreadExecutor { runnable ->
@@ -32,6 +36,7 @@ class MangayomiRuntime(
     }
     private val engineDispatcher: ExecutorCoroutineDispatcher = executor.asCoroutineDispatcher()
     private val dom = JsoupBridge()
+    private val prefs: JSONObject? = prefsJson?.let { runCatching { JSONObject(it) }.getOrNull() }
 
     private var context: QuickJSContext? = null
     private var started = false
@@ -108,8 +113,29 @@ class MangayomiRuntime(
             global.setProperty("__html_attr", JSCallFunction { args -> dom.attr(args.int(0), args.str(1), args.bool(2)) })
             global.setProperty("__html_text", JSCallFunction { args -> dom.text(args.int(0)) })
             global.setProperty("__html_html", JSCallFunction { args -> dom.html(args.int(0), args.bool(1)) })
-            // Preferences bridge — always null until the preferences PR wires per-source storage.
-            global.setProperty("__pref_get", JSCallFunction { null })
+            // Crypto / deobfuscation helpers used by hosts that obfuscate their stream URLs.
+            global.setProperty("__crypto_encrypt_cryptojs", JSCallFunction { args ->
+                CryptoBridge.encryptAesCryptoJs(args.str(0), args.str(1))
+            })
+            global.setProperty("__crypto_decrypt_cryptojs", JSCallFunction { args ->
+                CryptoBridge.decryptAesCryptoJs(args.str(0), args.str(1))
+            })
+            global.setProperty("__crypto_handler", JSCallFunction { args ->
+                CryptoBridge.cryptoHandler(args.str(0), args.str(1), args.str(2), args.bool(3))
+            })
+            global.setProperty("__unpack_js", JSCallFunction { args -> JsUnpacker.unpack(args.str(0)) })
+            global.setProperty("__b64_encode", JSCallFunction { args ->
+                Base64.encodeToString(args.str(0).toByteArray(Charsets.ISO_8859_1), Base64.NO_WRAP)
+            })
+            global.setProperty("__b64_decode", JSCallFunction { args ->
+                String(Base64.decode(args.str(0), Base64.DEFAULT), Charsets.ISO_8859_1)
+            })
+            // Preferences bridge — returns the stored/resolved value for a key, or null.
+            global.setProperty("__pref_get", JSCallFunction { args ->
+                val key = args.str(0)
+                val value = prefs?.opt(key) ?: return@JSCallFunction null
+                JSONObject().put("value", value).toString()
+            })
             global.setProperty("__om_deliver", JSCallFunction { args ->
                 deliverOk = args.bool(0)
                 deliverValue = args?.getOrNull(1) as? String

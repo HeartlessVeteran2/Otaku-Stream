@@ -6,9 +6,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -28,6 +33,7 @@ import com.otakustream.core.sources.mangayomi.repo.MangayomiExtensionListing
 @Composable
 fun MangayomiExtensionsScreen(
     modifier: Modifier = Modifier,
+    onConfigure: (Long) -> Unit = {},
     viewModel: MangayomiExtensionsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -91,6 +97,7 @@ fun MangayomiExtensionsScreen(
                         canInstall = uiState.installingId == null,
                         onInstall = { viewModel.install(listing) },
                         onUninstall = { viewModel.uninstall(listing) },
+                        onConfigure = { onConfigure(listing.id) },
                     )
                 }
             }
@@ -106,6 +113,7 @@ private fun MangayomiExtensionRow(
     canInstall: Boolean,
     onInstall: () -> Unit,
     onUninstall: () -> Unit,
+    onConfigure: () -> Unit,
 ) {
     ListItem(
         headlineContent = { Text(listing.name) },
@@ -120,7 +128,12 @@ private fun MangayomiExtensionRow(
         trailingContent = {
             when {
                 isInstalling -> CircularProgressIndicator(modifier = Modifier.padding(4.dp))
-                isInstalled -> OutlinedButton(onClick = onUninstall) { Text("Remove") }
+                isInstalled -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onConfigure) {
+                        Icon(Icons.Default.Settings, contentDescription = "Preferences")
+                    }
+                    OutlinedButton(onClick = onUninstall) { Text("Remove") }
+                }
                 else -> Button(onClick = onInstall, enabled = canInstall) { Text("Install") }
             }
         },

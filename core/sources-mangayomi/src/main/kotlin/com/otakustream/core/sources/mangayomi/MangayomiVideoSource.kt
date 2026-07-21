@@ -108,6 +108,10 @@ class MangayomiVideoSource(
         }
     }
 
+    // The extension's declared preferences (list/switch/editText descriptors) as a JSON array, for
+    // the per-source settings screen. Non-async in extensions, but invoke() handles sync returns.
+    suspend fun getSourcePreferences(): String = runtime.invoke("getSourcePreferences", emptyList()) ?: "[]"
+
     private suspend fun detailFor(url: String): String = coroutineScope {
         // computeIfAbsent is atomic, so concurrent callers share one getDetail job. A failed job
         // is evicted so a transient error doesn't get cached and block every later open.
