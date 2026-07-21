@@ -53,6 +53,17 @@
                 <data android:scheme="otakustream" android:host="anilist-auth" />
             </intent-filter>
         </activity>
+
+        <!-- The crash screen runs in its own process so it stays alive after CrashReporter kills
+             the crashed one. Not exported — only the app's own handler launches it. -->
+        <activity
+            android:name=".crash.CrashActivity"
+            android:exported="false"
+            android:process=":crash"
+            android:launchMode="singleTask"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.OtakuStream" />
+
     </application>
 
 </manifest>

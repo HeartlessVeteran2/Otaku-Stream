@@ -111,7 +111,9 @@ class HomeViewModel @Inject constructor(
                     }
             }
         }.awaitAll()
-        interleave(perSource).take(RAIL_ITEM_CAP)
+        // Dedupe by (source, url) before the cap: the rails key on that pair, and a source can
+        // repeat an item — a duplicate key would crash the LazyRow.
+        interleave(perSource).distinctBy { it.sourceId to it.media.url }.take(RAIL_ITEM_CAP)
     }
 
     private fun interleave(lists: List<List<CatalogEntry>>): List<CatalogEntry> {

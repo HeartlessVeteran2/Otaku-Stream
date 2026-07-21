@@ -164,7 +164,10 @@ class CatalogViewModel @Inject constructor(
             val results = fetchPage(state.query, state.selectedFilters, pending, state.nextPageBySource)
             val current = _uiState.value
             _uiState.value = current.copy(
-                entries = current.entries + results.flatMap { it.entries },
+                // Dedupe by (source, url): the grid keys on that pair, and real sources routinely
+                // repeat items across pages — a duplicate key would crash the LazyVerticalGrid.
+                entries = (current.entries + results.flatMap { it.entries })
+                    .distinctBy { it.sourceId to it.media.url },
                 isLoadingMore = false,
                 nextPageBySource = current.nextPageBySource + results.associate {
                     it.sourceId to (current.nextPageBySource[it.sourceId] ?: FIRST_LOAD_MORE_PAGE) + 1
@@ -191,7 +194,8 @@ class CatalogViewModel @Inject constructor(
         val sources = effectiveSources()
         val results = fetchPage(query, _uiState.value.selectedFilters, sources, nextPageBySource = emptyMap())
         _uiState.value = _uiState.value.copy(
-            entries = results.flatMap { it.entries },
+            // Dedupe by (source, url) — the grid keys on that pair, so duplicates would crash it.
+            entries = results.flatMap { it.entries }.distinctBy { it.sourceId to it.media.url },
             isLoading = false,
             hasLoadedOnce = true,
             failedSourceCount = results.count { it.failed },

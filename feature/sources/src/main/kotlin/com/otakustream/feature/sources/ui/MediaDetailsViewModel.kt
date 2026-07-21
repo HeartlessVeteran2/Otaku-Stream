@@ -115,7 +115,9 @@ class MediaDetailsViewModel @Inject constructor(
             runCatching {
                 val media = MediaItem(url = mediaUrl, title = mediaTitle)
                 val details = source.getMediaDetails(media)
-                val episodes = source.getEpisodeList(media)
+                // Dedupe by url: the episode list keys on url, and some sources list the same
+                // episode url more than once (multi-server) — a duplicate key would crash the list.
+                val episodes = source.getEpisodeList(media).distinctBy { it.url }
                 details to episodes
             }.onSuccess { (details, episodes) ->
                 _uiState.value = _uiState.value.copy(isLoading = false, details = details, episodes = episodes)
