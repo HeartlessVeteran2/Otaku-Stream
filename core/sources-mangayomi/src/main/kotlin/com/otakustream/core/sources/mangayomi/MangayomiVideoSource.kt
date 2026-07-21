@@ -10,6 +10,9 @@ import com.otakustream.core.sources.api.SubtitleTrack
 import com.otakustream.core.sources.api.Video
 import com.otakustream.core.sources.api.VideoSource
 import com.otakustream.core.sources.mangayomi.runtime.MangayomiRuntime
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
@@ -24,15 +27,20 @@ import java.util.concurrent.ConcurrentHashMap
 class MangayomiVideoSource(
     private val metadata: MangayomiSourceMetadata,
     private val runtime: MangayomiRuntime,
-) : VideoSource {
+) : VideoSource, AutoCloseable {
 
     override val id: Long = metadata.id
     override val name: String = metadata.name
     override val lang: String = metadata.lang
 
     // getMediaDetails and getEpisodeList both derive from the same getDetail(url) call — cache the
-    // raw JSON per media url so opening a title doesn't hit the extension twice.
-    private val detailCache = ConcurrentHashMap<String, String>()
+    // in-flight job (not the raw string) per media url so concurrent opens (details screen fires
+    // both) share one getDetail call rather than racing two.
+    private val detailCache = ConcurrentHashMap<String, Deferred<String>>()
+
+    // Releases the runtime's engine thread + native QuickJS context. VideoSource has no lifecycle
+    // hook, so the host closes this when the source is uninstalled/reloaded (wired in a later PR).
+    override fun close() = runtime.close()
 
     override suspend fun getPopular(page: Int): CatalogPage =
         parseCatalog(runtime.invoke("getPopular", listOf(page)))
@@ -100,8 +108,19 @@ class MangayomiVideoSource(
         }
     }
 
-    private suspend fun detailFor(url: String): String =
-        detailCache.getOrPut(url) { runtime.invoke("getDetail", listOf(url)) ?: "{}" }
+    private suspend fun detailFor(url: String): String = coroutineScope {
+        // computeIfAbsent is atomic, so concurrent callers share one getDetail job. A failed job
+        // is evicted so a transient error doesn't get cached and block every later open.
+        val deferred = detailCache.computeIfAbsent(url) {
+            async { runtime.invoke("getDetail", listOf(url)) ?: "{}" }
+        }
+        try {
+            deferred.await()
+        } catch (t: Throwable) {
+            detailCache.remove(url, deferred)
+            throw t
+        }
+    }
 
     private fun parseCatalog(raw: String?): CatalogPage {
         val json = JSONObject(raw ?: "{}")
@@ -129,7 +148,8 @@ class MangayomiVideoSource(
 
     private fun JSONObject?.toStringMap(): Map<String, String> {
         if (this == null) return emptyMap()
-        return keys().asSequence().associateWith { getString(it) }
+        // optString coerces non-string header values instead of throwing on them.
+        return keys().asSequence().associateWith { optString(it) }
     }
 
     private fun JSONArray?.toSubtitleTracks(): List<SubtitleTrack> {

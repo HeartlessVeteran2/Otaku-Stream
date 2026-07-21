@@ -18,8 +18,15 @@ class MangayomiSourceFactory @Inject constructor(
 
     suspend fun create(source: String, override: MangayomiSourceMetadata? = null): MangayomiVideoSource {
         val runtime = MangayomiRuntime(source, httpClient)
-        val metadata = override ?: readSelfMetadata(runtime)
-        return MangayomiVideoSource(metadata, runtime)
+        return try {
+            val metadata = override ?: readSelfMetadata(runtime)
+            MangayomiVideoSource(metadata, runtime)
+        } catch (t: Throwable) {
+            // Metadata read forces engine bringup; if the extension JS is malformed it throws here,
+            // and the runtime's engine thread + native context would leak without this close.
+            runCatching { runtime.close() }
+            throw t
+        }
     }
 
     private suspend fun readSelfMetadata(runtime: MangayomiRuntime): MangayomiSourceMetadata {

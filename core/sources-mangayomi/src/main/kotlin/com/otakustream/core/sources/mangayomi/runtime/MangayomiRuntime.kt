@@ -85,40 +85,47 @@ class MangayomiRuntime(
         if (started) return
         QuickJSLoader.init()
         val ctx = QuickJSContext.create()
-        runCatching {
-            ctx.setConsole(object : QuickJSContext.Console {
-                override fun log(info: String) { Log.d(TAG, info) }
-                override fun info(info: String) { Log.i(TAG, info) }
-                override fun warn(info: String) { Log.w(TAG, info) }
-                override fun error(info: String) { Log.e(TAG, info) }
+        // If any step of bringup throws (bad extension source, host-API eval error), the native
+        // context is already allocated — destroy it before propagating so it doesn't leak.
+        try {
+            runCatching {
+                ctx.setConsole(object : QuickJSContext.Console {
+                    override fun log(info: String) { Log.d(TAG, info) }
+                    override fun info(info: String) { Log.i(TAG, info) }
+                    override fun warn(info: String) { Log.w(TAG, info) }
+                    override fun error(info: String) { Log.e(TAG, info) }
+                })
+            }
+            val global = ctx.globalObject
+            global.setProperty("__http", JSCallFunction { args -> httpBridge(args) })
+            global.setProperty("__html_load", JSCallFunction { args -> dom.load(args.str(0)) })
+            global.setProperty("__html_select", JSCallFunction { args -> dom.select(args.int(0), args.str(1)) })
+            global.setProperty("__html_selectFirst", JSCallFunction { args -> dom.selectFirst(args.int(0), args.str(1)) })
+            global.setProperty("__html_attr", JSCallFunction { args -> dom.attr(args.int(0), args.str(1), args.bool(2)) })
+            global.setProperty("__html_text", JSCallFunction { args -> dom.text(args.int(0)) })
+            global.setProperty("__html_html", JSCallFunction { args -> dom.html(args.int(0), args.bool(1)) })
+            // Preferences bridge — always null until the preferences PR wires per-source storage.
+            global.setProperty("__pref_get", JSCallFunction { null })
+            global.setProperty("__om_deliver", JSCallFunction { args ->
+                deliverOk = args.bool(0)
+                deliverValue = args?.getOrNull(1) as? String
+                deliverSet = true
+                null
             })
-        }
-        val global = ctx.globalObject
-        global.setProperty("__http", JSCallFunction { args -> httpBridge(args) })
-        global.setProperty("__html_load", JSCallFunction { args -> dom.load(args.str(0)) })
-        global.setProperty("__html_select", JSCallFunction { args -> dom.select(args.int(0), args.str(1)) })
-        global.setProperty("__html_selectFirst", JSCallFunction { args -> dom.selectFirst(args.int(0), args.str(1)) })
-        global.setProperty("__html_attr", JSCallFunction { args -> dom.attr(args.int(0), args.str(1), args.bool(2)) })
-        global.setProperty("__html_text", JSCallFunction { args -> dom.text(args.int(0)) })
-        global.setProperty("__html_html", JSCallFunction { args -> dom.html(args.int(0), args.bool(1)) })
-        // Preferences bridge — always null until the preferences PR wires per-source storage.
-        global.setProperty("__pref_get", JSCallFunction { null })
-        global.setProperty("__om_deliver", JSCallFunction { args ->
-            deliverOk = args.bool(0)
-            deliverValue = args?.getOrNull(1) as? String
-            deliverSet = true
-            null
-        })
 
-        ctx.evaluate(MANGAYOMI_HOST_BOOTSTRAP, "mangayomi-host.js")
-        ctx.evaluate(extensionSource, "extension.js")
-        // Instantiate the extension and attach its source metadata (Mangayomi exposes this as
-        // `this.source`, read by many extensions for baseUrl/apiUrl).
-        ctx.evaluate(
-            "globalThis.__om_instance = new DefaultExtension();" +
-                "try{globalThis.__om_instance.source=(typeof mangayomiSources!=='undefined'&&mangayomiSources.length)?mangayomiSources[0]:{};}catch(e){}",
-            "mangayomi-instantiate.js",
-        )
+            ctx.evaluate(MANGAYOMI_HOST_BOOTSTRAP, "mangayomi-host.js")
+            ctx.evaluate(extensionSource, "extension.js")
+            // Instantiate the extension and attach its source metadata (Mangayomi exposes this as
+            // `this.source`, read by many extensions for baseUrl/apiUrl).
+            ctx.evaluate(
+                "globalThis.__om_instance = new DefaultExtension();" +
+                    "try{globalThis.__om_instance.source=(typeof mangayomiSources!=='undefined'&&mangayomiSources.length)?mangayomiSources[0]:{};}catch(e){}",
+                "mangayomi-instantiate.js",
+            )
+        } catch (t: Throwable) {
+            runCatching { ctx.destroy() }
+            throw t
+        }
         context = ctx
         started = true
     }
@@ -132,12 +139,16 @@ class MangayomiRuntime(
         val builder = Request.Builder().url(url)
         if (!headersJson.isNullOrBlank()) {
             val headers = JSONObject(headersJson)
-            headers.keys().forEach { key -> builder.addHeader(key, headers.getString(key)) }
+            // optString coerces non-string header values (numbers/booleans) rather than throwing.
+            headers.keys().forEach { key -> builder.addHeader(key, headers.optString(key)) }
         }
+        // POST/PUT/PATCH require a non-null body in OkHttp — fall back to an empty one so a
+        // body-less call from an extension doesn't throw; GET/HEAD/DELETE allow a null body.
+        val requestBody = body?.toRequestBody(null)
+            ?: "".toRequestBody(null).takeIf { method in BODY_REQUIRED_METHODS }
         when (method) {
             "GET" -> builder.get()
-            "POST" -> builder.post((body ?: "").toRequestBody(null))
-            else -> builder.method(method, body?.toRequestBody(null))
+            else -> builder.method(method, requestBody)
         }
         httpClient.newCall(builder.build()).execute().use { response ->
             val out = JSONObject()
@@ -167,5 +178,6 @@ class MangayomiRuntime(
 
     private companion object {
         const val TAG = "MangayomiExtension"
+        val BODY_REQUIRED_METHODS = setOf("POST", "PUT", "PATCH")
     }
 }
