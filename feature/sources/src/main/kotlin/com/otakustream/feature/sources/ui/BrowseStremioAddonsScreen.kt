@@ -5,8 +5,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ListItem
@@ -19,6 +21,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.sources.stremio.model.OfficialAddonListing
@@ -34,7 +37,7 @@ fun BrowseStremioAddonsScreen(
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
             Text(text = "Add-on directory", style = MaterialTheme.typography.titleMedium)
             Text(
-                text = "Browse add-ons and tap Install to add them to your catalog.",
+                text = "Browse official and community add-ons and tap Install to add them to your catalog.",
                 style = MaterialTheme.typography.bodySmall,
             )
 
@@ -89,6 +92,13 @@ private fun AddonListingRow(
     ListItem(
         headlineContent = { Text(listing.name) },
         supportingContent = { listing.description?.let { Text(it) } },
+        leadingContent = {
+            CoverImage(
+                url = listing.logoUrl,
+                contentDescription = listing.name,
+                modifier = Modifier.size(48.dp).clip(RoundedCornerShape(8.dp)),
+            )
+        },
         trailingContent = {
             when {
                 isInstalled -> Text("Installed", style = MaterialTheme.typography.bodySmall)
