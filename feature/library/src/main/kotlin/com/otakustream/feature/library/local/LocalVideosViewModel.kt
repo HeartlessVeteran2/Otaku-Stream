@@ -28,16 +28,19 @@ class LocalVideosViewModel @Inject constructor(
     private val repository: LocalVideoRepository,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(LocalVideosUiState(hasPermission = hasReadPermission()))
-    val uiState: StateFlow<LocalVideosUiState> = _uiState.asStateFlow()
-
-    // The permission the current OS actually gates video reads on.
+    // The permission the current OS actually gates video reads on. Declared before _uiState:
+    // Kotlin initializes properties top-to-bottom, and _uiState's initializer reads this via
+    // hasReadPermission() — if it came later it would still be null there and crash the ViewModel
+    // (checkSelfPermission with a null permission) the moment the On-device tab opens.
     val requiredPermission: String =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             Manifest.permission.READ_MEDIA_VIDEO
         } else {
             Manifest.permission.READ_EXTERNAL_STORAGE
         }
+
+    private val _uiState = MutableStateFlow(LocalVideosUiState(hasPermission = hasReadPermission()))
+    val uiState: StateFlow<LocalVideosUiState> = _uiState.asStateFlow()
 
     fun refresh() {
         val granted = hasReadPermission()
