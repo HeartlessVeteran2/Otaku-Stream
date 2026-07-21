@@ -25,6 +25,9 @@ import javax.inject.Inject
 
 data class CatalogEntry(val sourceId: Long, val media: MediaItem)
 
+// A source the user can scope browsing/search to, shown in the source picker.
+data class SourcePick(val id: Long, val name: String)
+
 data class CatalogUiState(
     val query: String = "",
     val entries: List<CatalogEntry> = emptyList(),
@@ -32,6 +35,12 @@ data class CatalogUiState(
     val isLoadingMore: Boolean = false,
     val nextPageBySource: Map<Long, Int> = emptyMap(),
     val exhaustedSources: Set<Long> = emptySet(),
+    // The registered sources, offered in the picker; selectedSourceId == null means "All sources"
+    // (the cross-source fan-out); a non-null id scopes browsing/search to that one source.
+    val availableSources: List<SourcePick> = emptyList(),
+    val selectedSourceId: Long? = null,
+    // id → name, used to badge each result with the source it came from.
+    val sourceNames: Map<Long, String> = emptyMap(),
     // The union of every registered source's declared filters (e.g. genre) merged by name —
     // sources that don't recognize a given filter simply ignore it when it's passed to search().
     val availableFilters: List<SourceFilter> = emptyList(),
@@ -85,12 +94,35 @@ class CatalogViewModel @Inject constructor(
         // startup, so newly installed addons' filters actually show up without a restart.
         viewModelScope.launch {
             sourceRepository.observeSources().collectLatest { sources ->
+                // If the currently-scoped source was removed, fall back to "All sources".
+                val prevSelected = _uiState.value.selectedSourceId
+                val selected = prevSelected?.takeIf { id -> sources.any { it.id == id } }
                 _uiState.value = _uiState.value.copy(
                     availableFilters = fetchAvailableFilters(sources),
+                    availableSources = sources.map { SourcePick(it.id, it.name) },
+                    sourceNames = sources.associate { it.id to it.name },
+                    selectedSourceId = selected,
                     hasAnySources = sources.isNotEmpty(),
                 )
+                // The scoped source vanished — the shown results are now stale; re-run for All.
+                if (prevSelected != null && selected == null) {
+                    startSearch(_uiState.value.query)
+                }
             }
         }
+    }
+
+    // The sources a browse/search should hit: just the picked one, or every source when "All".
+    private fun effectiveSources(): List<VideoSource> {
+        val selected = _uiState.value.selectedSourceId
+        val all = sourceRepository.getSources()
+        return if (selected == null) all else all.filter { it.id == selected }
+    }
+
+    fun selectSource(sourceId: Long?) {
+        if (_uiState.value.selectedSourceId == sourceId) return
+        _uiState.value = _uiState.value.copy(selectedSourceId = sourceId, isLoading = true)
+        startSearch(_uiState.value.query)
     }
 
     fun search(query: String) {
@@ -122,7 +154,7 @@ class CatalogViewModel @Inject constructor(
     fun loadMore() {
         val state = _uiState.value
         if (state.isLoadingMore) return
-        val pending = sourceRepository.getSources().filter { it.id !in state.exhaustedSources }
+        val pending = effectiveSources().filter { it.id !in state.exhaustedSources }
         if (pending.isEmpty()) return
         loadMoreJob?.cancel()
         loadMoreJob = viewModelScope.launch {
@@ -147,11 +179,14 @@ class CatalogViewModel @Inject constructor(
     private fun startSearch(query: String) {
         loadMoreJob?.cancel()
         searchJob?.cancel()
+        // A cancelled load-more would otherwise leave its bottom spinner stuck on — clear it
+        // whenever a fresh search supersedes an in-flight page load (source switch, filter, typing).
+        _uiState.value = _uiState.value.copy(isLoadingMore = false)
         searchJob = viewModelScope.launch { runSearch(query) }
     }
 
     private suspend fun runSearch(query: String) {
-        val sources = sourceRepository.getSources()
+        val sources = effectiveSources()
         val results = fetchPage(query, _uiState.value.selectedFilters, sources, nextPageBySource = emptyMap())
         _uiState.value = _uiState.value.copy(
             entries = results.flatMap { it.entries },

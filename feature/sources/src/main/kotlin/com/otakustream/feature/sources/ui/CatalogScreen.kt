@@ -111,6 +111,36 @@ fun CatalogScreen(
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
             )
 
+            // Source picker: scope browsing/search to one source (AnymeX-style) or "All".
+            if (uiState.availableSources.size > 1) {
+                LazyRow(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                    item {
+                        FilterChip(
+                            selected = uiState.selectedSourceId == null,
+                            onClick = { viewModel.selectSource(null) },
+                            label = { Text("All sources") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.tertiary,
+                                selectedLabelColor = MaterialTheme.colorScheme.onTertiary,
+                            ),
+                            modifier = Modifier.padding(end = 8.dp),
+                        )
+                    }
+                    items(uiState.availableSources, key = { it.id }) { source ->
+                        FilterChip(
+                            selected = uiState.selectedSourceId == source.id,
+                            onClick = { viewModel.selectSource(source.id) },
+                            label = { Text(source.name) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.tertiary,
+                                selectedLabelColor = MaterialTheme.colorScheme.onTertiary,
+                            ),
+                            modifier = Modifier.padding(end = 8.dp),
+                        )
+                    }
+                }
+            }
+
             if (uiState.availableFilters.isNotEmpty()) {
                 LazyRow(modifier = Modifier.padding(horizontal = 16.dp)) {
                     items(uiState.availableFilters, key = { it.name }) { filter ->
@@ -162,6 +192,9 @@ fun CatalogScreen(
                             MediaCard(
                                 title = entry.media.title,
                                 coverUrl = entry.media.coverUrl,
+                                // Only badge the source when browsing All — in a scoped view the
+                                // picker already shows which source you're in.
+                                sourceName = if (uiState.selectedSourceId == null) uiState.sourceNames[entry.sourceId] else null,
                                 onClick = { onMediaClick(entry.sourceId, entry.media.url, entry.media.title) },
                             )
                         }
@@ -234,7 +267,7 @@ private fun FilterChooserChip(
 }
 
 @Composable
-private fun MediaCard(title: String, coverUrl: String?, onClick: () -> Unit) {
+private fun MediaCard(title: String, coverUrl: String?, sourceName: String?, onClick: () -> Unit) {
     val shape = MaterialTheme.shapes.medium
     Box(
         modifier = Modifier
@@ -250,6 +283,22 @@ private fun MediaCard(title: String, coverUrl: String?, onClick: () -> Unit) {
             contentDescription = title,
             modifier = Modifier.fillMaxSize(),
         )
+        sourceName?.let { name ->
+            Surface(
+                color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.85f),
+                shape = MaterialTheme.shapes.small,
+                modifier = Modifier.align(Alignment.TopStart).padding(4.dp),
+            ) {
+                Text(
+                    text = name,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onTertiary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+        }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
