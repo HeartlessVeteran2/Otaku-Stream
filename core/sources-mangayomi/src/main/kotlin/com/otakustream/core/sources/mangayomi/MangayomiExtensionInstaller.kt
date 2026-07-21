@@ -26,8 +26,15 @@ class MangayomiExtensionInstaller @Inject constructor(
     suspend fun install(listing: MangayomiExtensionListing): MangayomiVideoSource = withContext(Dispatchers.IO) {
         val content = download(listing.sourceCodeUrl)
         val source = factory.create(content, override = listing.toMetadata())
-        repository.save(listing.toRecord(content, repoPrefs.repoUrl))
-        source
+        try {
+            repository.save(listing.toRecord(content, repoPrefs.repoUrl))
+            source
+        } catch (t: Throwable) {
+            // The source is built (engine thread + native context live) but not yet handed back
+            // to be registered — if persisting it fails, close it here so it can't leak.
+            runCatching { source.close() }
+            throw t
+        }
     }
 
     suspend fun uninstall(id: Long) = repository.delete(id)

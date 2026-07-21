@@ -10,10 +10,12 @@ import com.otakustream.feature.sources.SourceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 data class MangayomiExtensionsUiState(
@@ -77,11 +79,17 @@ class MangayomiExtensionsViewModel @Inject constructor(
     fun install(listing: MangayomiExtensionListing) {
         _uiState.value = _uiState.value.copy(installingId = listing.id, error = null)
         viewModelScope.launch {
-            runCatching { sourceRepository.registerDynamic(installer.install(listing)) }
-                .onFailure { failure ->
-                    if (failure is CancellationException) throw failure
-                    _uiState.value = _uiState.value.copy(error = failure.message ?: "Failed to install extension")
-                }
+            runCatching {
+                // The download/build stays cancellable (navigate away → the install is dropped and
+                // the runtime closed by the installer/factory). But once the source exists, hand it
+                // to the registry non-cancellably — otherwise a cancel in that gap would orphan a
+                // live QuickJS engine that's neither registered nor closed.
+                val source = installer.install(listing)
+                withContext(NonCancellable) { sourceRepository.registerDynamic(source) }
+            }.onFailure { failure ->
+                if (failure is CancellationException) throw failure
+                _uiState.value = _uiState.value.copy(error = failure.message ?: "Failed to install extension")
+            }
             _uiState.value = _uiState.value.copy(installingId = null)
         }
     }
@@ -89,10 +97,12 @@ class MangayomiExtensionsViewModel @Inject constructor(
     fun uninstall(listing: MangayomiExtensionListing) {
         viewModelScope.launch {
             runCatching {
-                installer.uninstall(listing.id)
-                // Unregistering closes the source's QuickJS runtime (SourceRegistry closes
-                // AutoCloseable sources on removal).
-                sourceRepository.unregisterDynamic(listing.id)
+                // Non-cancellable so DB delete + in-memory unregister (which closes the QuickJS
+                // runtime) complete atomically even if the user navigates away mid-remove.
+                withContext(NonCancellable) {
+                    installer.uninstall(listing.id)
+                    sourceRepository.unregisterDynamic(listing.id)
+                }
             }.onFailure { failure ->
                 if (failure is CancellationException) throw failure
                 _uiState.value = _uiState.value.copy(error = failure.message ?: "Failed to uninstall extension")

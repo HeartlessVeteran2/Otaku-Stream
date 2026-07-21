@@ -1,5 +1,6 @@
 package com.otakustream.core.sources.mangayomi
 
+import android.util.Log
 import com.otakustream.core.database.mangayomi.MangayomiSourceRecord
 import com.otakustream.core.database.mangayomi.MangayomiSourceRepository
 import kotlinx.coroutines.CancellationException
@@ -21,6 +22,8 @@ class MangayomiBootstrapper @Inject constructor(
             runCatching { factory.create(record.scriptContent, override = record.toMetadata()) }
                 .getOrElse { error ->
                     if (error is CancellationException) throw error
+                    // Log rather than silently drop, so a broken persisted extension is diagnosable.
+                    Log.e("MangayomiBootstrapper", "Failed to load persisted extension: ${record.name}", error)
                     null
                 }
         }
