@@ -29,6 +29,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.otakustream.core.player.ui.PlayerScreen
 import com.otakustream.feature.library.LibraryScreen
+import com.otakustream.feature.sources.ui.BrowseSourceCatalogScreen
 import com.otakustream.feature.sources.ui.BrowseStremioAddonsScreen
 import com.otakustream.feature.sources.ui.CatalogScreen
 import com.otakustream.feature.sources.ui.ManageSourcesScreen
@@ -45,6 +46,7 @@ private const val ROUTE_TRACKING_SETTINGS = "tracking-settings"
 private const val ROUTE_MANAGE_STREMIO = "manage-stremio"
 private const val ROUTE_MANAGE_STREMIO_PATTERN = "manage-stremio?installUrl={installUrl}"
 private const val ROUTE_BROWSE_STREMIO = "browse-stremio"
+private const val ROUTE_BROWSE_SOURCE_CATALOG = "browse-source-catalog"
 private const val ROUTE_DETAILS = "details/{sourceId}?mediaUrl={mediaUrl}&title={title}"
 private const val ROUTE_PLAYER = "player?videoUrl={videoUrl}"
 
@@ -152,7 +154,12 @@ fun AppNavHost(
                 )
             }
             composable(ROUTE_MANAGE_SOURCES) {
-                ManageSourcesScreen()
+                ManageSourcesScreen(
+                    onBrowseCatalogClick = { navController.navigate(ROUTE_BROWSE_SOURCE_CATALOG) },
+                )
+            }
+            composable(ROUTE_BROWSE_SOURCE_CATALOG) {
+                BrowseSourceCatalogScreen()
             }
             composable(ROUTE_TRACKING_SETTINGS) {
                 TrackingSettingsScreen(
