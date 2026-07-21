@@ -3,6 +3,7 @@ package com.otakustream.core.player
 import android.content.Context
 import android.content.Intent
 import android.media.audiofx.Equalizer
+import android.media.audiofx.LoudnessEnhancer
 import android.net.Uri
 import android.os.SystemClock
 import android.provider.OpenableColumns
@@ -82,6 +83,9 @@ data class PlayerUiState(
     val videoBitrateBps: Int = 0,
     val droppedFrameCount: Int = 0,
     val equalizerPreset: EqualizerPreset = EqualizerPreset.FLAT,
+    val volumeBoostMillibels: Int = 0,
+    val hasNext: Boolean = false,
+    val seekDurationMs: Long = 10_000L,
 )
 
 @OptIn(UnstableApi::class)
@@ -119,9 +123,13 @@ class PlayerController @Inject constructor(
     private var pendingSegmentStartMs: Long? = null
     private var speedBeforeBoost: Float? = null
     private var equalizer: Equalizer? = null
+    private var loudnessEnhancer: LoudnessEnhancer? = null
 
     init {
-        _uiState.value = _uiState.value.copy(autoSkipEnabled = playerSettingsPrefs.autoSkipEnabled)
+        _uiState.value = _uiState.value.copy(
+            autoSkipEnabled = playerSettingsPrefs.autoSkipEnabled,
+            seekDurationMs = playerSettingsPrefs.seekDurationMs,
+        )
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 _uiState.value = _uiState.value.copy(isPlaying = isPlaying)
@@ -249,6 +257,7 @@ class PlayerController @Inject constructor(
         val stashed = PendingPlayback.consume(url)
         val pending = stashed?.video
         currentSkipLookup = stashed?.skipLookup
+        _uiState.value = _uiState.value.copy(hasNext = PlaybackQueue.hasResolver())
 
         // No stash (file picker, pasted link, "Open with") — or a stash that explicitly left
         // history to us: record the play here, and drop any auto-play resolver left over from
@@ -286,6 +295,11 @@ class PlayerController @Inject constructor(
             player.setMediaSource(mediaSource, resumeMs)
             player.prepare()
             player.playWhenReady = true
+
+            // Apply the remembered default speed to every new video (boost is separate and resets).
+            val defaultSpeed = playerSettingsPrefs.defaultSpeed
+            player.setPlaybackSpeed(defaultSpeed)
+            _uiState.value = _uiState.value.copy(playbackSpeed = defaultSpeed)
         }
     }
 
@@ -428,6 +442,27 @@ class PlayerController @Inject constructor(
         _uiState.value = _uiState.value.copy(autoSkipEnabled = enabled)
     }
 
+    // A user-chosen speed also becomes the remembered default for future videos (unlike the
+    // transient long-press boost, which uses setPlaybackSpeed directly).
+    fun setUserPlaybackSpeed(speed: Float) {
+        playerSettingsPrefs.defaultSpeed = speed
+        setPlaybackSpeed(speed)
+    }
+
+    fun setSeekDurationMs(durationMs: Long) {
+        playerSettingsPrefs.seekDurationMs = durationMs
+        _uiState.value = _uiState.value.copy(seekDurationMs = durationMs)
+    }
+
+    fun setVolumeBoostMillibels(millibels: Int) {
+        _uiState.value = _uiState.value.copy(volumeBoostMillibels = millibels)
+        applyVolumeBoost(millibels)
+    }
+
+    fun skipToNext() {
+        scope.launch { playNext() }
+    }
+
     // AniSkip is fetched once per playback, after the real duration is known (STATE_READY).
     private fun maybeFetchAniSkip() {
         if (aniSkipFetched) return
@@ -488,6 +523,13 @@ class PlayerController @Inject constructor(
         equalizer?.release()
         equalizer = runCatching { Equalizer(0, sessionId) }.getOrNull()?.apply { enabled = true }
         applyEqualizerPreset(_uiState.value.equalizerPreset)
+        loudnessEnhancer?.release()
+        loudnessEnhancer = runCatching { LoudnessEnhancer(sessionId) }.getOrNull()?.apply { enabled = true }
+        applyVolumeBoost(_uiState.value.volumeBoostMillibels)
+    }
+
+    private fun applyVolumeBoost(millibels: Int) {
+        runCatching { loudnessEnhancer?.setTargetGain(millibels) }
     }
 
     private fun applyEqualizerPreset(preset: EqualizerPreset) {

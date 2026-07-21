@@ -60,7 +60,13 @@ class PlayerViewModel @Inject constructor(
 
     fun adjustVolume(delta: Float) = controller.setVolume(controller.uiState.value.volume + delta)
 
-    fun setPlaybackSpeed(speed: Float) = controller.setPlaybackSpeed(speed)
+    fun setPlaybackSpeed(speed: Float) = controller.setUserPlaybackSpeed(speed)
+
+    fun skipToNext() = controller.skipToNext()
+
+    fun setSeekDurationMs(durationMs: Long) = controller.setSeekDurationMs(durationMs)
+
+    fun setVolumeBoost(millibels: Int) = controller.setVolumeBoostMillibels(millibels)
 
     fun selectAudioTrack(track: TrackInfo) = controller.selectTrack(C.TRACK_TYPE_AUDIO, track)
 
