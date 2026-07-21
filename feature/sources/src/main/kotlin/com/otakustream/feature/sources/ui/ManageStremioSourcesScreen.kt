@@ -177,6 +177,15 @@ private fun AddonRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = item.record.name, style = MaterialTheme.typography.titleSmall)
                 Text(text = item.record.manifestUrl, style = MaterialTheme.typography.bodySmall)
+                // Add-ons with no browsable catalog (Torrentio etc.) still contribute streams to
+                // playback — make that clear so they don't look inert.
+                if (item.catalogs.isEmpty()) {
+                    Text(
+                        text = "Streams only",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.tertiary,
+                    )
+                }
             }
             IconButton(onClick = onMoveUp, enabled = canMoveUp) { Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Move up") }
             IconButton(onClick = onMoveDown, enabled = canMoveDown) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Move down") }
