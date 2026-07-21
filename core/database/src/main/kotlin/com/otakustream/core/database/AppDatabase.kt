@@ -6,6 +6,8 @@ import com.otakustream.core.database.library.LibraryDao
 import com.otakustream.core.database.library.LibraryEntry
 import com.otakustream.core.database.library.WatchHistoryDao
 import com.otakustream.core.database.library.WatchHistoryEntry
+import com.otakustream.core.database.mangayomi.MangayomiSourceDao
+import com.otakustream.core.database.mangayomi.MangayomiSourceEntity
 import com.otakustream.core.database.playback.PlaybackProgressDao
 import com.otakustream.core.database.playback.PlaybackProgressEntity
 import com.otakustream.core.database.scripted.ScriptedSourceDao
@@ -32,8 +34,9 @@ import com.otakustream.core.database.tracking.TrackingDao
         StremioAddonEntity::class,
         StremioServerConfigEntity::class,
         StremioCatalogToggleEntity::class,
+        MangayomiSourceEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -44,4 +47,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun watchHistoryDao(): WatchHistoryDao
     abstract fun trackingDao(): TrackingDao
     abstract fun stremioDao(): StremioDao
+    abstract fun mangayomiSourceDao(): MangayomiSourceDao
 }

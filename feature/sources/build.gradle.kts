@@ -32,6 +32,7 @@ dependencies {
     implementation(project(":core:sources-api"))
     implementation(project(":core:sources-scripting"))
     implementation(project(":core:sources-stremio"))
+    implementation(project(":core:sources-mangayomi"))
     implementation(project(":feature:tracking"))
     implementation(libs.coil.compose)
 

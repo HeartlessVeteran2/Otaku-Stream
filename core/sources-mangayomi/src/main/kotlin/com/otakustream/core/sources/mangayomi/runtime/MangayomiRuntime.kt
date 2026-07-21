@@ -41,6 +41,10 @@ class MangayomiRuntime(
     private var deliverOk = false
     private var deliverValue: String? = null
 
+    // Forces engine bringup (parse + instantiate the extension) now, so a malformed extension
+    // fails at install/bootstrap time rather than on first catalog load. Idempotent.
+    suspend fun ensureLoaded() = withContext(engineDispatcher) { ensureStarted() }
+
     // Reads a global set by the extension source, e.g. the `mangayomiSources` metadata array.
     // Returns the JSON string, or null if absent/unset.
     suspend fun readGlobalJson(expression: String): String? = withContext(engineDispatcher) {

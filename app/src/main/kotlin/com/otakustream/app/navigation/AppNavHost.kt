@@ -32,6 +32,7 @@ import com.otakustream.feature.library.LibraryScreen
 import com.otakustream.feature.sources.ui.BrowseSourceCatalogScreen
 import com.otakustream.feature.sources.ui.BrowseStremioAddonsScreen
 import com.otakustream.feature.sources.ui.CatalogScreen
+import com.otakustream.feature.sources.ui.MangayomiExtensionsScreen
 import com.otakustream.feature.sources.ui.ManageSourcesScreen
 import com.otakustream.feature.sources.ui.ManageStremioSourcesScreen
 import com.otakustream.feature.sources.ui.MediaDetailsScreen
@@ -47,6 +48,7 @@ private const val ROUTE_MANAGE_STREMIO = "manage-stremio"
 private const val ROUTE_MANAGE_STREMIO_PATTERN = "manage-stremio?installUrl={installUrl}"
 private const val ROUTE_BROWSE_STREMIO = "browse-stremio"
 private const val ROUTE_BROWSE_SOURCE_CATALOG = "browse-source-catalog"
+private const val ROUTE_ANYMEX_EXTENSIONS = "anymex-extensions"
 private const val ROUTE_DETAILS = "details/{sourceId}?mediaUrl={mediaUrl}&title={title}"
 private const val ROUTE_PLAYER = "player?videoUrl={videoUrl}"
 
@@ -151,6 +153,7 @@ fun AppNavHost(
                     onManageSourcesClick = { navController.navigate(ROUTE_MANAGE_SOURCES) },
                     onTrackingClick = { navController.navigate(ROUTE_TRACKING_SETTINGS) },
                     onManageStremioClick = { navController.navigate(ROUTE_MANAGE_STREMIO) },
+                    onAnymexExtensionsClick = { navController.navigate(ROUTE_ANYMEX_EXTENSIONS) },
                 )
             }
             composable(ROUTE_MANAGE_SOURCES) {
@@ -160,6 +163,9 @@ fun AppNavHost(
             }
             composable(ROUTE_BROWSE_SOURCE_CATALOG) {
                 BrowseSourceCatalogScreen()
+            }
+            composable(ROUTE_ANYMEX_EXTENSIONS) {
+                MangayomiExtensionsScreen()
             }
             composable(ROUTE_TRACKING_SETTINGS) {
                 TrackingSettingsScreen(
@@ -243,12 +249,18 @@ private fun SettingsScreen(
     onManageSourcesClick: () -> Unit,
     onTrackingClick: () -> Unit,
     onManageStremioClick: () -> Unit,
+    onAnymexExtensionsClick: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         ListItem(
             headlineContent = { Text("Add-ons") },
             supportingContent = { Text("Install add-ons that fill your catalog") },
             modifier = Modifier.clickable(onClick = onManageStremioClick),
+        )
+        ListItem(
+            headlineContent = { Text("AnymeX extensions") },
+            supportingContent = { Text("Install anime extensions from an AnymeX/Mangayomi repository") },
+            modifier = Modifier.clickable(onClick = onAnymexExtensionsClick),
         )
         ListItem(
             headlineContent = { Text("AniList tracking") },

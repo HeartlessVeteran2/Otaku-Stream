@@ -4,10 +4,14 @@ import android.content.Context
 import androidx.room.Room
 import com.otakustream.core.database.AppDatabase
 import com.otakustream.core.database.MIGRATION_6_7
+import com.otakustream.core.database.MIGRATION_7_8
 import com.otakustream.core.database.library.LibraryDao
 import com.otakustream.core.database.library.LibraryRepository
 import com.otakustream.core.database.library.LibraryRepositoryImpl
 import com.otakustream.core.database.library.WatchHistoryDao
+import com.otakustream.core.database.mangayomi.MangayomiSourceDao
+import com.otakustream.core.database.mangayomi.MangayomiSourceRepository
+import com.otakustream.core.database.mangayomi.MangayomiSourceRepositoryImpl
 import com.otakustream.core.database.playback.PlaybackProgressDao
 import com.otakustream.core.database.playback.PlaybackProgressRepository
 import com.otakustream.core.database.playback.PlaybackProgressRepositoryImpl
@@ -43,7 +47,7 @@ object DatabaseProvidesModule {
             // fails fast instead of silently wiping the user's library, addons, and tokens.
             // Schema JSONs under core/database/schemas are the baseline migrations are
             // authored against.
-            .addMigrations(MIGRATION_6_7)
+            .addMigrations(MIGRATION_6_7, MIGRATION_7_8)
             .fallbackToDestructiveMigrationOnDowngrade(true)
             .build()
 
@@ -67,6 +71,9 @@ object DatabaseProvidesModule {
 
     @Provides
     fun provideStremioDao(database: AppDatabase): StremioDao = database.stremioDao()
+
+    @Provides
+    fun provideMangayomiSourceDao(database: AppDatabase): MangayomiSourceDao = database.mangayomiSourceDao()
 }
 
 @Module
@@ -102,4 +109,9 @@ abstract class DatabaseBindsModule {
     abstract fun bindStremioRepository(
         impl: StremioRepositoryImpl,
     ): StremioRepository
+
+    @Binds
+    abstract fun bindMangayomiSourceRepository(
+        impl: MangayomiSourceRepositoryImpl,
+    ): MangayomiSourceRepository
 }
