@@ -95,7 +95,8 @@ class CatalogViewModel @Inject constructor(
         viewModelScope.launch {
             sourceRepository.observeSources().collectLatest { sources ->
                 // If the currently-scoped source was removed, fall back to "All sources".
-                val selected = _uiState.value.selectedSourceId?.takeIf { id -> sources.any { it.id == id } }
+                val prevSelected = _uiState.value.selectedSourceId
+                val selected = prevSelected?.takeIf { id -> sources.any { it.id == id } }
                 _uiState.value = _uiState.value.copy(
                     availableFilters = fetchAvailableFilters(sources),
                     availableSources = sources.map { SourcePick(it.id, it.name) },
@@ -103,6 +104,10 @@ class CatalogViewModel @Inject constructor(
                     selectedSourceId = selected,
                     hasAnySources = sources.isNotEmpty(),
                 )
+                // The scoped source vanished — the shown results are now stale; re-run for All.
+                if (prevSelected != null && selected == null) {
+                    startSearch(_uiState.value.query)
+                }
             }
         }
     }
@@ -174,6 +179,9 @@ class CatalogViewModel @Inject constructor(
     private fun startSearch(query: String) {
         loadMoreJob?.cancel()
         searchJob?.cancel()
+        // A cancelled load-more would otherwise leave its bottom spinner stuck on — clear it
+        // whenever a fresh search supersedes an in-flight page load (source switch, filter, typing).
+        _uiState.value = _uiState.value.copy(isLoadingMore = false)
         searchJob = viewModelScope.launch { runSearch(query) }
     }
 
