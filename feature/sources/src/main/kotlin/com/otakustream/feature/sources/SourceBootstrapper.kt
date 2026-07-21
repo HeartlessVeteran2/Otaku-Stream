@@ -1,5 +1,6 @@
 package com.otakustream.feature.sources
 
+import com.otakustream.core.sources.mangayomi.MangayomiBootstrapper
 import com.otakustream.core.sources.scripting.ScriptedSourceBootstrapper
 import com.otakustream.core.sources.stremio.StremioAddonBootstrapper
 import kotlinx.coroutines.CancellationException
@@ -20,6 +21,7 @@ import javax.inject.Singleton
 class SourceBootstrapper @Inject constructor(
     private val scriptedBootstrapper: ScriptedSourceBootstrapper,
     private val stremioBootstrapper: StremioAddonBootstrapper,
+    private val mangayomiBootstrapper: MangayomiBootstrapper,
     private val sourceRepository: SourceRepository,
 ) {
     // App-scoped so the work survives the ViewModel that first triggered it.
@@ -51,6 +53,8 @@ class SourceBootstrapper @Inject constructor(
         runCatching { scriptedBootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic) }
             .onFailure { if (it is CancellationException) throw it }
         runCatching { stremioBootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic) }
+            .onFailure { if (it is CancellationException) throw it }
+        runCatching { mangayomiBootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic) }
             .onFailure { if (it is CancellationException) throw it }
     }
 }

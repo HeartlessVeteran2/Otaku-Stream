@@ -25,6 +25,7 @@ android {
 
 dependencies {
     api(project(":core:sources-api"))
+    api(project(":core:database"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)

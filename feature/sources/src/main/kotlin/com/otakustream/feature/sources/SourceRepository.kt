@@ -37,6 +37,10 @@ class SourceRegistry @Inject constructor(
     }
 
     override fun unregisterDynamic(id: Long) {
-        _dynamicSources.value = _dynamicSources.value.filterNot { it.id == id }
+        val (removed, remaining) = _dynamicSources.value.partition { it.id == id }
+        _dynamicSources.value = remaining
+        // Release any engine-backed source (e.g. a Mangayomi QuickJS runtime) as it leaves the
+        // registry, so uninstall/reload frees its thread + native context.
+        removed.forEach { source -> (source as? AutoCloseable)?.let { runCatching { it.close() } } }
     }
 }

@@ -19,11 +19,13 @@ class MangayomiSourceFactory @Inject constructor(
     suspend fun create(source: String, override: MangayomiSourceMetadata? = null): MangayomiVideoSource {
         val runtime = MangayomiRuntime(source, httpClient)
         return try {
+            // Force bringup so a malformed extension fails now (install/bootstrap), not on first use.
+            runtime.ensureLoaded()
             val metadata = override ?: readSelfMetadata(runtime)
             MangayomiVideoSource(metadata, runtime)
         } catch (t: Throwable) {
-            // Metadata read forces engine bringup; if the extension JS is malformed it throws here,
-            // and the runtime's engine thread + native context would leak without this close.
+            // Bringup / metadata read can throw on malformed extension JS; the runtime's engine
+            // thread + native context would leak without this close.
             runCatching { runtime.close() }
             throw t
         }
