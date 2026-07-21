@@ -32,10 +32,19 @@ class SourceBootstrapper @Inject constructor(
     // preserving the old "bootstrap before first use" ordering. Idempotent: concurrent or later
     // callers await the same one-time run.
     suspend fun ensureStarted() {
-        job?.let { return it.await() }
-        mutex.withLock {
-            (job ?: scope.async { bootstrap() }.also { job = it })
-        }.await()
+        val deferred = job ?: mutex.withLock {
+            job ?: scope.async { bootstrap() }.also { job = it }
+        }
+        try {
+            deferred.await()
+        } catch (t: Throwable) {
+            // Never leave a failed or cancelled attempt cached: otherwise every future caller
+            // would await the same dead Deferred and persisted sources would never register
+            // until the process restarts. Clear it (only if it's still the one we awaited, so a
+            // concurrently-started fresh run isn't clobbered) so the next call retries.
+            mutex.withLock { if (job === deferred) job = null }
+            throw t
+        }
     }
 
     private suspend fun bootstrap() {
