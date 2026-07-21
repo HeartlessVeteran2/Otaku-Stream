@@ -535,15 +535,21 @@ class PlayerController @Inject constructor(
 
     private fun applyEqualizerPreset(preset: EqualizerPreset) {
         val eq = equalizer ?: return
-        val bandCount = eq.numberOfBands.toInt()
-        val maxGain = eq.bandLevelRange[1]
-        for (band in 0 until bandCount) {
-            val level: Short = when (preset) {
-                EqualizerPreset.FLAT -> 0
-                EqualizerPreset.BASS_BOOST -> if (band < bandCount / 3) maxGain else 0
-                EqualizerPreset.TREBLE_BOOST -> if (band >= bandCount - bandCount / 3) maxGain else 0
+        // Even a successfully-constructed Equalizer can throw from these calls on some OEM audio
+        // stacks (getBandLevelRange/setBandLevel RuntimeExceptions). This runs from ExoPlayer's
+        // onAudioSessionIdChanged during playback, so an unguarded throw would crash mid-play —
+        // swallow it and leave the EQ flat, matching applyVolumeBoost's guarded style.
+        runCatching {
+            val bandCount = eq.numberOfBands.toInt()
+            val maxGain = eq.bandLevelRange[1]
+            for (band in 0 until bandCount) {
+                val level: Short = when (preset) {
+                    EqualizerPreset.FLAT -> 0
+                    EqualizerPreset.BASS_BOOST -> if (band < bandCount / 3) maxGain else 0
+                    EqualizerPreset.TREBLE_BOOST -> if (band >= bandCount - bandCount / 3) maxGain else 0
+                }
+                eq.setBandLevel(band.toShort(), level)
             }
-            eq.setBandLevel(band.toShort(), level)
         }
     }
 }

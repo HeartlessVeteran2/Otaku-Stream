@@ -2,6 +2,7 @@ package com.otakustream.core.sources.mangayomi.repo
 
 import com.otakustream.core.sources.api.stableSourceId
 import org.json.JSONArray
+import org.json.JSONObject
 
 // One installable entry from a Mangayomi/AnymeX extension repo index (anime_index.json). The
 // runnable logic isn't here — `sourceCodeUrl` points at the raw .js the installer downloads.
@@ -27,26 +28,32 @@ private const val SOURCE_LANGUAGE_JS = 1
 // manga/novel entries are dropped — there's no Dart interpreter, and the app is video-only.
 fun parseMangayomiIndex(json: String): List<MangayomiExtensionListing> {
     val array = JSONArray(json)
-    return (0 until array.length()).mapNotNull { index ->
-        val obj = array.optJSONObject(index) ?: return@mapNotNull null
-        val itemType = obj.optInt("itemType", ITEM_TYPE_ANIME)
-        val sourceCodeLanguage = obj.optInt("sourceCodeLanguage", SOURCE_LANGUAGE_JS)
-        if (itemType != ITEM_TYPE_ANIME || sourceCodeLanguage != SOURCE_LANGUAGE_JS) return@mapNotNull null
-        val name = obj.optString("name").ifEmpty { return@mapNotNull null }
-        val sourceCodeUrl = obj.optString("sourceCodeUrl").ifEmpty { return@mapNotNull null }
-        val lang = obj.optString("lang").ifEmpty { "en" }
-        val declaredId = obj.optLong("id", 0L)
-        MangayomiExtensionListing(
-            id = if (declaredId != 0L) declaredId else stableSourceId(name, lang),
-            name = name,
-            lang = lang,
-            baseUrl = obj.optString("baseUrl"),
-            iconUrl = obj.optString("iconUrl").ifEmpty { null },
-            sourceCodeUrl = sourceCodeUrl,
-            version = obj.optString("version"),
-            isNsfw = obj.optBoolean("isNsfw", false),
-            itemType = itemType,
-            sourceCodeLanguage = sourceCodeLanguage,
-        )
-    }
+    return (0 until array.length())
+        .mapNotNull { index -> parseEntry(array.optJSONObject(index)) }
+        // A malformed third-party repo could list the same id twice; the browse list keys on id,
+        // so a duplicate would crash it. Keep the first occurrence.
+        .distinctBy { it.id }
+}
+
+private fun parseEntry(obj: JSONObject?): MangayomiExtensionListing? {
+    if (obj == null) return null
+    val itemType = obj.optInt("itemType", ITEM_TYPE_ANIME)
+    val sourceCodeLanguage = obj.optInt("sourceCodeLanguage", SOURCE_LANGUAGE_JS)
+    if (itemType != ITEM_TYPE_ANIME || sourceCodeLanguage != SOURCE_LANGUAGE_JS) return null
+    val name = obj.optString("name").ifEmpty { return null }
+    val sourceCodeUrl = obj.optString("sourceCodeUrl").ifEmpty { return null }
+    val lang = obj.optString("lang").ifEmpty { "en" }
+    val declaredId = obj.optLong("id", 0L)
+    return MangayomiExtensionListing(
+        id = if (declaredId != 0L) declaredId else stableSourceId(name, lang),
+        name = name,
+        lang = lang,
+        baseUrl = obj.optString("baseUrl"),
+        iconUrl = obj.optString("iconUrl").ifEmpty { null },
+        sourceCodeUrl = sourceCodeUrl,
+        version = obj.optString("version"),
+        isNsfw = obj.optBoolean("isNsfw", false),
+        itemType = itemType,
+        sourceCodeLanguage = sourceCodeLanguage,
+    )
 }
