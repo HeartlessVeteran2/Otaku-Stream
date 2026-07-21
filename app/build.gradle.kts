@@ -46,6 +46,7 @@ dependencies {
     implementation(project(":feature:tracking"))
     implementation(project(":sources:example"))
     implementation(libs.androidx.material.icons.extended)
+    implementation(libs.coil.compose)
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

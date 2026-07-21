@@ -33,7 +33,7 @@ import com.otakustream.core.database.tracking.TrackingDao
         StremioServerConfigEntity::class,
         StremioCatalogToggleEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
