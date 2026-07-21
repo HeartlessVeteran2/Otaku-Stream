@@ -62,7 +62,7 @@ class BrowseStremioAddonsViewModel @Inject constructor(
         isLoading.value = true
         error.value = null
         viewModelScope.launch {
-            runCatching { directoryClient.fetchOfficialAddons() }
+            runCatching { directoryClient.fetchAddonCatalog() }
                 .onSuccess { listings.value = it }
                 .onFailure { failure ->
                     if (failure is CancellationException) throw failure
