@@ -11,6 +11,9 @@ navigationCompose = "2.8.5"
 media3 = "1.5.0"
 room = "2.8.4"
 rhino = "1.7.15"
+quickjs = "3.2.3"
+jsoup = "1.18.1"
+coroutines = "1.8.1"
 okhttp = "4.12.0"
 coil = "2.7.0"
 
@@ -41,6 +44,9 @@ room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "
 room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
 rhino = { group = "org.mozilla", name = "rhino", version.ref = "rhino" }
+quickjs-android = { group = "wang.harlon.quickjs", name = "wrapper-android", version.ref = "quickjs" }
+jsoup = { group = "org.jsoup", name = "jsoup", version.ref = "jsoup" }
+kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 coil-video = { group = "io.coil-kt", name = "coil-video", version.ref = "coil" }
 okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
