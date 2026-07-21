@@ -39,7 +39,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import android.net.Uri
-import coil.ImageLoader
 import coil.compose.AsyncImage
 import coil.decode.VideoFrameDecoder
 import coil.request.ImageRequest
@@ -198,11 +197,6 @@ private fun OnDeviceTab(
     viewModel: LocalVideosViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val context = LocalContext.current
-    // Coil can decode a frame straight from the video URI for a real thumbnail.
-    val thumbnailLoader = remember(context) {
-        ImageLoader.Builder(context).components { add(VideoFrameDecoder.Factory()) }.build()
-    }
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         viewModel.refresh()
@@ -240,7 +234,6 @@ private fun OnDeviceTab(
                         leadingContent = {
                             LocalVideoThumbnail(
                                 uri = video.uri,
-                                imageLoader = thumbnailLoader,
                                 contentDescription = video.displayName,
                                 modifier = Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)),
                             )
@@ -273,18 +266,19 @@ private fun OnDeviceTab(
 @Composable
 private fun LocalVideoThumbnail(
     uri: Uri,
-    imageLoader: ImageLoader,
     contentDescription: String,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    // Decoder set per-request so the global ImageLoader (shared cache + thread pool) is reused
+    // rather than spinning up a dedicated one for video frames.
     AsyncImage(
         model = ImageRequest.Builder(context)
             .data(uri)
+            .decoderFactory(VideoFrameDecoder.Factory())
             .videoFrameMillis(1000)
             .crossfade(true)
             .build(),
-        imageLoader = imageLoader,
         contentDescription = contentDescription,
         contentScale = ContentScale.Crop,
         modifier = modifier,

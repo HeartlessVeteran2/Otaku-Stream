@@ -151,7 +151,9 @@ fun PlayerScreen(
                     brightnessFraction = (brightnessFraction + delta).coerceIn(0.01f, 1f)
                     activity?.setScreenBrightness(brightnessFraction)
                 },
-                volumeLevel = { uiState.volume },
+                // Read the flow's current value so the HUD ring tracks the drag without waiting
+                // on a recomposition of the collected uiState.
+                volumeLevel = { viewModel.uiState.value.volume },
                 brightnessLevel = { brightnessFraction },
                 doubleTapSeekMs = uiState.seekDurationMs,
                 onTap = { controlsVisible = !controlsVisible },

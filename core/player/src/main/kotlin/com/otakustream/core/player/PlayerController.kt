@@ -445,8 +445,9 @@ class PlayerController @Inject constructor(
     // A user-chosen speed also becomes the remembered default for future videos (unlike the
     // transient long-press boost, which uses setPlaybackSpeed directly).
     fun setUserPlaybackSpeed(speed: Float) {
-        playerSettingsPrefs.defaultSpeed = speed
-        setPlaybackSpeed(speed)
+        val clamped = speed.coerceAtLeast(0.25f)
+        playerSettingsPrefs.defaultSpeed = clamped
+        setPlaybackSpeed(clamped)
     }
 
     fun setSeekDurationMs(durationMs: Long) {
