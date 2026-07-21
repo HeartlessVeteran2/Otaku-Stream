@@ -17,6 +17,9 @@ class StremioAddonBootstrapper @Inject constructor(
         val disabledCatalogKeys = stremioRepository.getDisabledCatalogKeys()
         stremioRepository.getAllAddons().filter { it.enabled }.flatMap { record ->
             runCatching {
+                // Re-register any stream provider (Torrentio et al.) so catalog-less stream
+                // add-ons resolve streams again after a cold start, not just when freshly installed.
+                installer.registerStreamProviderIfAny(record.manifestUrl, record.manifestJson)
                 installer.buildSources(record.manifestUrl, record.manifestJson) { type, id ->
                     Triple(record.manifestUrl, type, id) !in disabledCatalogKeys
                 }

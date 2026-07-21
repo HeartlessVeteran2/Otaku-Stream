@@ -16,13 +16,16 @@ import com.otakustream.core.sources.stremio.model.parseCatalogResponse
 import com.otakustream.core.sources.stremio.model.parseMetaResponse
 import com.otakustream.core.sources.stremio.model.parseStreamResponse
 import com.otakustream.core.sources.stremio.model.parseSubtitlesResponse
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
 
 // One instance per (addon, catalog) pair — Stremio addons can declare multiple catalogs, and
 // VideoSource models a single browsable catalog, so installing an addon registers one
@@ -30,6 +33,7 @@ import java.net.URLEncoder
 class StremioVideoSource(
     private val httpClient: OkHttpClient,
     private val stremioRepository: StremioRepository,
+    private val streamProviderRegistry: StremioStreamProviderRegistry,
     manifestUrl: String,
     private val catalog: StremioCatalog,
     private val resources: Set<String>,
@@ -117,17 +121,32 @@ class StremioVideoSource(
 
     override suspend fun getVideoList(episode: Episode): List<Video> = withContext(Dispatchers.IO) {
         val (type, videoId) = splitTypeId(episode.url)
-        // Streams and subtitles are independent network calls — fetch them concurrently rather
-        // than paying their latency twice in sequence.
+        // This catalog's own /stream, plus every installed stream provider (Torrentio etc.) that
+        // handles this type/id — so catalog-less stream add-ons contribute streams here. All
+        // fetched concurrently; a failing or slow provider never blocks the others.
         coroutineScope {
-            val streamsDeferred = async { parseStreamResponse(get("$baseUrl/stream/$type/$videoId.json")).streams }
+            val ownStreamsDeferred = async { fetchStreams("$baseUrl/stream/$type/$videoId.json") }
+            // Exclude this add-on's own base URL — an all-in-one add-on (catalog + stream) would
+            // otherwise be queried twice.
+            val providerStreamDeferreds = streamProviderRegistry.providersFor(type, videoId)
+                .filter { it.baseUrl != baseUrl }
+                .map { provider -> async { fetchStreams("${provider.baseUrl}/stream/$type/$videoId.json") } }
             val subtitleTracksDeferred = async { fetchSubtitleTracks(type, videoId) }
             val serverBaseUrl = stremioRepository.getServerBaseUrl()
-            val streams = streamsDeferred.await()
+            val allStreams = ownStreamsDeferred.await() + providerStreamDeferreds.awaitAll().flatten()
             val subtitleTracks = subtitleTracksDeferred.await()
-            streams.mapNotNull { stream -> stream.toVideo(serverBaseUrl, subtitleTracks) }
+            allStreams.mapNotNull { stream -> stream.toVideo(serverBaseUrl, subtitleTracks) }
+                .distinctBy { it.url }
         }
     }
+
+    // Best-effort stream fetch: the per-call timeout in get() bounds a dead/slow endpoint, and
+    // failures yield no streams rather than propagating so one provider can't sink the others.
+    private fun fetchStreams(url: String): List<StremioStream> =
+        runCatching { parseStreamResponse(get(url)).streams }.getOrElse { error ->
+            if (error is CancellationException) throw error
+            emptyList()
+        }
 
     // The subtitles resource is a separate endpoint from /stream — only probe it when the
     // manifest actually declares support, and never let a failure break stream resolution.
@@ -166,7 +185,12 @@ class StremioVideoSource(
 
     private fun get(url: String): String {
         val request = Request.Builder().url(url).build()
-        httpClient.newCall(request).execute().use { response ->
+        val call = httpClient.newCall(request).apply {
+            // A coroutine timeout can't interrupt OkHttp's blocking execute(), but a per-call
+            // timeout aborts the call at the deadline — so a hung provider actually gives up.
+            timeout().timeout(REQUEST_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        }
+        call.execute().use { response ->
             require(response.isSuccessful) { "Stremio request failed: HTTP ${response.code}" }
             return response.body?.string() ?: error("Empty response body")
         }
@@ -184,5 +208,9 @@ class StremioVideoSource(
         // Stremio addons commonly page in chunks around this size; used only to compute "skip",
         // not enforced by the protocol itself.
         const val PAGE_SIZE = 100
+
+        // Cap every Stremio request so a single slow endpoint (e.g. an overloaded torrent
+        // indexer) can't hold up catalog/detail/stream resolution.
+        const val REQUEST_TIMEOUT_MS = 12_000L
     }
 }

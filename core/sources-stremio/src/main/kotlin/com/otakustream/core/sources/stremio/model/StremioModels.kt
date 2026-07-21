@@ -20,6 +20,10 @@ data class StremioManifest(
     val description: String?,
     val resources: List<String>,
     val catalogs: List<StremioCatalog>,
+    // Content types the addon serves (e.g. "movie", "series", "anime") and the id prefixes it
+    // recognizes (e.g. "tt", "kitsu:"). Used to route stream lookups to matching stream providers.
+    val types: List<String> = emptyList(),
+    val idPrefixes: List<String> = emptyList(),
 )
 
 data class StremioMetaPreview(val id: String, val type: String, val name: String, val poster: String?)
@@ -109,6 +113,8 @@ fun parseManifest(json: String): StremioManifest {
         description = root.stringOrNull("description"),
         resources = resources,
         catalogs = catalogs,
+        types = root.stringListOrEmpty("types"),
+        idPrefixes = root.stringListOrEmpty("idPrefixes"),
     )
 }
 

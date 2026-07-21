@@ -13,6 +13,7 @@ import javax.inject.Inject
 class StremioAddonInstaller @Inject constructor(
     private val httpClient: OkHttpClient,
     private val stremioRepository: StremioRepository,
+    private val streamProviderRegistry: StremioStreamProviderRegistry,
 ) {
     suspend fun installFromUrl(manifestUrl: String, priority: Int = 0): List<StremioVideoSource> = withContext(Dispatchers.IO) {
         val normalizedUrl = manifestUrl.trim().let { raw ->
@@ -33,10 +34,33 @@ class StremioAddonInstaller @Inject constructor(
         stremioRepository.saveAddon(
             StremioAddonRecord(manifestUrl = normalizedUrl, manifestJson = content, name = manifest.name, priority = priority),
         )
+        registerStreamProviderIfAny(normalizedUrl, content)
         sources
     }
 
-    suspend fun uninstall(manifestUrl: String) = stremioRepository.deleteAddon(manifestUrl)
+    suspend fun uninstall(manifestUrl: String) {
+        streamProviderRegistry.unregister(baseUrlOf(manifestUrl))
+        stremioRepository.deleteAddon(manifestUrl)
+    }
+
+    // Register an add-on that declares the "stream" resource as a stream provider, so its streams
+    // are merged into playback even when it has no browsable catalog (Torrentio et al.). Safe to
+    // call for any add-on — a no-op when "stream" isn't declared. Idempotent (keyed by base URL).
+    fun registerStreamProviderIfAny(manifestUrl: String, manifestJson: String) {
+        val manifest = parseManifest(manifestJson)
+        if ("stream" !in manifest.resources) return
+        streamProviderRegistry.register(
+            StreamProvider(
+                baseUrl = baseUrlOf(manifestUrl),
+                types = manifest.types.toSet(),
+                idPrefixes = manifest.idPrefixes,
+            ),
+        )
+    }
+
+    fun unregisterStreamProvider(manifestUrl: String) = streamProviderRegistry.unregister(baseUrlOf(manifestUrl))
+
+    private fun baseUrlOf(manifestUrl: String): String = manifestUrl.removeSuffix("/manifest.json")
 
     // Stream/subtitle-only addons (e.g. Torrentio, OpenSubtitles) commonly declare zero
     // catalogs — they're still installable, they just don't register a browsable VideoSource
@@ -53,6 +77,7 @@ class StremioAddonInstaller @Inject constructor(
             StremioVideoSource(
                 httpClient = httpClient,
                 stremioRepository = stremioRepository,
+                streamProviderRegistry = streamProviderRegistry,
                 manifestUrl = manifestUrl,
                 catalog = catalog,
                 resources = resources,
