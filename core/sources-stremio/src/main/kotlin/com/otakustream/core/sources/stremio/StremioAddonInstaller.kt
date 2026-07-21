@@ -10,20 +10,24 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import javax.inject.Inject
 
+// Canonicalizes a user-entered add-on URL to its manifest URL (adds a scheme, appends
+// /manifest.json). Shared so "is this installed?" checks elsewhere match the saved record's URL.
+fun normalizeStremioManifestUrl(manifestUrl: String): String = manifestUrl.trim().let { raw ->
+    val withScheme = when {
+        raw.startsWith("stremio://", ignoreCase = true) -> raw.replaceFirst("stremio://", "https://")
+        raw.startsWith("http://", ignoreCase = true) || raw.startsWith("https://", ignoreCase = true) -> raw
+        else -> "https://$raw"
+    }
+    if (withScheme.endsWith("manifest.json")) withScheme else "${withScheme.trimEnd('/')}/manifest.json"
+}
+
 class StremioAddonInstaller @Inject constructor(
     private val httpClient: OkHttpClient,
     private val stremioRepository: StremioRepository,
     private val streamProviderRegistry: StremioStreamProviderRegistry,
 ) {
     suspend fun installFromUrl(manifestUrl: String, priority: Int = 0): List<StremioVideoSource> = withContext(Dispatchers.IO) {
-        val normalizedUrl = manifestUrl.trim().let { raw ->
-            val withScheme = when {
-                raw.startsWith("stremio://", ignoreCase = true) -> raw.replaceFirst("stremio://", "https://")
-                raw.startsWith("http://", ignoreCase = true) || raw.startsWith("https://", ignoreCase = true) -> raw
-                else -> "https://$raw"
-            }
-            if (withScheme.endsWith("manifest.json")) withScheme else "${withScheme.trimEnd('/')}/manifest.json"
-        }
+        val normalizedUrl = normalizeStremioManifestUrl(manifestUrl)
         val request = Request.Builder().url(normalizedUrl).build()
         val content = httpClient.newCall(request).execute().use { response ->
             require(response.isSuccessful) { "Failed to download manifest: HTTP ${response.code}" }

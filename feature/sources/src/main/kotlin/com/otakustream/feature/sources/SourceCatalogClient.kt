@@ -3,6 +3,8 @@ package com.otakustream.feature.sources
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -50,9 +52,17 @@ class SourceCatalogClient @Inject constructor(
         val repoUrl = prefs.repoUrl.trim()
         if (repoUrl.isEmpty()) return@withContext DEFAULT_ENTRIES
         val request = Request.Builder().url(repoUrl).build()
-        val content = httpClient.newCall(request).execute().use { response ->
-            require(response.isSuccessful) { "Failed to load source catalog: HTTP ${response.code}" }
-            response.body?.string() ?: error("Empty response body")
+        val call = httpClient.newCall(request)
+        // Cancel the blocking OkHttp call if the coroutine is cancelled (navigate away / reload),
+        // instead of leaving it to occupy the thread until it completes on its own.
+        val cancellation = currentCoroutineContext()[Job]?.invokeOnCompletion { call.cancel() }
+        val content = try {
+            call.execute().use { response ->
+                require(response.isSuccessful) { "Failed to load source catalog: HTTP ${response.code}" }
+                response.body?.string() ?: error("Empty response body")
+            }
+        } finally {
+            cancellation?.dispose()
         }
         parse(content)
     }

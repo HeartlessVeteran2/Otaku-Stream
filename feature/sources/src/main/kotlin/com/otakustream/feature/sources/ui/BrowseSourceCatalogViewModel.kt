@@ -6,12 +6,14 @@ import com.otakustream.core.database.stremio.StremioRepository
 import com.otakustream.core.sources.scripting.ScriptSourceInstaller
 import com.otakustream.core.sources.scripting.stableSourceId
 import com.otakustream.core.sources.stremio.StremioAddonInstaller
+import com.otakustream.core.sources.stremio.normalizeStremioManifestUrl
 import com.otakustream.feature.sources.SourceCatalogClient
 import com.otakustream.feature.sources.SourceCatalogEntry
 import com.otakustream.feature.sources.SourceCatalogPrefs
 import com.otakustream.feature.sources.SourceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -44,6 +46,7 @@ class BrowseSourceCatalogViewModel @Inject constructor(
 
     private var installedSourceIds: Set<Long> = emptySet()
     private var installedManifestUrls: Set<String> = emptySet()
+    private var loadJob: Job? = null
 
     init {
         load()
@@ -59,8 +62,10 @@ class BrowseSourceCatalogViewModel @Inject constructor(
     }
 
     fun load() {
+        // Cancel any in-flight load so fast Load/Retry taps can't race stale results into state.
+        loadJob?.cancel()
         _uiState.value = _uiState.value.copy(isLoading = true, error = null)
-        viewModelScope.launch {
+        loadJob = viewModelScope.launch {
             runCatching { catalogClient.fetch() }
                 .onSuccess { entries -> _uiState.value = _uiState.value.copy(entries = entries) }
                 .onFailure { failure ->
@@ -109,20 +114,10 @@ class BrowseSourceCatalogViewModel @Inject constructor(
         val installed = _uiState.value.entries.filter { entry ->
             when (entry.type) {
                 SourceCatalogEntry.TYPE_SCRIPTED -> stableSourceId(entry.name, entry.lang) in installedSourceIds
-                SourceCatalogEntry.TYPE_STREMIO -> normalizeManifestUrl(entry.url) in installedManifestUrls
+                SourceCatalogEntry.TYPE_STREMIO -> normalizeStremioManifestUrl(entry.url) in installedManifestUrls
                 else -> false
             }
         }.map { it.url }.toSet()
         _uiState.value = _uiState.value.copy(installedUrls = installed)
-    }
-
-    // Mirrors StremioAddonInstaller's normalization so the "Installed" check matches saved records.
-    private fun normalizeManifestUrl(raw: String): String {
-        val withScheme = when {
-            raw.startsWith("stremio://", ignoreCase = true) -> raw.replaceFirst("stremio://", "https://")
-            raw.startsWith("http://", ignoreCase = true) || raw.startsWith("https://", ignoreCase = true) -> raw
-            else -> "https://$raw"
-        }
-        return if (withScheme.endsWith("manifest.json")) withScheme else "${withScheme.trimEnd('/')}/manifest.json"
     }
 }

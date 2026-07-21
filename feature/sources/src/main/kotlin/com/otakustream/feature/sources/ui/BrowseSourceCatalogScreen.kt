@@ -50,7 +50,7 @@ fun BrowseSourceCatalogScreen(
                     supportingText = { Text("A link to a source directory (JSON). Leave blank for the built-in list.") },
                     modifier = Modifier.weight(1f),
                 )
-                Button(onClick = viewModel::saveRepoUrl) { Text("Load") }
+                Button(onClick = viewModel::saveRepoUrl, enabled = !uiState.isLoading) { Text("Load") }
             }
 
             if (uiState.isLoading) {
