@@ -1,6 +1,7 @@
 package com.otakustream.core.player.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.FormatColorText
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -35,6 +37,7 @@ fun TrackSelectionSheet(
     onLoadSubtitleFile: () -> Unit,
     onOpenSubtitleStyle: () -> Unit,
     onAutoSkipChange: (Boolean) -> Unit,
+    onSeekDurationChange: (Long) -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -94,6 +97,20 @@ fun TrackSelectionSheet(
             ) {
                 Text(text = "Auto-skip intros & outros", modifier = Modifier.weight(1f))
                 Switch(checked = uiState.autoSkipEnabled, onCheckedChange = onAutoSkipChange)
+            }
+            Text(text = "Double-tap to seek", style = MaterialTheme.typography.bodyMedium)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(top = 4.dp),
+            ) {
+                listOf(5L, 10L, 15L, 30L).forEach { seconds ->
+                    val millis = seconds * 1000L
+                    FilterChip(
+                        selected = uiState.seekDurationMs == millis,
+                        onClick = { onSeekDurationChange(millis) },
+                        label = { Text("${seconds}s") },
+                    )
+                }
             }
         }
     }

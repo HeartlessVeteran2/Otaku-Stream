@@ -34,8 +34,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import android.net.Uri
+import coil.compose.AsyncImage
+import coil.decode.VideoFrameDecoder
+import coil.request.ImageRequest
+import coil.request.videoFrameMillis
 import com.otakustream.core.database.library.DIRECT_PLAY_SOURCE_ID
 import com.otakustream.core.database.library.WatchHistoryEntry
 import com.otakustream.core.sources.api.PendingPlayback
@@ -225,8 +232,8 @@ private fun OnDeviceTab(
                     ListItem(
                         headlineContent = { Text(video.displayName) },
                         leadingContent = {
-                            CoverImage(
-                                url = null,
+                            LocalVideoThumbnail(
+                                uri = video.uri,
                                 contentDescription = video.displayName,
                                 modifier = Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)),
                             )
@@ -254,6 +261,28 @@ private fun OnDeviceTab(
             }
         }
     }
+}
+
+@Composable
+private fun LocalVideoThumbnail(
+    uri: Uri,
+    contentDescription: String,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    // Decoder set per-request so the global ImageLoader (shared cache + thread pool) is reused
+    // rather than spinning up a dedicated one for video frames.
+    AsyncImage(
+        model = ImageRequest.Builder(context)
+            .data(uri)
+            .decoderFactory(VideoFrameDecoder.Factory())
+            .videoFrameMillis(1000)
+            .crossfade(true)
+            .build(),
+        contentDescription = contentDescription,
+        contentScale = ContentScale.Crop,
+        modifier = modifier,
+    )
 }
 
 private fun formatDurationMs(ms: Long): String {

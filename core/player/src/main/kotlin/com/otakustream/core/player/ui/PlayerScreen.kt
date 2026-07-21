@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -42,6 +43,7 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
+import kotlinx.coroutines.delay
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.util.UnstableApi
@@ -88,6 +90,19 @@ fun PlayerScreen(
     var showTrackSheet by remember { mutableStateOf(false) }
     var showEqualizerSheet by remember { mutableStateOf(false) }
     var showSubtitleStyleSheet by remember { mutableStateOf(false) }
+    // Window brightness as a 0..1 fraction, tracked here so the gesture HUD can show a level ring.
+    var brightnessFraction by remember { mutableStateOf(0.5f) }
+    var resizeModeOsd by remember { mutableStateOf<String?>(null) }
+    var lastResizeMode by remember { mutableStateOf(uiState.resizeMode) }
+
+    LaunchedEffect(uiState.resizeMode) {
+        if (uiState.resizeMode != lastResizeMode) {
+            lastResizeMode = uiState.resizeMode
+            resizeModeOsd = uiState.resizeMode.displayName()
+            delay(800)
+            resizeModeOsd = null
+        }
+    }
     var showGestureCoach by remember { mutableStateOf(!viewModel.hasSeenGestureCoach) }
 
     LaunchedEffect(videoUrl) {
@@ -132,11 +147,35 @@ fun PlayerScreen(
                 modifier = Modifier.fillMaxSize(),
                 onSeekBy = viewModel::seekBy,
                 onVolumeDeltaChange = viewModel::adjustVolume,
-                onBrightnessDeltaChange = { delta -> activity?.adjustScreenBrightnessBy(delta) },
+                onBrightnessDeltaChange = { delta ->
+                    brightnessFraction = (brightnessFraction + delta).coerceIn(0.01f, 1f)
+                    activity?.setScreenBrightness(brightnessFraction)
+                },
+                // Read the flow's current value so the HUD ring tracks the drag without waiting
+                // on a recomposition of the collected uiState.
+                volumeLevel = { viewModel.uiState.value.volume },
+                brightnessLevel = { brightnessFraction },
+                doubleTapSeekMs = uiState.seekDurationMs,
                 onTap = { controlsVisible = !controlsVisible },
                 onLongPressSpeedStart = viewModel::beginSpeedBoost,
                 onLongPressSpeedEnd = viewModel::endSpeedBoost,
             )
+
+            // Brief on-screen label when the scaling mode is cycled (AnymeX shows a toast).
+            resizeModeOsd?.let { label ->
+                Surface(
+                    color = Color.Black.copy(alpha = 0.7f),
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.align(Alignment.TopCenter).padding(24.dp),
+                ) {
+                    Text(
+                        text = label,
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    )
+                }
+            }
 
             if (uiState.statsOverlayVisible) {
                 Surface(
@@ -211,6 +250,11 @@ fun PlayerScreen(
                     onMarkSegmentEnd = viewModel::markSegmentEnd,
                     modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
                     trailingControls = {
+                        if (uiState.hasNext) {
+                            IconButton(onClick = viewModel::skipToNext) {
+                                Icon(imageVector = Icons.Filled.SkipNext, contentDescription = "Next episode")
+                            }
+                        }
                         SpeedPickerMenu(currentSpeed = uiState.playbackSpeed, onSpeedSelected = viewModel::setPlaybackSpeed)
                         IconButton(onClick = viewModel::cycleResizeMode) {
                             Icon(imageVector = Icons.Filled.AspectRatio, contentDescription = "Change video scaling")
@@ -238,6 +282,7 @@ fun PlayerScreen(
                         showSubtitleStyleSheet = true
                     },
                     onAutoSkipChange = viewModel::setAutoSkipEnabled,
+                    onSeekDurationChange = viewModel::setSeekDurationMs,
                     onDismiss = { showTrackSheet = false },
                 )
             }
@@ -254,6 +299,8 @@ fun PlayerScreen(
                 EqualizerSheet(
                     selectedPreset = uiState.equalizerPreset,
                     onSelectPreset = viewModel::setEqualizerPreset,
+                    volumeBoostMillibels = uiState.volumeBoostMillibels,
+                    onSelectVolumeBoost = viewModel::setVolumeBoost,
                     onDismiss = { showEqualizerSheet = false },
                 )
             }
@@ -267,11 +314,16 @@ internal tailrec fun Context.findActivity(): Activity? = when (this) {
     else -> null
 }
 
-private fun Activity.adjustScreenBrightnessBy(delta: Float) {
+private fun Activity.setScreenBrightness(fraction: Float) {
     val params = window.attributes
-    val current = if (params.screenBrightness < 0f) 0.5f else params.screenBrightness
-    params.screenBrightness = (current + delta).coerceIn(0.01f, 1f)
+    params.screenBrightness = fraction.coerceIn(0.01f, 1f)
     window.attributes = params
+}
+
+private fun ResizeMode.displayName(): String = when (this) {
+    ResizeMode.FIT -> "Fit"
+    ResizeMode.ZOOM -> "Zoom"
+    ResizeMode.STRETCH -> "Stretch"
 }
 
 @androidx.annotation.OptIn(UnstableApi::class)

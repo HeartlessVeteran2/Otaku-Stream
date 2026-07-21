@@ -17,6 +17,8 @@ object PlaybackQueue {
         this.resolver = resolver
     }
 
+    fun hasResolver(): Boolean = resolver != null
+
     suspend fun resolveNext(): Video? = runCatching { resolver?.invoke() }
         .getOrElse { error ->
             // kotlin.coroutines.cancellation keeps this module free of kotlinx-coroutines.

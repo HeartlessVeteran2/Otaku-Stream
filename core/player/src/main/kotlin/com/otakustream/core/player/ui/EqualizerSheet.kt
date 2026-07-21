@@ -22,11 +22,16 @@ private fun EqualizerPreset.label(): String = when (this) {
     EqualizerPreset.TREBLE_BOOST -> "Treble boost"
 }
 
+// Volume-boost options as LoudnessEnhancer target gains, in millibels (100 mB = 1 dB).
+private val VOLUME_BOOST_OPTIONS = listOf(0 to "Off", 600 to "+50%", 1200 to "+100%")
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EqualizerSheet(
     selectedPreset: EqualizerPreset,
     onSelectPreset: (EqualizerPreset) -> Unit,
+    volumeBoostMillibels: Int,
+    onSelectVolumeBoost: (Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
@@ -42,6 +47,20 @@ fun EqualizerSheet(
                 ) {
                     RadioButton(selected = preset == selectedPreset, onClick = { onSelectPreset(preset) })
                     Text(text = preset.label())
+                }
+            }
+
+            Text(text = "Volume boost", style = MaterialTheme.typography.titleMedium)
+            VOLUME_BOOST_OPTIONS.forEach { (millibels, label) ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onSelectVolumeBoost(millibels) }
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(selected = millibels == volumeBoostMillibels, onClick = { onSelectVolumeBoost(millibels) })
+                    Text(text = label)
                 }
             }
         }
