@@ -5,8 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.otakustream.core.sources.api.MediaItem
 import com.otakustream.core.sources.api.SourceFilter
 import com.otakustream.core.sources.api.VideoSource
-import com.otakustream.core.sources.scripting.ScriptedSourceBootstrapper
-import com.otakustream.core.sources.stremio.StremioAddonBootstrapper
+import com.otakustream.feature.sources.SourceBootstrapper
 import com.otakustream.feature.sources.SourceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -21,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 data class CatalogEntry(val sourceId: Long, val media: MediaItem)
@@ -65,13 +65,14 @@ private data class SourceFetch(
 
 private const val SEARCH_DEBOUNCE_MS = 300L
 private const val FIRST_LOAD_MORE_PAGE = 2
+// Soft cap per source per page so one slow source can't hold up the whole fan-out's result.
+private const val SOURCE_FETCH_TIMEOUT_MS = 15_000L
 
 @OptIn(FlowPreview::class)
 @HiltViewModel
 class CatalogViewModel @Inject constructor(
     private val sourceRepository: SourceRepository,
-    private val bootstrapper: ScriptedSourceBootstrapper,
-    private val stremioBootstrapper: StremioAddonBootstrapper,
+    private val sourceBootstrapper: SourceBootstrapper,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CatalogUiState())
@@ -83,8 +84,9 @@ class CatalogViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            bootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic)
-            stremioBootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic)
+            // Shared, once-per-process rehydrate of persisted scripted + Stremio sources — no longer
+            // duplicated against HomeViewModel's own bootstrap.
+            sourceBootstrapper.ensureStarted()
             // Only start reacting to searches once bootstrapping has registered every persisted
             // source, so the very first catalog load can't race a still-loading source.
             queryFlow.debounce(SEARCH_DEBOUNCE_MS).collect { query -> startSearch(query) }
@@ -229,7 +231,12 @@ class CatalogViewModel @Inject constructor(
             async {
                 val page = nextPageBySource[source.id] ?: 1
                 runCatching {
-                    val result = if (query.isBlank() && filters.isEmpty()) source.getPopular(page) else source.search(query, filters, page)
+                    // Bound each source so one hung endpoint can't stall the whole fan-out — a
+                    // timed-out source is treated as a failed fetch (surfaced in the error banner),
+                    // not left blocking the others.
+                    val result = withTimeoutOrNull(SOURCE_FETCH_TIMEOUT_MS) {
+                        if (query.isBlank() && filters.isEmpty()) source.getPopular(page) else source.search(query, filters, page)
+                    } ?: return@async SourceFetch(source.id, emptyList(), hasNextPage = false, failed = true)
                     SourceFetch(source.id, result.items.map { CatalogEntry(source.id, it) }, result.hasNextPage)
                 }.getOrElse { error ->
                     // Don't swallow cancellation — a newer search cancels this fan-out, and eating

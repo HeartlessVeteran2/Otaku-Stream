@@ -5,8 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.otakustream.core.database.library.LibraryRepository
 import com.otakustream.core.database.library.WatchHistoryEntry
 import com.otakustream.core.sources.api.VideoSource
-import com.otakustream.core.sources.scripting.ScriptedSourceBootstrapper
-import com.otakustream.core.sources.stremio.StremioAddonBootstrapper
+import com.otakustream.feature.sources.SourceBootstrapper
 import com.otakustream.feature.sources.SourceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -22,10 +21,13 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 private const val RAIL_ITEM_CAP = 20
 private const val CONTINUE_WATCHING_CAP = 10
+// Soft cap per source per rail so one slow source can't hold up the whole home fan-out.
+private const val RAIL_FETCH_TIMEOUT_MS = 15_000L
 
 data class HomeUiState(
     val popular: List<CatalogEntry> = emptyList(),
@@ -43,8 +45,7 @@ data class HomeUiState(
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val sourceRepository: SourceRepository,
-    private val bootstrapper: ScriptedSourceBootstrapper,
-    private val stremioBootstrapper: StremioAddonBootstrapper,
+    private val sourceBootstrapper: SourceBootstrapper,
     libraryRepository: LibraryRepository,
 ) : ViewModel() {
 
@@ -59,13 +60,11 @@ class HomeViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            // A failed bootstrap (corrupt persisted source, I/O error) must not kill this
-            // coroutine before observeSources() collection starts — that would leave the home
-            // stuck loading forever.
-            runCatching { bootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic) }
-                .onFailure { if (it is CancellationException) throw it }
-            runCatching { stremioBootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic) }
-                .onFailure { if (it is CancellationException) throw it }
+            // Shared, once-per-process rehydrate of persisted sources (dedup with CatalogViewModel).
+            // A failed bootstrap (corrupt persisted source, I/O error) must not kill this coroutine
+            // before observeSources() collection starts — that would leave the home stuck loading
+            // forever — so SourceBootstrapper guards each rehydrate internally.
+            sourceBootstrapper.ensureStarted()
             // React to every registration change (bootstrap above, addon install/removal later)
             // so a newly installed add-on populates the home without a restart.
             sourceRepository.observeSources().collectLatest { sources ->

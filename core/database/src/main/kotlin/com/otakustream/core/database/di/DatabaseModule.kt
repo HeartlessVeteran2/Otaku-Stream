@@ -3,6 +3,7 @@ package com.otakustream.core.database.di
 import android.content.Context
 import androidx.room.Room
 import com.otakustream.core.database.AppDatabase
+import com.otakustream.core.database.MIGRATION_6_7
 import com.otakustream.core.database.library.LibraryDao
 import com.otakustream.core.database.library.LibraryRepository
 import com.otakustream.core.database.library.LibraryRepositoryImpl
@@ -42,6 +43,7 @@ object DatabaseProvidesModule {
             // fails fast instead of silently wiping the user's library, addons, and tokens.
             // Schema JSONs under core/database/schemas are the baseline migrations are
             // authored against.
+            .addMigrations(MIGRATION_6_7)
             .fallbackToDestructiveMigrationOnDowngrade(true)
             .build()
 
