@@ -33,6 +33,7 @@ import com.otakustream.core.database.skip.SkipSegment
 import com.otakustream.core.database.skip.SkipSegmentRepository
 import com.otakustream.core.database.skip.SkipSegmentType
 import com.otakustream.core.sources.api.PendingPlayback
+import com.otakustream.core.sources.api.PlaybackCompletion
 import com.otakustream.core.sources.api.PlaybackQueue
 import com.otakustream.core.sources.api.SkipMark
 import kotlinx.coroutines.CancellationException
@@ -196,9 +197,21 @@ class PlayerController @Inject constructor(
     private fun startPositionTicker() {
         scope.launch {
             while (isActive) {
+                if (!player.isPlaying) {
+                    // Idle (paused / ended / nothing loaded): keep the scrubber position roughly
+                    // current so a paused seek still shows, but back off the cadence and skip the
+                    // auto-skip scan + progress persist — this loop lives for the whole app process,
+                    // so it should do almost nothing while playback isn't advancing.
+                    _uiState.value = _uiState.value.copy(
+                        positionMs = player.currentPosition.coerceAtLeast(0L),
+                        durationMs = player.duration.coerceAtLeast(0L),
+                    )
+                    delay(1_000)
+                    continue
+                }
                 val position = player.currentPosition.coerceAtLeast(0L)
                 val active = currentSegments.firstOrNull { position in it.startMs until it.endMs }
-                if (active != null && _uiState.value.autoSkipEnabled && player.isPlaying) {
+                if (active != null && _uiState.value.autoSkipEnabled) {
                     // Auto-skip jumps past the segment instead of surfacing the manual button.
                     seekTo(active.endMs)
                     _uiState.value = _uiState.value.copy(
@@ -229,6 +242,14 @@ class PlayerController @Inject constructor(
         scope.launch {
             if (duration > 0 && positionMs >= duration * FINISHED_THRESHOLD_FRACTION) {
                 progressRepository.clear(url)
+                // Episode genuinely watched to the end — hand off to whoever registered a
+                // completion handler (feature:sources syncs AniList progress here, never at
+                // play-start). takeHandler pops it so it fires at most once per play.
+                PlaybackCompletion.takeHandler(url)?.let { onFinished ->
+                    runCatching { onFinished() }.exceptionOrNull()?.let { e ->
+                        if (e is CancellationException) throw e
+                    }
+                }
             } else {
                 progressRepository.save(url, positionMs, duration)
             }
@@ -238,7 +259,16 @@ class PlayerController @Inject constructor(
     fun play(url: String, startPositionMs: Long? = null) {
         currentMediaUrl = url
         pendingSegmentStartMs = null
-        _uiState.value = _uiState.value.copy(isMarkingSegment = false)
+        // Clear per-video state carried over from the previous playback: a stale "Playback failed"
+        // overlay must not sit over the next (working) episode, and the stats overlay must not show
+        // the previous video's dropped-frame count / codec / bitrate until a new format arrives.
+        _uiState.value = _uiState.value.copy(
+            isMarkingSegment = false,
+            error = null,
+            droppedFrameCount = 0,
+            codecName = null,
+            videoBitrateBps = 0,
+        )
 
         // Reset skip state for the new media before either source repopulates it.
         manualSegments = emptyList()

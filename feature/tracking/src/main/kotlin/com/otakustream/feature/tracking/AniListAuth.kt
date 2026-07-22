@@ -1,5 +1,7 @@
 package com.otakustream.feature.tracking
 
+import java.net.URLEncoder
+
 // In-app AniList sign-in uses OAuth's implicit grant: the authorize page redirects back to
 // REDIRECT_URI with the access token in the URL fragment, which MainActivity captures.
 //
@@ -15,6 +17,11 @@ object AniListAuth {
     val isConfigured: Boolean
         get() = CLIENT_ID.isNotBlank() && CLIENT_ID != "YOUR_ANILIST_CLIENT_ID"
 
-    fun authorizeUrl(): String =
-        "https://anilist.co/api/v2/oauth/authorize?client_id=$CLIENT_ID&response_type=token"
+    // Send redirect_uri explicitly: AniList only defaults it when exactly one URI is registered on
+    // the client, so an app registered with more than one would otherwise fail the round-trip.
+    fun authorizeUrl(): String {
+        val redirect = URLEncoder.encode(REDIRECT_URI, "UTF-8")
+        return "https://anilist.co/api/v2/oauth/authorize" +
+            "?client_id=$CLIENT_ID&response_type=token&redirect_uri=$redirect"
+    }
 }
