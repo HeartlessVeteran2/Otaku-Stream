@@ -10,6 +10,7 @@ import javax.inject.Inject
 interface TrackingRepository {
     suspend fun getLink(mediaUrl: String): TrackerLink?
     fun observeLink(mediaUrl: String): Flow<TrackerLink?>
+    suspend fun getLinkByTrackerId(trackerMediaId: Long): TrackerLink?
     suspend fun saveLink(link: TrackerLink)
     suspend fun removeLink(mediaUrl: String)
 
@@ -25,6 +26,8 @@ class TrackingRepositoryImpl @Inject constructor(
 ) : TrackingRepository {
     override suspend fun getLink(mediaUrl: String): TrackerLink? = dao.getLink(mediaUrl)
     override fun observeLink(mediaUrl: String): Flow<TrackerLink?> = dao.observeLink(mediaUrl)
+    override suspend fun getLinkByTrackerId(trackerMediaId: Long): TrackerLink? =
+        dao.getLinkByTrackerId(trackerMediaId)
     override suspend fun saveLink(link: TrackerLink) = dao.upsertLink(link)
     override suspend fun removeLink(mediaUrl: String) = dao.deleteLink(mediaUrl)
 

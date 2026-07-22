@@ -13,6 +13,11 @@ interface TrackingDao {
     @Query("SELECT * FROM tracker_links WHERE mediaUrl = :mediaUrl")
     fun observeLink(mediaUrl: String): Flow<TrackerLink?>
 
+    // Reverse lookup: the source mapping remembered for an AniList media id. Most recent-ish by
+    // rowid; there's normally only one.
+    @Query("SELECT * FROM tracker_links WHERE trackerMediaId = :trackerMediaId ORDER BY rowid DESC LIMIT 1")
+    suspend fun getLinkByTrackerId(trackerMediaId: Long): TrackerLink?
+
     @Upsert
     suspend fun upsertLink(link: TrackerLink)
 

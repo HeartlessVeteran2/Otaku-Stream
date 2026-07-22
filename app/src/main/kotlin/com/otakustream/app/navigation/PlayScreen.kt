@@ -15,8 +15,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -46,6 +48,7 @@ fun PlayScreen(
     onBrowseAddons: () -> Unit,
     onMediaClick: (sourceId: Long, mediaUrl: String, title: String) -> Unit,
     onAniListClick: (mediaId: Long, title: String) -> Unit,
+    onAniListSearch: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -67,6 +70,11 @@ fun PlayScreen(
         topBar = {
             TopAppBar(
                 title = { Text("OTAKU STREAM") },
+                actions = {
+                    IconButton(onClick = onAniListSearch) {
+                        Icon(Icons.Filled.Search, contentDescription = "Search AniList")
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
