@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Anime streaming sources, Stremio add-on manifests, and the extracted video/subtitle
+  URLs they return are frequently served over plain http (mirrors, self-hosted add-ons,
+  CDN edge nodes without TLS). targetSdk 28+ blocks cleartext by default, which made
+  those sources and streams silently fail. Permit cleartext so real sources work; TLS is
+  still used wherever the source provides it.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

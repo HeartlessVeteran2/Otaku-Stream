@@ -30,6 +30,7 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.rhino)
     implementation(libs.okhttp)
+    implementation(libs.okhttp.urlconnection)
 
     implementation(libs.hilt.android)
     kapt(libs.hilt.compiler)
