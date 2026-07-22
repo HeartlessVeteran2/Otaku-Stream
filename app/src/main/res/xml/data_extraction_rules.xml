@@ -8,8 +8,10 @@
 <data-extraction-rules>
     <cloud-backup>
         <exclude domain="sharedpref" path="otaku_secure_prefs.xml" />
+        <exclude domain="sharedpref" path="stremio_account_prefs.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="otaku_secure_prefs.xml" />
+        <exclude domain="sharedpref" path="stremio_account_prefs.xml" />
     </device-transfer>
 </data-extraction-rules>
