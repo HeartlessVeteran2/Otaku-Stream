@@ -30,6 +30,8 @@ import androidx.navigation.navArgument
 import com.otakustream.core.player.ui.PlayerScreen
 import com.otakustream.feature.library.LibraryScreen
 import com.otakustream.feature.sources.ui.AniListDetailScreen
+import com.otakustream.feature.sources.ui.AniListSearchScreen
+import com.otakustream.feature.sources.ui.AniListWatchScreen
 import com.otakustream.feature.sources.ui.BrowseSourceCatalogScreen
 import com.otakustream.feature.sources.ui.BrowseStremioAddonsScreen
 import com.otakustream.feature.sources.ui.CatalogScreen
@@ -54,6 +56,8 @@ private const val ROUTE_ANYMEX_EXTENSIONS = "anymex-extensions"
 private const val ROUTE_ANYMEX_EXTENSION_PREFS = "anymex-extension-prefs/{sourceId}"
 private const val ROUTE_DETAILS = "details/{sourceId}?mediaUrl={mediaUrl}&title={title}"
 private const val ROUTE_ANILIST_DETAILS = "anilist/{mediaId}"
+private const val ROUTE_ANILIST_WATCH = "anilist-watch/{mediaId}?title={title}"
+private const val ROUTE_ANILIST_SEARCH = "anilist-search"
 private const val ROUTE_PLAYER = "player?videoUrl={videoUrl}"
 
 private data class BottomTab(val route: String, val label: String, val icon: @Composable () -> Unit)
@@ -138,6 +142,7 @@ fun AppNavHost(
                     onBrowseAddons = { navController.navigate(ROUTE_BROWSE_STREMIO) },
                     onMediaClick = { sourceId, mediaUrl, title -> navController.navigateToDetails(sourceId, mediaUrl, title) },
                     onAniListClick = { mediaId, _ -> navController.navigate("anilist/$mediaId") },
+                    onAniListSearch = { navController.navigate(ROUTE_ANILIST_SEARCH) },
                 )
             }
             composable(ROUTE_CATALOG) {
@@ -240,6 +245,40 @@ fun AppNavHost(
                 arguments = listOf(navArgument("mediaId") { type = NavType.LongType }),
             ) {
                 AniListDetailScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenAniList = { mediaId, _ -> navController.navigate("anilist/$mediaId") },
+                    onWatch = { mediaId, title ->
+                        navController.navigate("anilist-watch/$mediaId?title=${Uri.encode(title)}")
+                    },
+                )
+            }
+            composable(
+                ROUTE_ANILIST_WATCH,
+                arguments = listOf(
+                    navArgument("mediaId") { type = NavType.LongType },
+                    navArgument("title") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = ""
+                    },
+                ),
+            ) {
+                AniListWatchScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenSource = { sourceId, mediaUrl, title ->
+                        // Replace the bridge in the back stack so returning from the source detail
+                        // lands back on the AniList detail (and the bridge doesn't re-resolve the
+                        // now-saved link into an immediate re-navigation loop).
+                        navController.navigate(
+                            "details/$sourceId?mediaUrl=${Uri.encode(mediaUrl)}&title=${Uri.encode(title)}",
+                        ) {
+                            popUpTo(ROUTE_ANILIST_WATCH) { inclusive = true }
+                        }
+                    },
+                )
+            }
+            composable(ROUTE_ANILIST_SEARCH) {
+                AniListSearchScreen(
                     onBack = { navController.popBackStack() },
                     onOpenAniList = { mediaId, _ -> navController.navigate("anilist/$mediaId") },
                 )

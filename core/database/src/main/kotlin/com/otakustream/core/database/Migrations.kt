@@ -34,3 +34,11 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
         )
     }
 }
+
+// v8 → v9: add tracker_links.sourceId so an AniList entry can remember which installed source it was
+// watched from (0 = unknown for pre-existing rows). Must match TrackerLink's generated column exactly.
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `tracker_links` ADD COLUMN `sourceId` INTEGER NOT NULL DEFAULT 0")
+    }
+}

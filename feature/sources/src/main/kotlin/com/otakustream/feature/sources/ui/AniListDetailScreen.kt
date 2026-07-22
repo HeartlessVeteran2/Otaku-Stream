@@ -57,6 +57,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 fun AniListDetailScreen(
     onBack: () -> Unit,
     onOpenAniList: (mediaId: Long, title: String) -> Unit,
+    onWatch: (mediaId: Long, title: String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: AniListDetailViewModel = hiltViewModel(),
 ) {
@@ -90,6 +91,7 @@ fun AniListDetailScreen(
                 uiState.media != null -> DetailContent(
                     uiState = uiState,
                     onOpenAniList = onOpenAniList,
+                    onWatch = onWatch,
                     onSetStatus = viewModel::setStatus,
                     onSetScore = viewModel::setScore,
                     onSetProgress = viewModel::setProgress,
@@ -103,6 +105,7 @@ fun AniListDetailScreen(
 private fun DetailContent(
     uiState: AniListDetailUiState,
     onOpenAniList: (Long, String) -> Unit,
+    onWatch: (Long, String) -> Unit,
     onSetStatus: (String) -> Unit,
     onSetScore: (Double) -> Unit,
     onSetProgress: (Int) -> Unit,
@@ -152,11 +155,10 @@ private fun DetailContent(
         // Watch is wired up in Phase 6 (cross-source match + play). Shown disabled so the intended
         // flow is visible without promising behavior that isn't built yet.
         Button(
-            onClick = {},
-            enabled = false,
+            onClick = { onWatch(media.id, media.displayTitle) },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         ) {
-            Text("Watch (coming soon)")
+            Text("Watch")
         }
 
         // Your-list controls (signed in) or a prompt to connect AniList (signed out).
