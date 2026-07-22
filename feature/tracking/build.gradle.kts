@@ -43,4 +43,8 @@ dependencies {
     implementation(libs.hilt.android)
     implementation(libs.hilt.navigation.compose)
     kapt(libs.hilt.compiler)
+
+    testImplementation(libs.junit)
+    // Real org.json for JVM unit tests (the android.jar stub throws "not mocked").
+    testImplementation(libs.json)
 }
