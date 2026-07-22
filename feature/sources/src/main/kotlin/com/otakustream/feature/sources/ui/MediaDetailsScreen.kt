@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -58,6 +59,7 @@ fun MediaDetailsScreen(
     mediaUrl: String,
     mediaTitle: String,
     onPlayVideo: (videoUrl: String) -> Unit,
+    onOpenTracking: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: MediaDetailsViewModel = hiltViewModel(),
 ) {
@@ -132,13 +134,9 @@ fun MediaDetailsScreen(
             } ?: if (hasTrackerToken) {
                 TextButton(onClick = { showLinkDialog = true }) { Text("Link to AniList") }
             } else {
-                // Not signed in — a link dialog would only fail, so point at Settings instead.
-                Text(
-                    text = "Sign in to AniList in Settings to track this show.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
+                // Not signed in — a link dialog would only fail, so make this a tappable shortcut
+                // straight to AniList sign-in instead of plain text telling the user to hunt for it.
+                TextButton(onClick = onOpenTracking) { Text("Sign in to AniList to track this show") }
             }
 
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
@@ -241,6 +239,10 @@ fun MediaDetailsScreen(
             LazyColumn(modifier = Modifier.padding(top = 16.dp)) {
                 items(visibleEpisodes, key = { it.url }) { episode ->
                     val watched = episode.url in watchedEpisodeUrls
+                    val resolving = episode.url == uiState.resolvingEpisodeUrl
+                    // While any episode is resolving, block taps so a second tap can't start a
+                    // competing resolve (or re-trigger the one in flight).
+                    val rowEnabled = uiState.resolvingEpisodeUrl == null
                     ListItem(
                         headlineContent = {
                             Text(
@@ -253,18 +255,29 @@ fun MediaDetailsScreen(
                                 },
                             )
                         },
-                        trailingContent = if (watched) {
-                            {
-                                Icon(
-                                    imageVector = Icons.Filled.CheckCircle,
-                                    contentDescription = "Watched",
-                                    tint = MaterialTheme.colorScheme.tertiary,
-                                )
+                        trailingContent = when {
+                            resolving -> {
+                                {
+                                    CircularProgressIndicator(
+                                        strokeWidth = 2.dp,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
                             }
-                        } else {
-                            null
+                            watched -> {
+                                {
+                                    Icon(
+                                        imageVector = Icons.Filled.CheckCircle,
+                                        contentDescription = "Watched",
+                                        tint = MaterialTheme.colorScheme.tertiary,
+                                    )
+                                }
+                            }
+                            else -> null
                         },
-                        modifier = Modifier.clickable { viewModel.playEpisode(sourceId, episode) },
+                        modifier = Modifier.clickable(enabled = rowEnabled) {
+                            viewModel.playEpisode(sourceId, episode)
+                        },
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 }
