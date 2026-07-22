@@ -32,21 +32,54 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.database.library.DIRECT_PLAY_SOURCE_ID
 import com.otakustream.core.database.library.WatchHistoryEntry
+import com.otakustream.feature.tracking.AniListListEntry
+import com.otakustream.feature.tracking.AniListMedia
 
-// The Stremio-style content home rendered on the Play tab: Continue Watching plus Popular and
-// Latest rails fanned out across every enabled source.
+// The Stremio-style content home rendered on the Play tab. AniList discovery rails lead (Trending,
+// This Season, All-Time Popular — no login needed), AnymeX-style; below them sit Continue Watching
+// and the Popular/Latest rails fanned out across every installed source.
 @Composable
 fun HomeContent(
     onMediaClick: (sourceId: Long, mediaUrl: String, title: String) -> Unit,
     onPlayDirect: (url: String) -> Unit,
     onBrowseAddons: () -> Unit,
+    onAniListClick: (mediaId: Long, title: String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel(),
+    aniListViewModel: AniListHomeViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val continueWatching by viewModel.continueWatching.collectAsState()
+    val aniListState by aniListViewModel.uiState.collectAsState()
 
     Column(modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        // ---- AniList discovery (works logged-out) ----
+        if (aniListState.continueWatching.isNotEmpty()) {
+            RailHeader("Continue watching on AniList")
+            AniListEntryRail(aniListState.continueWatching, onAniListClick)
+        }
+        if (aniListState.trending.isNotEmpty()) {
+            RailHeader("Trending now")
+            AniListMediaRail(aniListState.trending, onAniListClick)
+        }
+        if (aniListState.thisSeason.isNotEmpty()) {
+            RailHeader("Popular this season")
+            AniListMediaRail(aniListState.thisSeason, onAniListClick)
+        }
+        if (aniListState.allTimePopular.isNotEmpty()) {
+            RailHeader("All-time popular")
+            AniListMediaRail(aniListState.allTimePopular, onAniListClick)
+        }
+        if (aniListState.isLoading && !aniListState.hasLoadedOnce) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.fillMaxWidth().padding(24.dp),
+            ) {
+                CircularProgressIndicator(color = MaterialTheme.colorScheme.tertiary)
+            }
+        }
+
+        // ---- Local history + source-based rails ----
         if (continueWatching.isNotEmpty()) {
             RailHeader("Continue watching")
             LazyRow {
@@ -109,6 +142,35 @@ private fun RailHeader(title: String) {
         style = MaterialTheme.typography.titleMedium,
         modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 8.dp),
     )
+}
+
+@Composable
+private fun AniListMediaRail(media: List<AniListMedia>, onAniListClick: (Long, String) -> Unit) {
+    LazyRow {
+        items(media, key = { "al-${it.id}" }) { item ->
+            AniListPosterTile(
+                title = item.displayTitle,
+                coverUrl = item.coverImageUrl,
+                subtitle = null,
+                onClick = { onAniListClick(item.id, item.displayTitle) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun AniListEntryRail(entries: List<AniListListEntry>, onAniListClick: (Long, String) -> Unit) {
+    LazyRow {
+        items(entries, key = { "ale-${it.media.id}" }) { entry ->
+            val total = entry.media.episodes
+            AniListPosterTile(
+                title = entry.media.displayTitle,
+                coverUrl = entry.media.coverImageUrl,
+                subtitle = if (total != null) "Ep ${entry.progress}/$total" else "Ep ${entry.progress}",
+                onClick = { onAniListClick(entry.media.id, entry.media.displayTitle) },
+            )
+        }
+    }
 }
 
 @Composable
