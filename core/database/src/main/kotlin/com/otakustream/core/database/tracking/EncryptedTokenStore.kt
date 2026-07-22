@@ -5,9 +5,13 @@ import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -37,8 +41,23 @@ class EncryptedTokenStore @Inject constructor(
         }.getOrNull()
     }
 
-    private val _token = MutableStateFlow(runCatching { prefs?.getString(KEY_TOKEN, null) }.getOrNull())
+    // Starts null and loads asynchronously: `prefs` (lazy) forces EncryptedSharedPreferences.create,
+    // which derives the Keystore master key and reads a file — that must not run on the main thread
+    // while Hilt builds this singleton. Observers treat null as "signed out", so a brief
+    // signed-out→signed-in flip on cold start is acceptable.
+    private val _token = MutableStateFlow<String?>(null)
     val token: StateFlow<String?> = _token.asStateFlow()
+
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        ioScope.launch {
+            val saved = runCatching { prefs?.getString(KEY_TOKEN, null) }.getOrNull() ?: return@launch
+            // compareAndSet so a token saved between construction and this load completing (a
+            // sign-in racing cold start) isn't clobbered by the stale disk value.
+            _token.compareAndSet(null, saved)
+        }
+    }
 
     fun current(): String? = _token.value
 

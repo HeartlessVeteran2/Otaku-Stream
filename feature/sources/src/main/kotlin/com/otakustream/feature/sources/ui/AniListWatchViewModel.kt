@@ -65,7 +65,10 @@ class AniListWatchViewModel @Inject constructor(
             // Persisted sources may not be registered yet when arriving here from an AniList screen.
             sourceBootstrapper.ensureStarted()
             // If a source was already chosen for this AniList id, skip the search and reopen it.
-            val existing = trackingRepository.getLinkByTrackerId(mediaId)
+            // Guard on mediaId > 0: a missing/mistyped nav arg reads back as 0L, which could match
+            // a stray legacy TrackerLink whose trackerMediaId is 0 and mis-open the wrong source —
+            // fall back to the title search instead.
+            val existing = if (mediaId > 0L) trackingRepository.getLinkByTrackerId(mediaId) else null
             if (existing != null && existing.sourceId != 0L &&
                 sourceRepository.getSource(existing.sourceId) != null
             ) {

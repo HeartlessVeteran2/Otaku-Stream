@@ -11,6 +11,7 @@ import com.otakustream.core.sources.api.Episode
 import com.otakustream.core.sources.api.MediaDetails
 import com.otakustream.core.sources.api.MediaItem
 import com.otakustream.core.sources.api.PendingPlayback
+import com.otakustream.core.sources.api.PlaybackCompletion
 import com.otakustream.core.sources.api.PlaybackQueue
 import com.otakustream.core.sources.api.SkipMark
 import com.otakustream.core.sources.api.Video
@@ -196,7 +197,8 @@ class MediaDetailsViewModel @Inject constructor(
         PendingPlayback.stash(video, skipLookup = buildSkipLookup(episode))
         PlaybackQueue.setNextResolver { resolveNextVideo(sourceId, episode) }
         _uiState.value = _uiState.value.copy(resolvedVideoUrl = video.url, error = null)
-        recordWatchAndSync(episode)
+        recordLocalWatch(episode)
+        registerAniListSync(video.url, episode)
     }
 
     // For AniList-linked shows, hand the player a closure that resolves AniSkip intro/outro/recap
@@ -237,11 +239,18 @@ class MediaDetailsViewModel @Inject constructor(
         val source = sourceRepository.getSource(sourceId) ?: return null
         val video = source.getVideoList(next).firstOrNull() ?: return null
         PlaybackQueue.setNextResolver { resolveNextVideo(sourceId, next) }
-        recordWatchAndSync(next)
+        // Local history at resolve time (so Continue Watching / episode checkmarks update as
+        // auto-play advances); the AniList sync waits for the player to report this episode
+        // finished — it must never fire the instant the next stream merely resolves.
+        recordLocalWatch(next)
+        registerAniListSync(video.url, next)
         return video
     }
 
-    private fun recordWatchAndSync(episode: Episode) {
+    // Records the episode in local watch history at play-start — this is what drives Continue
+    // Watching and the episode-row checkmarks, so it stays eager. The AniList sync is separate
+    // (registerAniListSync) and deliberately deferred to episode completion.
+    private fun recordLocalWatch(episode: Episode) {
         val mediaUrl = currentMediaUrl.value ?: return
         viewModelScope.launch {
             libraryRepository.recordWatch(
@@ -256,7 +265,18 @@ class MediaDetailsViewModel @Inject constructor(
                     coverUrl = _uiState.value.details?.media?.coverUrl,
                 ),
             )
-            trackingManager.onEpisodeWatched(mediaUrl, episode.episodeNumber)
+        }
+    }
+
+    // Defers the AniList progress push to when the player reports the stream watched to the end
+    // (PlaybackCompletion), instead of firing at play-start. Captures only the singleton manager
+    // and the primitives it needs — never `this` — so the app-scoped registry can't leak the VM.
+    private fun registerAniListSync(videoUrl: String, episode: Episode) {
+        val mediaUrl = currentMediaUrl.value ?: return
+        val manager = trackingManager
+        val episodeNumber = episode.episodeNumber
+        PlaybackCompletion.register(videoUrl) {
+            manager.onEpisodeWatched(mediaUrl, episodeNumber)
         }
     }
 

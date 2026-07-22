@@ -84,6 +84,12 @@ class AniListDetailViewModel @Inject constructor(
     }
 
     fun load() {
+        // A missing/mistyped nav arg reads back as 0L; fail clearly instead of round-tripping to
+        // AniList for Media(id: 0).
+        if (mediaId <= 0L) {
+            _uiState.value = _uiState.value.copy(isLoading = false, error = "Couldn't open this title.")
+            return
+        }
         _uiState.value = _uiState.value.copy(isLoading = true, error = null)
         viewModelScope.launch {
             runCatching { aniListClient.fetchMediaDetail(mediaId) }

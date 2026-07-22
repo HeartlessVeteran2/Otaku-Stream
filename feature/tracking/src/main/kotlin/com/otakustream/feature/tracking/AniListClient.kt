@@ -45,7 +45,7 @@ class AniListClient @Inject constructor(
             .put("page", page)
             .put("season", season)
             .put("seasonYear", year)
-        parsePage(execute(query, variables, token = null).getJSONObject("Page"))
+        parsePage(execute(query, variables, token = null).requireField("Page"))
     }
 
     suspend fun search(query: String, page: Int = 1): AniListPage = withContext(Dispatchers.IO) {
@@ -60,7 +60,7 @@ class AniListClient @Inject constructor(
             }
         """.trimIndent()
         val variables = JSONObject().put("search", query).put("page", page)
-        parsePage(execute(gql, variables, token = null).getJSONObject("Page"))
+        parsePage(execute(gql, variables, token = null).requireField("Page"))
     }
 
     // Full detail incl. relations + recommendations for the AniList detail screen.
@@ -83,7 +83,7 @@ class AniListClient @Inject constructor(
               }
             }
         """.trimIndent()
-        parseMedia(execute(gql, JSONObject().put("id", id), token = null).getJSONObject("Media"))
+        parseMedia(execute(gql, JSONObject().put("id", id), token = null).requireField("Media"))
     }
 
     private suspend fun fetchPageSortedBy(sort: String, page: Int): AniListPage =
@@ -98,7 +98,7 @@ class AniListClient @Inject constructor(
                   }
                 }
             """.trimIndent()
-            parsePage(execute(gql, JSONObject().put("page", page), token = null).getJSONObject("Page"))
+            parsePage(execute(gql, JSONObject().put("page", page), token = null).requireField("Page"))
         }
 
     // ---- Personal library + writes (authenticated) ----
@@ -114,7 +114,7 @@ class AniListClient @Inject constructor(
                   }
                 }
             """.trimIndent()
-            parseViewerEntry(execute(gql, JSONObject().put("id", mediaId), token).getJSONObject("Media"))
+            parseViewerEntry(execute(gql, JSONObject().put("id", mediaId), token).requireField("Media"))
         }
 
     suspend fun fetchViewer(token: String): AniListViewer = withContext(Dispatchers.IO) {
@@ -123,7 +123,7 @@ class AniListClient @Inject constructor(
               Viewer { id name avatar { large } }
             }
         """.trimIndent()
-        parseViewer(execute(gql, JSONObject(), token).getJSONObject("Viewer"))
+        parseViewer(execute(gql, JSONObject(), token).requireField("Viewer"))
     }
 
     // The signed-in user's anime lists (Watching/Planning/Completed/…) with their per-entry
@@ -147,7 +147,7 @@ class AniListClient @Inject constructor(
             """.trimIndent()
             parseListCollection(
                 execute(gql, JSONObject().put("userId", userId), token)
-                    .getJSONObject("MediaListCollection"),
+                    .requireField("MediaListCollection"),
             )
         }
 
@@ -196,20 +196,19 @@ class AniListClient @Inject constructor(
     private val malIdCache = ConcurrentHashMap<Long, Long>()
 
     suspend fun getMalId(aniListId: Long): Long? = withContext(Dispatchers.IO) {
-        malIdCache[aniListId]?.let { return@withContext it }
+        // 0L is the "known to have no MAL id" sentinel: cache negatives too so a show without a MAL
+        // id doesn't re-hit the network on every AniSkip attempt (only transient errors — which
+        // throw before we reach the cache write — are retried).
+        malIdCache[aniListId]?.let { return@withContext it.takeIf { cached -> cached > 0 } }
         val gql = """
             query (${'$'}id: Int) {
               Media(id: ${'$'}id, type: ANIME) { idMal }
             }
         """.trimIndent()
         val data = execute(gql, JSONObject().put("id", aniListId), token = null)
-        data.optJSONObject("Media")?.optInt("idMal", 0)?.toLong()?.takeIf { it > 0 }
-            ?.also { malIdCache[aniListId] = it }
-    }
-
-    // Sets the entry to CURRENT with the given progress (creates it if absent).
-    suspend fun saveProgress(token: String, mediaId: Long, progress: Int) {
-        saveMediaListEntry(token, mediaId, status = "CURRENT", progress = progress)
+        val malId = data.optJSONObject("Media")?.optInt("idMal", 0)?.toLong()?.takeIf { it > 0 }
+        malIdCache[aniListId] = malId ?: 0L
+        malId
     }
 
     private fun execute(query: String, variables: JSONObject, token: String?): JSONObject {
@@ -226,13 +225,24 @@ class AniListClient @Inject constructor(
                 val message = runCatching { parseErrorMessage(JSONObject(text)) }.getOrNull()
                 error(message ?: "AniList request failed: HTTP ${response.code}")
             }
-            val root = JSONObject(text)
+            // A 200 can still carry a non-JSON body (captive portal / Cloudflare HTML) — parse
+            // defensively and surface the HTTP context rather than throwing a raw JSONException.
+            val root = runCatching { JSONObject(text) }.getOrElse {
+                error("AniList returned an unexpected response (HTTP ${response.code}).")
+            }
             if (root.has("errors")) {
                 error(parseErrorMessage(root) ?: "AniList request failed")
             }
-            return root.getJSONObject("data")
+            return root.optJSONObject("data")
+                ?: error("AniList returned no data (HTTP ${response.code}).")
         }
     }
+
+    // Pulls a required top-level field out of a GraphQL `data` object with a clean message when it
+    // is absent/null (e.g. Media(id) for a removed anime returns `Media: null`), instead of the
+    // opaque JSONException that getJSONObject throws.
+    private fun JSONObject.requireField(name: String): JSONObject =
+        optJSONObject(name) ?: error("AniList response was missing \"$name\".")
 
     private fun parseErrorMessage(root: JSONObject): String? =
         root.optJSONArray("errors")?.optJSONObject(0)?.let { if (it.isNull("message")) null else it.optString("message") }

@@ -44,11 +44,15 @@ object DatabaseProvidesModule {
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, "otaku_stream.db")
-            // Destructive only on downgrade — an upgrade without an explicit Migration now
-            // fails fast instead of silently wiping the user's library, addons, and tokens.
-            // Schema JSONs under core/database/schemas are the baseline migrations are
-            // authored against.
+            // Explicit migrations preserve the user's library, addons, and tokens across upgrades;
+            // an upgrade with a missing path still fails fast (never a silent wipe). Schema JSONs
+            // under core/database/schemas are the baseline migrations are authored against.
             .addMigrations(MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+            // Pre-6 builds shipped before schemas were exported, so no authored migration exists to
+            // reach them. Rather than crash those users on update ("migration from N to 9 required
+            // but not found"), wipe *only* when coming from those specific old versions; 6→9 keeps
+            // real migrations and any future gap still fails fast.
+            .fallbackToDestructiveMigrationFrom(1, 2, 3, 4, 5)
             .fallbackToDestructiveMigrationOnDowngrade(true)
             .build()
 
