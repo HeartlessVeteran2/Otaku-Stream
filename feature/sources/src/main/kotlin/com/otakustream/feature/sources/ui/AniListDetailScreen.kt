@@ -18,13 +18,20 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -32,13 +39,15 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.otakustream.feature.tracking.AniListMedia
 
 // AniList anime detail. Phase 3 renders read-only metadata; the list controls and a working Watch
 // action arrive in later phases. Kept intentionally simple so it's a real, tappable payoff for the
@@ -78,14 +87,27 @@ fun AniListDetailScreen(
                         TextButton(onClick = viewModel::load) { Text("Retry") }
                     }
                 }
-                uiState.media != null -> DetailContent(uiState.media!!, onOpenAniList)
+                uiState.media != null -> DetailContent(
+                    uiState = uiState,
+                    onOpenAniList = onOpenAniList,
+                    onSetStatus = viewModel::setStatus,
+                    onSetScore = viewModel::setScore,
+                    onSetProgress = viewModel::setProgress,
+                )
             }
         }
     }
 }
 
 @Composable
-private fun DetailContent(media: AniListMedia, onOpenAniList: (Long, String) -> Unit) {
+private fun DetailContent(
+    uiState: AniListDetailUiState,
+    onOpenAniList: (Long, String) -> Unit,
+    onSetStatus: (String) -> Unit,
+    onSetScore: (Double) -> Unit,
+    onSetProgress: (Int) -> Unit,
+) {
+    val media = uiState.media ?: return
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         if (media.bannerImageUrl != null) {
             CoverImage(
@@ -137,6 +159,23 @@ private fun DetailContent(media: AniListMedia, onOpenAniList: (Long, String) -> 
             Text("Watch (coming soon)")
         }
 
+        // Your-list controls (signed in) or a prompt to connect AniList (signed out).
+        if (uiState.isSignedIn) {
+            ListControls(
+                uiState = uiState,
+                onSetStatus = onSetStatus,
+                onSetScore = onSetScore,
+                onSetProgress = onSetProgress,
+            )
+        } else {
+            Text(
+                text = "Connect AniList in Settings to track your progress and score.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
+
         if (media.genres.isNotEmpty()) {
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -186,6 +225,85 @@ private fun DetailContent(media: AniListMedia, onOpenAniList: (Long, String) -> 
         }
 
         Spacer(modifier = Modifier.height(24.dp))
+    }
+}
+
+@Composable
+private fun ListControls(
+    uiState: AniListDetailUiState,
+    onSetStatus: (String) -> Unit,
+    onSetScore: (Double) -> Unit,
+    onSetProgress: (Int) -> Unit,
+) {
+    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("Your list", style = MaterialTheme.typography.titleSmall)
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Status dropdown
+            var statusExpanded by remember { mutableStateOf(false) }
+            Box {
+                OutlinedButton(onClick = { statusExpanded = true }, enabled = !uiState.isSaving) {
+                    Text(aniListStatusLabel(uiState.listStatus))
+                    Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+                }
+                DropdownMenu(expanded = statusExpanded, onDismissRequest = { statusExpanded = false }) {
+                    ANILIST_STATUSES.forEach { status ->
+                        DropdownMenuItem(
+                            text = { Text(aniListStatusLabel(status)) },
+                            onClick = {
+                                statusExpanded = false
+                                onSetStatus(status)
+                            },
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Progress stepper
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Episode", modifier = Modifier.weight(1f))
+                IconButton(
+                    onClick = { onSetProgress(uiState.listProgress - 1) },
+                    enabled = !uiState.isSaving && uiState.listProgress > 0,
+                ) { Icon(Icons.Filled.Remove, contentDescription = "One fewer episode") }
+                Text(
+                    text = uiState.media?.episodes?.let { "${uiState.listProgress} / $it" }
+                        ?: "${uiState.listProgress}",
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                IconButton(
+                    onClick = { onSetProgress(uiState.listProgress + 1) },
+                    enabled = !uiState.isSaving,
+                ) { Icon(Icons.Filled.Add, contentDescription = "One more episode") }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Score stepper (AniList POINT_10 scale)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Score", modifier = Modifier.weight(1f))
+                IconButton(
+                    onClick = { onSetScore((uiState.listScore ?: 0.0) - 1.0) },
+                    enabled = !uiState.isSaving && (uiState.listScore ?: 0.0) > 0.0,
+                ) { Icon(Icons.Filled.Remove, contentDescription = "Lower score") }
+                Text(
+                    text = uiState.listScore?.let { "${it.toInt()} / 10" } ?: "–",
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                IconButton(
+                    onClick = { onSetScore((uiState.listScore ?: 0.0) + 1.0) },
+                    enabled = !uiState.isSaving && (uiState.listScore ?: 0.0) < 10.0,
+                ) { Icon(Icons.Filled.Add, contentDescription = "Raise score") }
+            }
+
+            if (uiState.saveError != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(uiState.saveError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
+        }
     }
 }
 

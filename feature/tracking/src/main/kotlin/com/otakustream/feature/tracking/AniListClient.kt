@@ -103,6 +103,20 @@ class AniListClient @Inject constructor(
 
     // ---- Personal library + writes (authenticated) ----
 
+    // The signed-in viewer's own entry for one anime (to pre-fill the detail list controls).
+    // Returns null when the anime isn't on any of their lists.
+    suspend fun fetchViewerListEntry(token: String, mediaId: Long): AniListViewerEntry? =
+        withContext(Dispatchers.IO) {
+            val gql = """
+                query (${'$'}id: Int) {
+                  Media(id: ${'$'}id, type: ANIME) {
+                    mediaListEntry { status score(format: POINT_10_DECIMAL) progress }
+                  }
+                }
+            """.trimIndent()
+            parseViewerEntry(execute(gql, JSONObject().put("id", mediaId), token).getJSONObject("Media"))
+        }
+
     suspend fun fetchViewer(token: String): AniListViewer = withContext(Dispatchers.IO) {
         val gql = """
             query {
