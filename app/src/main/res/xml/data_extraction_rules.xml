@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ (API 31+) backup/transfer rules. The AniList access token lives in the
+  Keystore-backed "otaku_secure_prefs" file; its encryption key is in the Android Keystore and is
+  never backed up, so a restored copy on another device could not be decrypted anyway. Exclude it
+  from both cloud backup and device-to-device transfer so no bearer credential leaves the device.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="otaku_secure_prefs.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="otaku_secure_prefs.xml" />
+    </device-transfer>
+</data-extraction-rules>

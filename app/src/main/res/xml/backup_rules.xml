@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Legacy auto-backup rules for Android 11 and below (fullBackupContent). Excludes the
+  Keystore-backed secure preferences that hold the AniList access token from cloud backup, matching
+  data_extraction_rules.xml used on API 31+.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="otaku_secure_prefs.xml" />
+</full-backup-content>
