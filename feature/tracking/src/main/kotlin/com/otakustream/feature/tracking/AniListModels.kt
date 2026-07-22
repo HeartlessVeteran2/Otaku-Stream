@@ -58,6 +58,14 @@ data class AniListPage(
     val hasNextPage: Boolean,
 )
 
+// The signed-in viewer's own list entry for a single media (status/score/progress). Null when the
+// anime isn't on any of their lists yet.
+data class AniListViewerEntry(
+    val status: String?,
+    val score: Double?,
+    val progress: Int,
+)
+
 // The signed-in AniList account (for the profile header + resolving the user's own lists).
 data class AniListViewer(
     val id: Long,
@@ -153,6 +161,15 @@ internal fun parseListCollection(collection: JSONObject): List<AniListListEntry>
         }
     }
     return entries
+}
+
+internal fun parseViewerEntry(media: JSONObject): AniListViewerEntry? {
+    val entry = media.optJSONObject("mediaListEntry") ?: return null
+    return AniListViewerEntry(
+        status = entry.stringOrNull("status"),
+        score = entry.optDouble("score", 0.0).takeIf { it > 0.0 },
+        progress = entry.optInt("progress", 0),
+    )
 }
 
 internal fun parseViewer(viewer: JSONObject): AniListViewer = AniListViewer(
