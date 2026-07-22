@@ -105,8 +105,23 @@ fun PlayerScreen(
     }
     var showGestureCoach by remember { mutableStateOf(!viewModel.hasSeenGestureCoach) }
 
+    // Android 13+ needs a runtime grant before the media-playback notification can show. Ask once
+    // when playback first starts; playback itself never waits on the result.
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { /* granted or not, playback proceeds — the notification simply won't show if denied */ }
+
     LaunchedEffect(videoUrl) {
         viewModel.play(videoUrl)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            val alreadyGranted = androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!alreadyGranted) {
+                notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
