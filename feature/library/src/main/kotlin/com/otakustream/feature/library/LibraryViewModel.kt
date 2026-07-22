@@ -40,6 +40,10 @@ class LibraryViewModel @Inject constructor(
         viewModelScope.launch { libraryRepository.remove(mediaUrl) }
     }
 
+    fun setStatus(mediaUrl: String, status: String) {
+        viewModelScope.launch { libraryRepository.setStatus(mediaUrl, status) }
+    }
+
     fun clearHistory() {
         viewModelScope.launch { libraryRepository.clearHistory() }
     }

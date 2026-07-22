@@ -2,6 +2,8 @@ package com.otakustream.feature.sources.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.otakustream.core.database.library.LibraryEntry
+import com.otakustream.core.database.library.LibraryRepository
 import com.otakustream.core.sources.api.MediaItem
 import com.otakustream.core.sources.api.SourceFilter
 import com.otakustream.core.sources.api.VideoSource
@@ -54,6 +56,9 @@ data class CatalogUiState(
     // How many sources failed on the last fetch (network down, dead addon). Surfaced as a
     // dismissible "some sources couldn't load" banner rather than silently dropping their results.
     val failedSourceCount: Int = 0,
+    // mediaUrls currently in the library, so each poster can show a filled/empty save bookmark and
+    // toggle it without leaving the grid.
+    val savedMediaUrls: Set<String> = emptySet(),
 )
 
 private data class SourceFetch(
@@ -73,6 +78,7 @@ private const val SOURCE_FETCH_TIMEOUT_MS = 15_000L
 class CatalogViewModel @Inject constructor(
     private val sourceRepository: SourceRepository,
     private val sourceBootstrapper: SourceBootstrapper,
+    private val libraryRepository: LibraryRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CatalogUiState())
@@ -110,6 +116,32 @@ class CatalogViewModel @Inject constructor(
                 if (prevSelected != null && selected == null) {
                     startSearch(_uiState.value.query)
                 }
+            }
+        }
+        // Keep the per-poster save state in sync with the library.
+        viewModelScope.launch {
+            libraryRepository.observeLibrary().collect { entries ->
+                _uiState.value = _uiState.value.copy(savedMediaUrls = entries.map { it.mediaUrl }.toSet())
+            }
+        }
+    }
+
+    // Toggle a catalog result in/out of the library straight from the grid, so titles can be saved
+    // while browsing without opening each one's details page.
+    fun toggleSave(entry: CatalogEntry) {
+        viewModelScope.launch {
+            if (entry.media.url in _uiState.value.savedMediaUrls) {
+                libraryRepository.remove(entry.media.url)
+            } else {
+                libraryRepository.add(
+                    LibraryEntry(
+                        mediaUrl = entry.media.url,
+                        sourceId = entry.sourceId,
+                        title = entry.media.title,
+                        coverUrl = entry.media.coverUrl,
+                        addedAtEpochMs = System.currentTimeMillis(),
+                    ),
+                )
             }
         }
     }

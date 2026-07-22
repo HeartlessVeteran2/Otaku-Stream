@@ -69,6 +69,11 @@ class MediaDetailsViewModel @Inject constructor(
         .flatMapLatest { url -> if (url == null) flowOf(false) else libraryRepository.observeInLibrary(url) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
+    // The saved title's watch status (null when not in the library), driving the status selector.
+    val libraryStatus: StateFlow<String?> = currentMediaUrl
+        .flatMapLatest { url -> if (url == null) flowOf(null) else libraryRepository.observeStatus(url) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
     // Episodes the user has started (recordWatch fires at play start) — drives the checkmarks
     // on episode rows. Reactive, so returning from playback updates the list with no extra wiring.
     val watchedEpisodeUrls: StateFlow<Set<String>> = currentMediaUrl
@@ -142,6 +147,11 @@ class MediaDetailsViewModel @Inject constructor(
         val url = currentMediaUrl.value ?: return
         loadedFor = null
         load(currentSourceId, url, currentTitle)
+    }
+
+    fun setLibraryStatus(status: String) {
+        val mediaUrl = currentMediaUrl.value ?: return
+        viewModelScope.launch { libraryRepository.setStatus(mediaUrl, status) }
     }
 
     fun toggleWatchlist() {
