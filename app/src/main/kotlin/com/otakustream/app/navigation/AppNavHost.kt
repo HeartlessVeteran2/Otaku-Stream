@@ -42,6 +42,7 @@ import com.otakustream.feature.sources.ui.MangayomiPreferencesScreen
 import com.otakustream.feature.sources.ui.ManageSourcesScreen
 import com.otakustream.feature.sources.ui.ManageStremioSourcesScreen
 import com.otakustream.feature.sources.ui.MediaDetailsScreen
+import com.otakustream.feature.sources.ui.StremioAccountScreen
 import com.otakustream.feature.tracking.TrackingSettingsScreen
 
 private const val ROUTE_PLAY = "play"
@@ -51,6 +52,7 @@ private const val ROUTE_SETTINGS = "settings"
 private const val ROUTE_MANAGE_SOURCES = "manage-sources"
 private const val ROUTE_TRACKING_SETTINGS = "tracking-settings"
 private const val ROUTE_MANAGE_STREMIO = "manage-stremio"
+private const val ROUTE_STREMIO_ACCOUNT = "stremio-account"
 private const val ROUTE_MANAGE_STREMIO_PATTERN = "manage-stremio?installUrl={installUrl}"
 private const val ROUTE_BROWSE_STREMIO = "browse-stremio"
 private const val ROUTE_BROWSE_SOURCE_CATALOG = "browse-source-catalog"
@@ -165,6 +167,7 @@ fun AppNavHost(
                     onManageSourcesClick = { navController.navigate(ROUTE_MANAGE_SOURCES) },
                     onTrackingClick = { navController.navigate(ROUTE_TRACKING_SETTINGS) },
                     onManageStremioClick = { navController.navigate(ROUTE_MANAGE_STREMIO) },
+                    onStremioAccountClick = { navController.navigate(ROUTE_STREMIO_ACCOUNT) },
                     onAnymexExtensionsClick = { navController.navigate(ROUTE_ANYMEX_EXTENSIONS) },
                 )
             }
@@ -214,6 +217,9 @@ fun AppNavHost(
             }
             composable(ROUTE_BROWSE_STREMIO) {
                 BrowseStremioAddonsScreen()
+            }
+            composable(ROUTE_STREMIO_ACCOUNT) {
+                StremioAccountScreen(onBack = { navController.popBackStack() })
             }
             composable(
                 ROUTE_DETAILS,
@@ -318,6 +324,7 @@ private fun SettingsScreen(
     onManageSourcesClick: () -> Unit,
     onTrackingClick: () -> Unit,
     onManageStremioClick: () -> Unit,
+    onStremioAccountClick: () -> Unit,
     onAnymexExtensionsClick: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
@@ -325,6 +332,11 @@ private fun SettingsScreen(
             headlineContent = { Text("Add-ons") },
             supportingContent = { Text("Install add-ons that fill your catalog") },
             modifier = Modifier.clickable(onClick = onManageStremioClick),
+        )
+        ListItem(
+            headlineContent = { Text("Stremio account") },
+            supportingContent = { Text("Sign in to sync your Stremio library") },
+            modifier = Modifier.clickable(onClick = onStremioAccountClick),
         )
         ListItem(
             headlineContent = { Text("AnymeX extensions") },

@@ -6,4 +6,5 @@
 -->
 <full-backup-content>
     <exclude domain="sharedpref" path="otaku_secure_prefs.xml" />
+    <exclude domain="sharedpref" path="stremio_account_prefs.xml" />
 </full-backup-content>
