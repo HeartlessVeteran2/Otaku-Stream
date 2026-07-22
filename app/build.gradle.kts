@@ -14,13 +14,41 @@ android {
         applicationId = "com.otakustream.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
+        versionCode = 2
         versionName = "0.1.0"
+    }
+
+    signingConfigs {
+        create("release") {
+            // Sourced from Gradle properties or env vars so release signing keys never live in the
+            // repo. When unset (local/CI without secrets), the release build falls back to the debug
+            // key below so assembleRelease still produces an installable, signed APK.
+            val storeFilePath = providers.gradleProperty("RELEASE_STORE_FILE").orNull
+                ?: System.getenv("RELEASE_STORE_FILE")
+            if (storeFilePath != null) {
+                storeFile = file(storeFilePath)
+                storePassword = providers.gradleProperty("RELEASE_STORE_PASSWORD").orNull
+                    ?: System.getenv("RELEASE_STORE_PASSWORD")
+                keyAlias = providers.gradleProperty("RELEASE_KEY_ALIAS").orNull
+                    ?: System.getenv("RELEASE_KEY_ALIAS")
+                keyPassword = providers.gradleProperty("RELEASE_KEY_PASSWORD").orNull
+                    ?: System.getenv("RELEASE_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
+            // Minification stays off until there are enough tests to catch R8 stripping something
+            // the JS runtimes reach reflectively; proguard-rules.pro stages the keep rules for then.
             isMinifyEnabled = false
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            val releaseSigning = signingConfigs.getByName("release")
+            signingConfig = if (releaseSigning.storeFile != null) {
+                releaseSigning
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 
