@@ -36,6 +36,7 @@ import com.otakustream.feature.sources.ui.AniListWatchScreen
 import com.otakustream.feature.sources.ui.BrowseSourceCatalogScreen
 import com.otakustream.feature.sources.ui.BrowseStremioAddonsScreen
 import com.otakustream.feature.sources.ui.CatalogScreen
+import com.otakustream.feature.sources.ui.CloudflareSettingRow
 import com.otakustream.feature.sources.ui.MangayomiExtensionsScreen
 import com.otakustream.feature.sources.ui.MangayomiPreferencesScreen
 import com.otakustream.feature.sources.ui.ManageSourcesScreen
@@ -340,5 +341,6 @@ private fun SettingsScreen(
             supportingContent = { Text("Advanced: add script-based video sources") },
             modifier = Modifier.clickable(onClick = onManageSourcesClick),
         )
+        CloudflareSettingRow()
     }
 }
