@@ -29,6 +29,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.otakustream.core.player.ui.PlayerScreen
 import com.otakustream.feature.library.LibraryScreen
+import com.otakustream.feature.sources.ui.AniListDetailScreen
 import com.otakustream.feature.sources.ui.BrowseSourceCatalogScreen
 import com.otakustream.feature.sources.ui.BrowseStremioAddonsScreen
 import com.otakustream.feature.sources.ui.CatalogScreen
@@ -52,6 +53,7 @@ private const val ROUTE_BROWSE_SOURCE_CATALOG = "browse-source-catalog"
 private const val ROUTE_ANYMEX_EXTENSIONS = "anymex-extensions"
 private const val ROUTE_ANYMEX_EXTENSION_PREFS = "anymex-extension-prefs/{sourceId}"
 private const val ROUTE_DETAILS = "details/{sourceId}?mediaUrl={mediaUrl}&title={title}"
+private const val ROUTE_ANILIST_DETAILS = "anilist/{mediaId}"
 private const val ROUTE_PLAYER = "player?videoUrl={videoUrl}"
 
 private data class BottomTab(val route: String, val label: String, val icon: @Composable () -> Unit)
@@ -135,6 +137,7 @@ fun AppNavHost(
                     onPlayVideo = { url -> navController.navigate("player?videoUrl=${Uri.encode(url)}") },
                     onBrowseAddons = { navController.navigate(ROUTE_BROWSE_STREMIO) },
                     onMediaClick = { sourceId, mediaUrl, title -> navController.navigateToDetails(sourceId, mediaUrl, title) },
+                    onAniListClick = { mediaId, _ -> navController.navigate("anilist/$mediaId") },
                 )
             }
             composable(ROUTE_CATALOG) {
@@ -230,6 +233,15 @@ fun AppNavHost(
                     mediaUrl = args?.getString("mediaUrl").orEmpty(),
                     mediaTitle = args?.getString("title").orEmpty(),
                     onPlayVideo = { videoUrl -> navController.navigate("player?videoUrl=${Uri.encode(videoUrl)}") },
+                )
+            }
+            composable(
+                ROUTE_ANILIST_DETAILS,
+                arguments = listOf(navArgument("mediaId") { type = NavType.LongType }),
+            ) {
+                AniListDetailScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenAniList = { mediaId, _ -> navController.navigate("anilist/$mediaId") },
                 )
             }
             composable(

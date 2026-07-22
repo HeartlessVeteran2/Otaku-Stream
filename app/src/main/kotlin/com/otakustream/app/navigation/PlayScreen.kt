@@ -45,6 +45,7 @@ fun PlayScreen(
     onPlayVideo: (String) -> Unit,
     onBrowseAddons: () -> Unit,
     onMediaClick: (sourceId: Long, mediaUrl: String, title: String) -> Unit,
+    onAniListClick: (mediaId: Long, title: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -99,6 +100,7 @@ fun PlayScreen(
                 onMediaClick = onMediaClick,
                 onPlayDirect = onPlayVideo,
                 onBrowseAddons = onBrowseAddons,
+                onAniListClick = onAniListClick,
             )
         }
     }
