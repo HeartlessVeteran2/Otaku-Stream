@@ -1,8 +1,12 @@
 package com.otakustream.core.sources.scripting.di
 
+import android.content.Context
+import com.otakustream.core.sources.scripting.net.CloudflareInterceptor
+import com.otakustream.core.sources.scripting.net.CloudflareSettings
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import okhttp3.Interceptor
 import okhttp3.JavaNetCookieJar
@@ -24,7 +28,10 @@ object ScriptingModule {
     // to the stock OkHttp UA, and streams often gate on cookies set during the same session.
     @Provides
     @Singleton
-    fun provideOkHttpClient(): OkHttpClient {
+    fun provideOkHttpClient(
+        @ApplicationContext context: Context,
+        cloudflareSettings: CloudflareSettings,
+    ): OkHttpClient {
         // Keep cookies across requests within the app session (Cloudflare clearance, PHPSESSID,
         // etc.). ACCEPT_ALL because these are third-party streaming hosts, not our own domain.
         val cookieManager = CookieManager().apply { setCookiePolicy(CookiePolicy.ACCEPT_ALL) }
@@ -32,8 +39,14 @@ object ScriptingModule {
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
             .writeTimeout(20, TimeUnit.SECONDS)
-            .callTimeout(30, TimeUnit.SECONDS)
+            // Longer overall budget than the WebView challenge timeout so a bypass has room to run.
+            .callTimeout(60, TimeUnit.SECONDS)
             .cookieJar(JavaNetCookieJar(cookieManager))
+            // Cloudflare interceptor is outermost so its retry re-runs the UA interceptor below it,
+            // and the retried request lands in the same cookie jar the WebView solve populated.
+            .addInterceptor(
+                CloudflareInterceptor(context, cookieManager, DESKTOP_USER_AGENT, cloudflareSettings),
+            )
             .addInterceptor(UserAgentInterceptor(DESKTOP_USER_AGENT))
             .build()
     }
