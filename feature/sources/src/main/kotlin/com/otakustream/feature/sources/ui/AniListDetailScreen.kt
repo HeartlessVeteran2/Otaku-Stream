@@ -58,6 +58,7 @@ fun AniListDetailScreen(
     onBack: () -> Unit,
     onOpenAniList: (mediaId: Long, title: String) -> Unit,
     onWatch: (mediaId: Long, title: String) -> Unit,
+    onOpenTracking: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: AniListDetailViewModel = hiltViewModel(),
 ) {
@@ -92,6 +93,7 @@ fun AniListDetailScreen(
                     uiState = uiState,
                     onOpenAniList = onOpenAniList,
                     onWatch = onWatch,
+                    onOpenTracking = onOpenTracking,
                     onSetStatus = viewModel::setStatus,
                     onSetScore = viewModel::setScore,
                     onSetProgress = viewModel::setProgress,
@@ -106,6 +108,7 @@ private fun DetailContent(
     uiState: AniListDetailUiState,
     onOpenAniList: (Long, String) -> Unit,
     onWatch: (Long, String) -> Unit,
+    onOpenTracking: () -> Unit,
     onSetStatus: (String) -> Unit,
     onSetScore: (Double) -> Unit,
     onSetProgress: (Int) -> Unit,
@@ -170,12 +173,12 @@ private fun DetailContent(
                 onSetProgress = onSetProgress,
             )
         } else {
-            Text(
-                text = "Connect AniList in Settings to track your progress and score.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            )
+            TextButton(
+                onClick = onOpenTracking,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            ) {
+                Text("Sign in to AniList to track your progress and score")
+            }
         }
 
         if (media.genres.isNotEmpty()) {

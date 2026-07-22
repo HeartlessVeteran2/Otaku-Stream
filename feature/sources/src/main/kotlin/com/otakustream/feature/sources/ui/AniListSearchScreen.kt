@@ -71,6 +71,12 @@ fun AniListSearchScreen(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier.fillMaxSize().padding(32.dp),
                 ) { Text(uiState.error!!, color = MaterialTheme.colorScheme.error) }
+                uiState.results.isEmpty() && uiState.query.isBlank() -> CenterMessage(
+                    "Search for an anime to get started.",
+                )
+                uiState.results.isEmpty() -> CenterMessage(
+                    "No results for “${uiState.query}”. Try another spelling.",
+                )
                 else -> LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 110.dp),
                     modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
@@ -86,5 +92,16 @@ fun AniListSearchScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun CenterMessage(text: String) {
+    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize().padding(32.dp)) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }

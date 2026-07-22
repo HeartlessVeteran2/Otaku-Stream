@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -36,6 +37,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 @Composable
 fun AniListWatchScreen(
     onBack: () -> Unit,
+    onBrowseAddons: () -> Unit,
     onOpenSource: (sourceId: Long, mediaUrl: String, title: String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: AniListWatchViewModel = hiltViewModel(),
@@ -74,13 +76,20 @@ fun AniListWatchScreen(
             )
 
             when {
-                uiState.hasNoSources -> CenterText(
-                    "No sources installed yet. Add an add-on or extension to watch from AniList.",
+                uiState.hasNoSources -> EmptyState(
+                    icon = Icons.Filled.Extension,
+                    title = "No sources installed",
+                    message = "Install an add-on or extension, then come back to watch this from AniList.",
+                    actionLabel = "Browse add-ons",
+                    onAction = onBrowseAddons,
                 )
                 uiState.isSearching -> Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier.fillMaxWidth().padding(32.dp),
                 ) { CircularProgressIndicator() }
+                uiState.query.isBlank() -> CenterText(
+                    "Type a title above to find it in your installed sources.",
+                )
                 uiState.groups.isEmpty() -> CenterText(
                     "No matches. Try a different spelling or the romaji title.",
                 )

@@ -16,8 +16,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Extension
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -78,6 +80,13 @@ fun HomeContent(
                 CircularProgressIndicator(color = MaterialTheme.colorScheme.tertiary)
             }
         }
+        // AniList discovery couldn't load and there's nothing to show — surface it with a Retry
+        // instead of leaving the top of the Play tab silently blank.
+        val aniListRailsEmpty = aniListState.trending.isEmpty() && aniListState.thisSeason.isEmpty() &&
+            aniListState.allTimePopular.isEmpty() && aniListState.continueWatching.isEmpty()
+        if (aniListState.error != null && aniListRailsEmpty && !aniListState.isLoading) {
+            AniListRailsError(onRetry = aniListViewModel::refresh)
+        }
 
         // ---- Local history + source-based rails ----
         if (continueWatching.isNotEmpty()) {
@@ -132,6 +141,22 @@ fun HomeContent(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun AniListRailsError(onRetry: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth().padding(24.dp),
+    ) {
+        Text(
+            text = "Couldn't load AniList. Check your connection.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        OutlinedButton(onClick = onRetry) { Text("Retry") }
     }
 }
 

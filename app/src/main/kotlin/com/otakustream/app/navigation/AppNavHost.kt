@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -60,13 +61,13 @@ private const val ROUTE_ANILIST_WATCH = "anilist-watch/{mediaId}?title={title}"
 private const val ROUTE_ANILIST_SEARCH = "anilist-search"
 private const val ROUTE_PLAYER = "player?videoUrl={videoUrl}"
 
-private data class BottomTab(val route: String, val label: String, val icon: @Composable () -> Unit)
+private data class BottomTab(val route: String, val label: String, val icon: ImageVector)
 
 private val bottomTabs = listOf(
-    BottomTab(ROUTE_PLAY, "Play") { Icon(Icons.Filled.PlayCircle, contentDescription = null) },
-    BottomTab(ROUTE_CATALOG, "Catalog") { Icon(Icons.Filled.Home, contentDescription = null) },
-    BottomTab(ROUTE_LIBRARY, "Library") { Icon(Icons.Filled.VideoLibrary, contentDescription = null) },
-    BottomTab(ROUTE_SETTINGS, "Settings") { Icon(Icons.Filled.Settings, contentDescription = null) },
+    BottomTab(ROUTE_PLAY, "Play", Icons.Filled.PlayCircle),
+    BottomTab(ROUTE_CATALOG, "Catalog", Icons.Filled.Home),
+    BottomTab(ROUTE_LIBRARY, "Library", Icons.Filled.VideoLibrary),
+    BottomTab(ROUTE_SETTINGS, "Settings", Icons.Filled.Settings),
 )
 
 @Composable
@@ -123,7 +124,7 @@ fun AppNavHost(
                                     restoreState = true
                                 }
                             },
-                            icon = tab.icon,
+                            icon = { Icon(tab.icon, contentDescription = tab.label) },
                             label = { Text(tab.label) },
                         )
                     }
@@ -238,6 +239,7 @@ fun AppNavHost(
                     mediaUrl = args?.getString("mediaUrl").orEmpty(),
                     mediaTitle = args?.getString("title").orEmpty(),
                     onPlayVideo = { videoUrl -> navController.navigate("player?videoUrl=${Uri.encode(videoUrl)}") },
+                    onOpenTracking = { navController.navigate(ROUTE_TRACKING_SETTINGS) },
                 )
             }
             composable(
@@ -250,6 +252,7 @@ fun AppNavHost(
                     onWatch = { mediaId, title ->
                         navController.navigate("anilist-watch/$mediaId?title=${Uri.encode(title)}")
                     },
+                    onOpenTracking = { navController.navigate(ROUTE_TRACKING_SETTINGS) },
                 )
             }
             composable(
@@ -265,6 +268,7 @@ fun AppNavHost(
             ) {
                 AniListWatchScreen(
                     onBack = { navController.popBackStack() },
+                    onBrowseAddons = { navController.navigate(ROUTE_BROWSE_STREMIO) },
                     onOpenSource = { sourceId, mediaUrl, title ->
                         // Replace the bridge in the back stack so returning from the source detail
                         // lands back on the AniList detail (and the bridge doesn't re-resolve the
@@ -295,7 +299,10 @@ fun AppNavHost(
             ) { entry ->
                 // Navigation Compose already URL-decodes query-string arguments — see the note above.
                 val videoUrl = entry.arguments?.getString("videoUrl").orEmpty()
-                PlayerScreen(videoUrl = videoUrl)
+                PlayerScreen(
+                    videoUrl = videoUrl,
+                    onBack = { navController.popBackStack() },
+                )
             }
         }
     }

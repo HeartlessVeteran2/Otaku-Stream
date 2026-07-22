@@ -42,6 +42,9 @@ data class MediaDetailsUiState(
     val error: String? = null,
     val pendingVideoChoices: List<Video> = emptyList(),
     val pendingEpisode: Episode? = null,
+    // The episode whose stream is currently being resolved (getVideoList in flight) — drives the
+    // per-row spinner so a tap gives immediate feedback instead of feeling dead for a few seconds.
+    val resolvingEpisodeUrl: String? = null,
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -163,19 +166,32 @@ class MediaDetailsViewModel @Inject constructor(
     fun playEpisode(sourceId: Long, episode: Episode) {
         val source = sourceRepository.getSource(sourceId) ?: return
         playJob?.cancel()
+        // Immediate feedback: mark this episode as resolving so its row shows a spinner while the
+        // (network) getVideoList runs, instead of looking like the tap did nothing.
+        _uiState.value = _uiState.value.copy(resolvingEpisodeUrl = episode.url, error = null)
         playJob = viewModelScope.launch {
             runCatching { source.getVideoList(episode) }
                 .onSuccess { videos ->
                     when {
                         videos.isEmpty() ->
-                            _uiState.value = _uiState.value.copy(error = "No playable stream was found for this episode.")
+                            _uiState.value = _uiState.value.copy(
+                                error = "No playable stream was found for this episode.",
+                                resolvingEpisodeUrl = null,
+                            )
                         videos.size == 1 -> playVideo(sourceId, episode, videos.first())
-                        else -> _uiState.value = _uiState.value.copy(pendingVideoChoices = videos, pendingEpisode = episode)
+                        else -> _uiState.value = _uiState.value.copy(
+                            pendingVideoChoices = videos,
+                            pendingEpisode = episode,
+                            resolvingEpisodeUrl = null,
+                        )
                     }
                 }
                 .onFailure { error ->
                     if (error is CancellationException) throw error
-                    _uiState.value = _uiState.value.copy(error = "Something went wrong starting playback. Please try again.")
+                    _uiState.value = _uiState.value.copy(
+                        error = "Something went wrong starting playback. Please try again.",
+                        resolvingEpisodeUrl = null,
+                    )
                 }
         }
     }
@@ -196,7 +212,7 @@ class MediaDetailsViewModel @Inject constructor(
     private fun playVideo(sourceId: Long, episode: Episode, video: Video) {
         PendingPlayback.stash(video, skipLookup = buildSkipLookup(episode))
         PlaybackQueue.setNextResolver { resolveNextVideo(sourceId, episode) }
-        _uiState.value = _uiState.value.copy(resolvedVideoUrl = video.url, error = null)
+        _uiState.value = _uiState.value.copy(resolvedVideoUrl = video.url, error = null, resolvingEpisodeUrl = null)
         recordLocalWatch(episode)
         registerAniListSync(video.url, episode)
     }
