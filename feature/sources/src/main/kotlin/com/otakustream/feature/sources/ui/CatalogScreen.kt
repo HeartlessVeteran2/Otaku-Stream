@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -37,9 +38,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -195,6 +198,8 @@ fun CatalogScreen(
                                 // Only badge the source when browsing All — in a scoped view the
                                 // picker already shows which source you're in.
                                 sourceName = if (uiState.selectedSourceId == null) uiState.sourceNames[entry.sourceId] else null,
+                                saved = entry.media.url in uiState.savedMediaUrls,
+                                onToggleSave = { viewModel.toggleSave(entry) },
                                 onClick = { onMediaClick(entry.sourceId, entry.media.url, entry.media.title) },
                             )
                         }
@@ -267,7 +272,14 @@ private fun FilterChooserChip(
 }
 
 @Composable
-private fun MediaCard(title: String, coverUrl: String?, sourceName: String?, onClick: () -> Unit) {
+private fun MediaCard(
+    title: String,
+    coverUrl: String?,
+    sourceName: String?,
+    saved: Boolean,
+    onToggleSave: () -> Unit,
+    onClick: () -> Unit,
+) {
     val shape = MaterialTheme.shapes.medium
     Box(
         modifier = Modifier
@@ -283,6 +295,21 @@ private fun MediaCard(title: String, coverUrl: String?, sourceName: String?, onC
             contentDescription = title,
             modifier = Modifier.fillMaxSize(),
         )
+        // Quick save/remove without opening the details page; the filled bookmark is the confirmation.
+        Surface(
+            color = MaterialTheme.colorScheme.background.copy(alpha = 0.5f),
+            shape = MaterialTheme.shapes.small,
+            modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
+        ) {
+            IconButton(onClick = onToggleSave, modifier = Modifier.size(32.dp)) {
+                Icon(
+                    imageVector = if (saved) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                    contentDescription = if (saved) "Remove from library" else "Save to library",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
         sourceName?.let { name ->
             Surface(
                 color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.85f),

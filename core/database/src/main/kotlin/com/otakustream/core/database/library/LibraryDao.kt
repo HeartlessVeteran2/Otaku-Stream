@@ -14,6 +14,15 @@ interface LibraryDao {
     @Query("SELECT EXISTS(SELECT 1 FROM library_entries WHERE mediaUrl = :mediaUrl)")
     fun observeInLibrary(mediaUrl: String): Flow<Boolean>
 
+    @Query("SELECT status FROM library_entries WHERE mediaUrl = :mediaUrl")
+    fun observeStatus(mediaUrl: String): Flow<String?>
+
+    @Query("SELECT status FROM library_entries WHERE mediaUrl = :mediaUrl")
+    suspend fun getStatus(mediaUrl: String): String?
+
+    @Query("UPDATE library_entries SET status = :status WHERE mediaUrl = :mediaUrl")
+    suspend fun setStatus(mediaUrl: String, status: String)
+
     @Upsert
     suspend fun upsert(entry: LibraryEntry)
 

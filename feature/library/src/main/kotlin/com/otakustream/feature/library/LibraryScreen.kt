@@ -13,9 +13,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -29,6 +31,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -44,6 +47,9 @@ import coil.decode.VideoFrameDecoder
 import coil.request.ImageRequest
 import coil.request.videoFrameMillis
 import com.otakustream.core.database.library.DIRECT_PLAY_SOURCE_ID
+import com.otakustream.core.database.library.LIBRARY_STATUS_COMPLETED
+import com.otakustream.core.database.library.LIBRARY_STATUS_PLANNED
+import com.otakustream.core.database.library.LIBRARY_STATUS_WATCHING
 import com.otakustream.core.database.library.WatchHistoryEntry
 import com.otakustream.core.sources.api.PendingPlayback
 import com.otakustream.core.sources.api.Video
@@ -84,6 +90,13 @@ fun LibraryScreen(
     }
 }
 
+// Watchlist status buckets, in the order they're shown.
+private val LIBRARY_STATUS_SECTIONS = listOf(
+    LIBRARY_STATUS_WATCHING to "Watching",
+    LIBRARY_STATUS_PLANNED to "Plan to watch",
+    LIBRARY_STATUS_COMPLETED to "Completed",
+)
+
 @Composable
 private fun WatchlistTab(
     uiState: LibraryUiState,
@@ -104,41 +117,93 @@ private fun WatchlistTab(
             }
         }
 
-        item {
-            Text(
-                text = "Watchlist",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(16.dp),
-            )
-        }
         if (uiState.watchlist.isEmpty()) {
             item {
                 Text(
-                    text = "Nothing saved yet — add something from its details page.",
+                    text = "Watchlist",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(16.dp),
+                )
+            }
+            item {
+                Text(
+                    text = "Nothing saved yet — tap the bookmark on a title, or on a catalog poster.",
                     style = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.padding(horizontal = 16.dp),
                 )
             }
         }
-        items(uiState.watchlist, key = { it.mediaUrl }) { entry ->
-            ListItem(
-                headlineContent = { Text(entry.title) },
-                leadingContent = {
-                    CoverImage(
-                        url = entry.coverUrl,
-                        contentDescription = entry.title,
-                        modifier = Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)),
+
+        // One section per non-empty status bucket. Unmigrated rows (status not one of the known
+        // values) fall back into "Plan to watch" so nothing is ever hidden.
+        val byStatus = uiState.watchlist.groupBy { entry ->
+            if (LIBRARY_STATUS_SECTIONS.any { it.first == entry.status }) entry.status else LIBRARY_STATUS_PLANNED
+        }
+        LIBRARY_STATUS_SECTIONS.forEach { (status, label) ->
+            val entries = byStatus[status].orEmpty()
+            if (entries.isNotEmpty()) {
+                item(key = "hdr-$status") {
+                    Text(
+                        text = label,
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(16.dp),
                     )
-                },
-                trailingContent = {
-                    IconButton(onClick = { viewModel.removeFromWatchlist(entry.mediaUrl) }) {
-                        Icon(Icons.Filled.Delete, contentDescription = "Remove")
-                    }
-                },
-                modifier = Modifier.clickable { onMediaClick(entry.sourceId, entry.mediaUrl, entry.title) },
-            )
+                }
+                items(entries, key = { it.mediaUrl }) { entry ->
+                    WatchlistRow(
+                        title = entry.title,
+                        coverUrl = entry.coverUrl,
+                        currentStatus = entry.status,
+                        onSetStatus = { viewModel.setStatus(entry.mediaUrl, it) },
+                        onRemove = { viewModel.removeFromWatchlist(entry.mediaUrl) },
+                        onClick = { onMediaClick(entry.sourceId, entry.mediaUrl, entry.title) },
+                    )
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun WatchlistRow(
+    title: String,
+    coverUrl: String?,
+    currentStatus: String,
+    onSetStatus: (String) -> Unit,
+    onRemove: () -> Unit,
+    onClick: () -> Unit,
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    ListItem(
+        headlineContent = { Text(title) },
+        leadingContent = {
+            CoverImage(
+                url = coverUrl,
+                contentDescription = title,
+                modifier = Modifier.size(48.dp).clip(RoundedCornerShape(4.dp)),
+            )
+        },
+        trailingContent = {
+            Box {
+                IconButton(onClick = { menuExpanded = true }) {
+                    Icon(Icons.Filled.MoreVert, contentDescription = "Change status")
+                }
+                DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                    LIBRARY_STATUS_SECTIONS.forEach { (status, label) ->
+                        DropdownMenuItem(
+                            text = { Text(if (status == currentStatus) "$label ✓" else label) },
+                            onClick = { onSetStatus(status); menuExpanded = false },
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("Remove") },
+                        onClick = { onRemove(); menuExpanded = false },
+                    )
+                }
+            }
+        },
+        modifier = Modifier.clickable(onClick = onClick),
+    )
 }
 
 @Composable

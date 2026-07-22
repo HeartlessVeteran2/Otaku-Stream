@@ -42,3 +42,12 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
         db.execSQL("ALTER TABLE `tracker_links` ADD COLUMN `sourceId` INTEGER NOT NULL DEFAULT 0")
     }
 }
+
+// v9 → v10: add library_entries.status so the Library can group saved titles by watch status
+// (Plan to watch / Watching / Completed). Pre-existing saves default to PLANNED. Must match
+// LibraryEntry's generated column exactly.
+val MIGRATION_9_10 = object : Migration(9, 10) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE `library_entries` ADD COLUMN `status` TEXT NOT NULL DEFAULT 'PLANNED'")
+    }
+}

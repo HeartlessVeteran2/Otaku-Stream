@@ -50,6 +50,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.otakustream.core.database.library.LIBRARY_STATUS_COMPLETED
+import com.otakustream.core.database.library.LIBRARY_STATUS_PLANNED
+import com.otakustream.core.database.library.LIBRARY_STATUS_WATCHING
 import com.otakustream.core.sources.api.Video
 import com.otakustream.feature.tracking.LinkAniListDialog
 
@@ -65,6 +68,7 @@ fun MediaDetailsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val inLibrary by viewModel.inLibrary.collectAsState()
+    val libraryStatus by viewModel.libraryStatus.collectAsState()
     val watchedEpisodeUrls by viewModel.watchedEpisodeUrls.collectAsState()
     val trackerLink by viewModel.trackerLink.collectAsState()
     val hasTrackerToken by viewModel.hasTrackerToken.collectAsState()
@@ -120,6 +124,15 @@ fun MediaDetailsScreen(
                         )
                     }
                 }
+            }
+
+            // Watch-status selector for a saved title — moves it between the Library's buckets.
+            if (inLibrary) {
+                LibraryStatusRow(
+                    status = libraryStatus,
+                    onSelect = viewModel::setLibraryStatus,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
             }
 
             trackerLink?.let { link ->
@@ -299,6 +312,35 @@ fun MediaDetailsScreen(
             onSelect = viewModel::selectVideo,
             onDismiss = viewModel::dismissVideoPicker,
         )
+    }
+}
+
+@Composable
+private fun LibraryStatusRow(
+    status: String?,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val options = listOf(
+        LIBRARY_STATUS_PLANNED to "Plan to watch",
+        LIBRARY_STATUS_WATCHING to "Watching",
+        LIBRARY_STATUS_COMPLETED to "Completed",
+    )
+    // Default a saved-but-unmigrated row (null → treated as PLANNED) so one chip always reads active.
+    val current = status ?: LIBRARY_STATUS_PLANNED
+    LazyRow(modifier = modifier) {
+        items(options, key = { it.first }) { (value, label) ->
+            FilterChip(
+                selected = value == current,
+                onClick = { onSelect(value) },
+                label = { Text(label) },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.tertiary,
+                    selectedLabelColor = MaterialTheme.colorScheme.onTertiary,
+                ),
+                modifier = Modifier.padding(end = 8.dp),
+            )
+        }
     }
 }
 
