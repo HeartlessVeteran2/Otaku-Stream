@@ -6,7 +6,6 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -14,40 +13,172 @@ import javax.inject.Singleton
 
 private const val ANILIST_GRAPHQL_URL = "https://graphql.anilist.co"
 
-data class AniListMedia(val id: Long, val title: String, val episodes: Int?)
-
+// The AniList GraphQL client. Browse/trending/search/detail are all public (no token); only the
+// viewer's own lists and writes (progress/score/status) require the OAuth token. Every network call
+// reuses the app-wide OkHttpClient. Response parsing lives in AniListModels.kt as pure functions so
+// it can be unit-tested without the network.
 @Singleton
 class AniListClient @Inject constructor(
     private val httpClient: OkHttpClient,
 ) {
-    suspend fun searchAnime(query: String): List<AniListMedia> = withContext(Dispatchers.IO) {
-        val gql = """
-            query (${'$'}search: String) {
-              Page(perPage: 10) {
-                media(search: ${'$'}search, type: ANIME) {
-                  id
-                  episodes
-                  title { romaji english }
+    // ---- Discovery (unauthenticated) ----
+
+    suspend fun fetchTrending(page: Int = 1): AniListPage =
+        fetchPageSortedBy("TRENDING_DESC", page)
+
+    suspend fun fetchAllTimePopular(page: Int = 1): AniListPage =
+        fetchPageSortedBy("POPULARITY_DESC", page)
+
+    suspend fun fetchPopularThisSeason(page: Int = 1): AniListPage = withContext(Dispatchers.IO) {
+        val (season, year) = currentSeasonAndYear()
+        val query = """
+            query (${'$'}page: Int, ${'$'}season: MediaSeason, ${'$'}seasonYear: Int) {
+              Page(page: ${'$'}page, perPage: $PAGE_SIZE) {
+                pageInfo { currentPage hasNextPage }
+                media(season: ${'$'}season, seasonYear: ${'$'}seasonYear, type: ANIME, sort: POPULARITY_DESC) {
+                  $MEDIA_SELECTION
                 }
               }
             }
         """.trimIndent()
-        val data = execute(gql, JSONObject().put("search", query), token = null)
-        val media = data.getJSONObject("Page").getJSONArray("media")
-        (0 until media.length()).map { index ->
-            val entry = media.getJSONObject(index)
-            val title = entry.getJSONObject("title")
-            AniListMedia(
-                id = entry.getLong("id"),
-                title = title.stringOrEmpty("english").ifEmpty { title.stringOrEmpty("romaji") },
-                episodes = entry.optInt("episodes", 0).takeIf { it > 0 },
+        val variables = JSONObject()
+            .put("page", page)
+            .put("season", season)
+            .put("seasonYear", year)
+        parsePage(execute(query, variables, token = null).getJSONObject("Page"))
+    }
+
+    suspend fun search(query: String, page: Int = 1): AniListPage = withContext(Dispatchers.IO) {
+        val gql = """
+            query (${'$'}search: String, ${'$'}page: Int) {
+              Page(page: ${'$'}page, perPage: $PAGE_SIZE) {
+                pageInfo { currentPage hasNextPage }
+                media(search: ${'$'}search, type: ANIME, sort: SEARCH_MATCH) {
+                  $MEDIA_SELECTION
+                }
+              }
+            }
+        """.trimIndent()
+        val variables = JSONObject().put("search", query).put("page", page)
+        parsePage(execute(gql, variables, token = null).getJSONObject("Page"))
+    }
+
+    // Full detail incl. relations + recommendations for the AniList detail screen.
+    suspend fun fetchMediaDetail(id: Long): AniListMedia = withContext(Dispatchers.IO) {
+        val gql = """
+            query (${'$'}id: Int) {
+              Media(id: ${'$'}id, type: ANIME) {
+                $MEDIA_SELECTION
+                relations {
+                  edges {
+                    relationType
+                    node { $MEDIA_SELECTION }
+                  }
+                }
+                recommendations(sort: RATING_DESC, perPage: 12) {
+                  nodes {
+                    mediaRecommendation { $MEDIA_SELECTION }
+                  }
+                }
+              }
+            }
+        """.trimIndent()
+        parseMedia(execute(gql, JSONObject().put("id", id), token = null).getJSONObject("Media"))
+    }
+
+    private suspend fun fetchPageSortedBy(sort: String, page: Int): AniListPage =
+        withContext(Dispatchers.IO) {
+            val gql = """
+                query (${'$'}page: Int) {
+                  Page(page: ${'$'}page, perPage: $PAGE_SIZE) {
+                    pageInfo { currentPage hasNextPage }
+                    media(type: ANIME, sort: $sort) {
+                      $MEDIA_SELECTION
+                    }
+                  }
+                }
+            """.trimIndent()
+            parsePage(execute(gql, JSONObject().put("page", page), token = null).getJSONObject("Page"))
+        }
+
+    // ---- Personal library + writes (authenticated) ----
+
+    suspend fun fetchViewer(token: String): AniListViewer = withContext(Dispatchers.IO) {
+        val gql = """
+            query {
+              Viewer { id name avatar { large } }
+            }
+        """.trimIndent()
+        parseViewer(execute(gql, JSONObject(), token).getJSONObject("Viewer"))
+    }
+
+    // The signed-in user's anime lists (Watching/Planning/Completed/…) with their per-entry
+    // status, score, and progress. Flattened across the AniList list buckets.
+    suspend fun fetchUserAnimeLists(token: String, userId: Long): List<AniListListEntry> =
+        withContext(Dispatchers.IO) {
+            val gql = """
+                query (${'$'}userId: Int) {
+                  MediaListCollection(userId: ${'$'}userId, type: ANIME) {
+                    lists {
+                      name
+                      entries {
+                        status
+                        score(format: POINT_10_DECIMAL)
+                        progress
+                        media { $MEDIA_SELECTION }
+                      }
+                    }
+                  }
+                }
+            """.trimIndent()
+            parseListCollection(
+                execute(gql, JSONObject().put("userId", userId), token)
+                    .getJSONObject("MediaListCollection"),
             )
+        }
+
+    // Create/update the viewer's list entry. Only non-null fields are sent so callers can nudge
+    // progress without clobbering status/score (and vice versa).
+    suspend fun saveMediaListEntry(
+        token: String,
+        mediaId: Long,
+        status: String? = null,
+        score: Double? = null,
+        progress: Int? = null,
+    ) {
+        withContext(Dispatchers.IO) {
+            val args = buildList {
+                add("mediaId: ${'$'}mediaId")
+                if (status != null) add("status: ${'$'}status")
+                if (score != null) add("scoreRaw: ${'$'}scoreRaw")
+                if (progress != null) add("progress: ${'$'}progress")
+            }.joinToString(", ")
+            val declarations = buildList {
+                add("${'$'}mediaId: Int")
+                if (status != null) add("${'$'}status: MediaListStatus")
+                if (score != null) add("${'$'}scoreRaw: Int")
+                if (progress != null) add("${'$'}progress: Int")
+            }.joinToString(", ")
+            val gql = """
+                mutation ($declarations) {
+                  SaveMediaListEntry($args) { id status score progress }
+                }
+            """.trimIndent()
+            val variables = JSONObject().put("mediaId", mediaId)
+            if (status != null) variables.put("status", status)
+            // AniList's scoreRaw is on a 0–100 scale regardless of the user's display format.
+            if (score != null) variables.put("scoreRaw", (score * 10).toInt().coerceIn(0, 100))
+            if (progress != null) variables.put("progress", progress)
+            execute(gql, variables, token)
         }
     }
 
+    // ---- Backward-compatible helpers used by the existing link/AniSkip/auto-sync flows ----
+
+    suspend fun searchAnime(query: String): List<AniListMedia> = search(query).media
+
     // AniList id → MyAnimeList id, needed to query AniSkip. Public field, no auth. Cached on this
-    // singleton so the mapping is resolved once per anime across every screen/playback (and the
-    // short-lived callers never have to hold it).
+    // singleton so the mapping is resolved once per anime across every screen/playback.
     private val malIdCache = ConcurrentHashMap<Long, Long>()
 
     suspend fun getMalId(aniListId: Long): Long? = withContext(Dispatchers.IO) {
@@ -64,14 +195,7 @@ class AniListClient @Inject constructor(
 
     // Sets the entry to CURRENT with the given progress (creates it if absent).
     suspend fun saveProgress(token: String, mediaId: Long, progress: Int) {
-        withContext(Dispatchers.IO) {
-            val gql = """
-                mutation (${'$'}mediaId: Int, ${'$'}progress: Int) {
-                  SaveMediaListEntry(mediaId: ${'$'}mediaId, progress: ${'$'}progress, status: CURRENT) { id }
-                }
-            """.trimIndent()
-            execute(gql, JSONObject().put("mediaId", mediaId).put("progress", progress), token)
-        }
+        saveMediaListEntry(token, mediaId, status = "CURRENT", progress = progress)
     }
 
     private fun execute(query: String, variables: JSONObject, token: String?): JSONObject {
@@ -97,8 +221,28 @@ class AniListClient @Inject constructor(
     }
 
     private fun parseErrorMessage(root: JSONObject): String? =
-        root.optJSONArray("errors")?.optJSONObject(0)?.stringOrEmpty("message")?.ifEmpty { null }
-}
+        root.optJSONArray("errors")?.optJSONObject(0)?.let { if (it.isNull("message")) null else it.optString("message") }
+            ?.ifEmpty { null }
 
-// Android's JSONObject.optString returns the literal string "null" for JSON null values.
-private fun JSONObject.stringOrEmpty(key: String): String = if (isNull(key)) "" else optString(key)
+    private companion object {
+        const val PAGE_SIZE = 30
+
+        // Shared GraphQL selection so every media-returning query yields the same fields the
+        // AniListMedia parser expects.
+        const val MEDIA_SELECTION = """
+                  id
+                  episodes
+                  title { romaji english native }
+                  coverImage { extraLarge large }
+                  bannerImage
+                  description(asHtml: false)
+                  genres
+                  averageScore
+                  format
+                  status
+                  season
+                  seasonYear
+                  nextAiringEpisode { episode airingAt }
+        """
+    }
+}
