@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AspectRatio
+import androidx.compose.material.icons.filled.Cast
 import androidx.compose.material.icons.filled.Equalizer
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Info
@@ -54,6 +55,8 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
 import androidx.media3.ui.SubtitleView
+import androidx.mediarouter.app.MediaRouteButton
+import com.google.android.gms.cast.framework.CastButtonFactory
 import com.otakustream.core.player.PlayerViewModel
 import com.otakustream.core.player.ResizeMode
 import com.otakustream.core.player.SubtitleEdgeStyle
@@ -117,6 +120,8 @@ fun PlayerScreen(
 
     LaunchedEffect(videoUrl) {
         viewModel.play(videoUrl)
+        // Bring the Cast session listener online so the route button reflects device availability.
+        viewModel.warmUpCast()
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             val alreadyGranted = androidx.core.content.ContextCompat.checkSelfPermission(
                 context,
@@ -253,6 +258,41 @@ fun PlayerScreen(
                         Button(onClick = { viewModel.play(videoUrl) }) { Text("Retry") }
                         OutlinedButton(onClick = onBack) { Text("Go back") }
                     }
+                }
+            }
+
+            // Google Cast button. setUpMediaRouteButton throws when Cast / Play Services is
+            // unavailable, so it's wrapped — on such devices the button simply doesn't appear.
+            if (controlsVisible && !isInPip) {
+                AndroidView(
+                    factory = { ctx ->
+                        MediaRouteButton(ctx).apply {
+                            runCatching {
+                                CastButtonFactory.setUpMediaRouteButton(ctx.applicationContext, this)
+                            }
+                        }
+                    },
+                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
+                )
+            }
+
+            // While casting, the local surface is black — say what's happening instead.
+            if (uiState.isCasting) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.align(Alignment.Center).padding(32.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Cast,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                    Text(
+                        text = "Casting to your TV",
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium,
+                    )
                 }
             }
 

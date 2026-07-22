@@ -87,6 +87,8 @@ data class PlayerUiState(
     val volumeBoostMillibels: Int = 0,
     val hasNext: Boolean = false,
     val seekDurationMs: Long = 10_000L,
+    // True while a Cast session is playing this media instead of the local player.
+    val isCasting: Boolean = false,
 )
 
 @OptIn(UnstableApi::class)
@@ -97,6 +99,7 @@ class PlayerController @Inject constructor(
     private val skipSegmentRepository: SkipSegmentRepository,
     private val libraryRepository: LibraryRepository,
     private val playerSettingsPrefs: PlayerSettingsPrefs,
+    private val castManager: com.otakustream.core.player.cast.CastManager,
 ) {
     val player: ExoPlayer = ExoPlayer.Builder(appContext, PlayerRenderersFactory(appContext)).build()
 
@@ -192,7 +195,34 @@ class PlayerController @Inject constructor(
             }
         })
         startPositionTicker()
+        observeCastSession()
     }
+
+    // Hand the current playback to/from a Cast device as the session connects and disconnects.
+    // On connect: pause local and load the same media item + position onto the Cast device. On
+    // disconnect: resume local playback from wherever casting left off.
+    private fun observeCastSession() {
+        scope.launch {
+            castManager.isConnected.collect { connected ->
+                if (connected) {
+                    val item = currentMediaItem
+                    val position = player.currentPosition.coerceAtLeast(0L)
+                    player.pause()
+                    if (item != null) castManager.castItem(item, position)
+                    _uiState.value = _uiState.value.copy(isCasting = true)
+                } else if (_uiState.value.isCasting) {
+                    val resumeMs = castManager.currentPositionMs().coerceAtLeast(0L)
+                    castManager.stop()
+                    if (resumeMs > 0) player.seekTo(resumeMs)
+                    player.play()
+                    _uiState.value = _uiState.value.copy(isCasting = false)
+                }
+            }
+        }
+    }
+
+    // Bring the Cast session listener online so the Cast button reflects device availability.
+    fun warmUpCast() = castManager.warmUp()
 
     private fun startPositionTicker() {
         scope.launch {

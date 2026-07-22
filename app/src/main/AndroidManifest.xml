@@ -15,6 +15,11 @@
         android:theme="@style/Theme.OtakuStream"
         android:supportsRtl="true">
 
+        <!-- Google Cast framework loads this at startup to configure the receiver app. -->
+        <meta-data
+            android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
+            android:value="com.otakustream.core.player.cast.CastOptionsProvider" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
