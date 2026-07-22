@@ -50,6 +50,9 @@ dependencies {
     implementation(libs.media3.ui)
     implementation(libs.media3.session)
     implementation(libs.media3.common)
+    implementation(libs.media3.cast)
+    implementation(libs.play.services.cast.framework)
+    implementation(libs.androidx.mediarouter)
 
     implementation(libs.hilt.android)
     implementation(libs.hilt.navigation.compose)
