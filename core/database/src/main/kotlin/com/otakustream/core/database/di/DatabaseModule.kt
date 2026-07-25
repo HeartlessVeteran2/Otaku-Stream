@@ -8,6 +8,7 @@ import com.otakustream.core.database.MIGRATION_7_8
 import com.otakustream.core.database.MIGRATION_8_9
 import com.otakustream.core.database.MIGRATION_10_11
 import com.otakustream.core.database.MIGRATION_9_10
+import com.otakustream.core.database.MIGRATION_11_12
 import com.otakustream.core.database.library.LibraryDao
 import com.otakustream.core.database.library.LibraryRepository
 import com.otakustream.core.database.library.LibraryRepositoryImpl
@@ -49,7 +50,7 @@ object DatabaseProvidesModule {
             // Explicit migrations preserve the user's library, addons, and tokens across upgrades;
             // an upgrade with a missing path still fails fast (never a silent wipe). Schema JSONs
             // under core/database/schemas are the baseline migrations are authored against.
-            .addMigrations(MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+            .addMigrations(MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
             // Pre-6 builds shipped before schemas were exported, so no authored migration exists to
             // reach them. Rather than crash those users on update ("migration from N to 9 required
             // but not found"), wipe *only* when coming from those specific old versions; 6→9 keeps

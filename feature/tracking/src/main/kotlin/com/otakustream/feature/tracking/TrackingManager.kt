@@ -1,6 +1,7 @@
 package com.otakustream.feature.tracking
 
 import android.util.Log
+import com.otakustream.core.database.tracking.toTrackerSeason
 import com.otakustream.core.database.tracking.TrackingRepository
 import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
@@ -19,9 +20,18 @@ class TrackingManager @Inject constructor(
     // viewer's current AniList entry and only writes a forward move — it never lowers progress and
     // never downgrades a COMPLETED/REPEATING entry, so rewatching an earlier episode can't erase
     // the user's completion. Whole episodes only; specials / episode 0 are skipped.
-    suspend fun onEpisodeWatched(mediaUrl: String, episodeNumber: Float) {
+    //
+    // `season` picks which AniList entry to write to, since AniList models each season as its own
+    // media. It resolves to the season's own link when one exists and to the whole-series link
+    // otherwise, so the episode number goes to the entry it actually counts against instead of
+    // being pushed at season 1 forever.
+    suspend fun onEpisodeWatched(
+        mediaUrl: String,
+        episodeNumber: Float,
+        season: Int? = null,
+    ) {
         val token = trackingRepository.getToken() ?: return
-        val link = trackingRepository.getLink(mediaUrl) ?: return
+        val link = trackingRepository.getLink(mediaUrl, season.toTrackerSeason()) ?: return
         val episode = episodeNumber.toWholeEpisodeOrNull() ?: return
         runCatching {
             val current = aniListClient.fetchViewerListEntry(token, link.trackerMediaId)

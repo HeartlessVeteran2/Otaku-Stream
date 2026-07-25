@@ -75,6 +75,8 @@ fun MediaDetailsScreen(
     val libraryStatus by viewModel.libraryStatus.collectAsState()
     val watchedEpisodeUrls by viewModel.watchedEpisodeUrls.collectAsState()
     val trackerLink by viewModel.trackerLink.collectAsState()
+    val selectedSeason by viewModel.selectedSeason.collectAsState()
+    val linkedSeasons by viewModel.linkedSeasons.collectAsState()
     val hasTrackerToken by viewModel.hasTrackerToken.collectAsState()
     val aniListEntry by viewModel.aniListEntry.collectAsState()
     val autoPlayEnabled by viewModel.autoPlayEnabled.collectAsState()
@@ -144,13 +146,29 @@ fun MediaDetailsScreen(
             }
 
             trackerLink?.let { link ->
+                // When the selected season has no link of its own, this row is showing the
+                // whole-series link as a fallback. Say so, and offer to link this season
+                // specifically — otherwise every season would silently report the same AniList entry
+                // and push progress at it.
+                val isFallback = selectedSeason != null && link.season !in linkedSeasons
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "AniList: ${link.trackerTitle}",
+                        text = if (isFallback) {
+                            "AniList (whole series): ${link.trackerTitle}"
+                        } else if (link.season > 0) {
+                            "AniList (season ${link.season}): ${link.trackerTitle}"
+                        } else {
+                            "AniList: ${link.trackerTitle}"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary,
                     )
                     TextButton(onClick = viewModel::unlinkTracker) { Text("Unlink") }
+                }
+                if (isFallback && hasTrackerToken) {
+                    TextButton(onClick = { showLinkDialog = true }) {
+                        Text("Link season $selectedSeason separately")
+                    }
                 }
                 // The same status/score/progress editor as the AniList detail screen, so a linked
                 // title is managed here without leaving for the AniList tab.
@@ -228,7 +246,9 @@ fun MediaDetailsScreen(
             }
 
             val seasons = remember(uiState.episodes) { uiState.episodes.mapNotNull { it.season }.distinct().sorted() }
-            var selectedSeason by remember(uiState.episodes) { mutableStateOf(seasons.firstOrNull()) }
+            // Selection lives in the ViewModel now: it decides which episodes are listed *and* which
+            // AniList entry the link row above targets, since AniList models each season separately.
+            LaunchedEffect(seasons) { viewModel.selectSeason(seasons.firstOrNull()) }
             val visibleEpisodes = remember(uiState.episodes, selectedSeason) {
                 if (seasons.isEmpty()) uiState.episodes else uiState.episodes.filter { it.season == selectedSeason }
             }
@@ -238,7 +258,7 @@ fun MediaDetailsScreen(
                     items(seasons, key = { it }) { season ->
                         FilterChip(
                             selected = season == selectedSeason,
-                            onClick = { selectedSeason = season },
+                            onClick = { viewModel.selectSeason(season) },
                             label = { Text("Season $season") },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = MaterialTheme.colorScheme.tertiary,
@@ -322,8 +342,11 @@ fun MediaDetailsScreen(
     if (showLinkDialog) {
         LinkAniListDialog(
             mediaUrl = mediaUrl,
-            defaultQuery = mediaTitle,
+            // Seed the search with the season, since AniList lists them as separate titles
+            // ("Show Season 2"), so the right entry is usually the first result.
+            defaultQuery = selectedSeason?.takeIf { it > 1 }?.let { "$mediaTitle Season $it" } ?: mediaTitle,
             onDismiss = { showLinkDialog = false },
+            season = selectedSeason,
         )
     }
 

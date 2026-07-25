@@ -5,7 +5,9 @@ import androidx.lifecycle.viewModelScope
 import com.otakustream.core.database.library.LibraryEntry
 import com.otakustream.core.database.library.LibraryRepository
 import com.otakustream.core.database.library.WatchHistoryEntry
+import com.otakustream.core.database.tracking.TRACKER_SEASON_WHOLE_SERIES
 import com.otakustream.core.database.tracking.TrackerLink
+import com.otakustream.core.database.tracking.toTrackerSeason
 import com.otakustream.core.database.tracking.TrackingRepository
 import com.otakustream.core.sources.api.Episode
 import com.otakustream.core.sources.api.MediaDetails
@@ -100,9 +102,32 @@ class MediaDetailsViewModel @Inject constructor(
         .map { it.toSet() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
-    val trackerLink: StateFlow<TrackerLink?> = currentMediaUrl
-        .flatMapLatest { url -> if (url == null) flowOf(null) else trackingRepository.observeLink(url) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    // Which season the user is looking at. Hoisted out of the screen because it now decides more
+    // than which episodes are listed: AniList models each season as its own media entry, so it also
+    // decides which entry the link row targets and which one progress is pushed to (issue #9).
+    // null until episodes load, and stays null for sources with no season data.
+    private val _selectedSeason = MutableStateFlow<Int?>(null)
+    val selectedSeason: StateFlow<Int?> = _selectedSeason.asStateFlow()
+
+    fun selectSeason(season: Int?) {
+        _selectedSeason.value = season
+    }
+
+    // The link that applies to what's on screen: the selected season's own, or the whole-series one
+    // as a fallback. A single-season show and a source with no seasons both land on the fallback,
+    // which is how this stays invisible for everything that isn't multi-season.
+    val trackerLink: StateFlow<TrackerLink?> = combine(currentMediaUrl, _selectedSeason) { url, season ->
+        url to season
+    }.flatMapLatest { (url, season) ->
+        if (url == null) flowOf(null) else trackingRepository.observeLink(url, season.toTrackerSeason())
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    // Every season already linked for this title, so the UI can say which are done rather than
+    // making the user click through each one to find out.
+    val linkedSeasons: StateFlow<Set<Int>> = currentMediaUrl
+        .flatMapLatest { url -> if (url == null) flowOf(emptyList()) else trackingRepository.observeLinksFor(url) }
+        .map { links -> links.map { it.season }.toSet() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     // Whether the user is signed in to AniList at all — the "Link to AniList" affordance only
     // makes sense once they are.
@@ -348,14 +373,24 @@ class MediaDetailsViewModel @Inject constructor(
         val mediaUrl = currentMediaUrl.value ?: return
         val manager = trackingManager
         val episodeNumber = episode.episodeNumber
+        // The episode's own season, not the selected one: auto-play-next can carry playback into a
+        // different season than the user was looking at when they pressed play, and progress has to
+        // land on the AniList entry for the episode that actually played.
+        val season = episode.season
         PlaybackCompletion.register(videoUrl) {
-            manager.onEpisodeWatched(mediaUrl, episodeNumber)
+            manager.onEpisodeWatched(mediaUrl, episodeNumber, season)
         }
     }
 
+    // Unlinks what the row is currently showing. If the selected season has its own link, only that
+    // one goes; otherwise this removes the whole-series link, which is what the row was displaying.
     fun unlinkTracker() {
         val mediaUrl = currentMediaUrl.value ?: return
-        viewModelScope.launch { trackingRepository.removeLink(mediaUrl) }
+        val season = _selectedSeason.value.toTrackerSeason()
+        viewModelScope.launch {
+            val hasOwnLink = season != TRACKER_SEASON_WHOLE_SERIES && season in linkedSeasons.value
+            trackingRepository.removeLink(mediaUrl, if (hasOwnLink) season else TRACKER_SEASON_WHOLE_SERIES)
+        }
     }
 
     fun setAniListStatus(status: String) = applyAniListEdit(status = status)
