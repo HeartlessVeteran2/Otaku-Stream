@@ -38,7 +38,7 @@ class StremioAddonInstaller @Inject constructor(
         stremioRepository.saveAddon(
             StremioAddonRecord(manifestUrl = normalizedUrl, manifestJson = content, name = manifest.name, priority = priority),
         )
-        registerStreamProviderIfAny(normalizedUrl, content)
+        registerProviderIfAny(normalizedUrl, content)
         sources
     }
 
@@ -47,29 +47,34 @@ class StremioAddonInstaller @Inject constructor(
         stremioRepository.deleteAddon(manifestUrl)
     }
 
-    // Register an add-on that declares the "stream" resource as a stream provider, so its streams
-    // are merged into playback even when it has no browsable catalog (Torrentio et al.). Safe to
-    // call for any add-on — a no-op when "stream" isn't declared. Idempotent (keyed by base URL).
-    fun registerStreamProviderIfAny(manifestUrl: String, manifestJson: String) {
+    // Register an add-on that declares the "stream" and/or "subtitles" resource, so its results are
+    // merged into playback even when it has no browsable catalog — Torrentio for streams,
+    // OpenSubtitles for subtitles. Safe to call for any add-on: a no-op when it declares neither.
+    // Idempotent (keyed by base URL).
+    fun registerProviderIfAny(manifestUrl: String, manifestJson: String) {
         val manifest = parseManifest(manifestJson)
-        if ("stream" !in manifest.resources) return
+        val resources = manifest.resources.toSet()
+        val routable = resources.intersect(setOf(STREMIO_RESOURCE_STREAM, STREMIO_RESOURCE_SUBTITLES))
+        if (routable.isEmpty()) return
         streamProviderRegistry.register(
-            StreamProvider(
+            AddonProvider(
                 baseUrl = baseUrlOf(manifestUrl),
+                name = manifest.name,
+                resources = resources,
                 types = manifest.types.toSet(),
                 idPrefixes = manifest.idPrefixes,
             ),
         )
     }
 
-    fun unregisterStreamProvider(manifestUrl: String) = streamProviderRegistry.unregister(baseUrlOf(manifestUrl))
+    fun unregisterProvider(manifestUrl: String) = streamProviderRegistry.unregister(baseUrlOf(manifestUrl))
 
     private fun baseUrlOf(manifestUrl: String): String = manifestUrl.removeSuffix("/manifest.json")
 
-    // Stream/subtitle-only addons (e.g. Torrentio, OpenSubtitles) commonly declare zero
-    // catalogs — they're still installable, they just don't register a browsable VideoSource
-    // (catalog-less stream/subtitle resolution is a separate, larger piece of work; see
-    // https://github.com/HeartlessVeteran2/Otaku-Stream/issues/12).
+    // Stream/subtitle-only add-ons (Torrentio, OpenSubtitles) commonly declare zero catalogs, so
+    // they register no browsable VideoSource — nothing to browse. They still contribute to playback:
+    // registerProviderIfAny above puts them in the registry, and StremioVideoSource.getVideoList
+    // queries every matching provider for streams and subtitles.
     fun buildSources(
         manifestUrl: String,
         manifestJson: String,

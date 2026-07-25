@@ -127,10 +127,10 @@ class ManageStremioSourcesViewModel @Inject constructor(
             }.getOrDefault(emptyList())
             if (newEnabled) {
                 sources.forEach(sourceRepository::registerDynamic)
-                installer.registerStreamProviderIfAny(record.manifestUrl, record.manifestJson)
+                installer.registerProviderIfAny(record.manifestUrl, record.manifestJson)
             } else {
                 sources.forEach { source -> sourceRepository.unregisterDynamic(source.id) }
-                installer.unregisterStreamProvider(record.manifestUrl)
+                installer.unregisterProvider(record.manifestUrl)
             }
         }
     }
