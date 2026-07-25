@@ -26,15 +26,19 @@ import androidx.hilt.navigation.compose.hiltViewModel
 @Composable
 fun ManageSourcesScreen(
     onBrowseCatalogClick: () -> Unit,
+    onBack: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: ManageSourcesViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    Scaffold(modifier = modifier.fillMaxSize()) { padding ->
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        topBar = { BackTopBar(title = "Custom sources", onBack = onBack) },
+    ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
             Button(onClick = onBrowseCatalogClick, modifier = Modifier.fillMaxWidth()) {
-                Text("Browse source catalog")
+                Text("Browse the source directory")
             }
             Text(
                 text = "Install sources one-tap from a directory.",
@@ -57,7 +61,7 @@ fun ManageSourcesScreen(
                     value = uiState.urlInput,
                     onValueChange = viewModel::onUrlInputChange,
                     label = { Text("Source script link") },
-                    supportingText = { Text("A link to a source script (.js).") },
+                    supportingText = { Text("Paste a link to a source script.") },
                     modifier = Modifier.weight(1f),
                 )
                 Button(onClick = viewModel::install, enabled = !uiState.isInstalling) {

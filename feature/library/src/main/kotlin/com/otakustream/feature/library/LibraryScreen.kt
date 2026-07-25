@@ -81,6 +81,11 @@ fun LibraryScreen(
     }
 
     Column(modifier = modifier.fillMaxSize()) {
+        Text(
+            text = "Library",
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 8.dp),
+        )
         TabRow(selectedTabIndex = selectedTab) {
             Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Watchlist") })
             Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("History") })

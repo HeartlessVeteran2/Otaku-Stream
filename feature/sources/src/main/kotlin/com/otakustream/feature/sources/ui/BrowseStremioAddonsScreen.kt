@@ -31,13 +31,16 @@ import com.otakustream.core.sources.stremio.model.OfficialAddonListing
 @Composable
 fun BrowseStremioAddonsScreen(
     modifier: Modifier = Modifier,
+    onBack: () -> Unit = {},
     viewModel: BrowseStremioAddonsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    Scaffold(modifier = modifier.fillMaxSize()) { padding ->
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        topBar = { BackTopBar(title = "Add-on directory", onBack = onBack) },
+    ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-            Text(text = "Add-on directory", style = MaterialTheme.typography.titleMedium)
             Text(
                 text = "Browse official and community add-ons and tap Install to add them to your catalog.",
                 style = MaterialTheme.typography.bodySmall,

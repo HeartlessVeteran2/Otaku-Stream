@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.otakustream.core.sources.api.UiMessages
 
 data class BrowseStremioUiState(
     val isLoading: Boolean = false,
@@ -80,7 +81,10 @@ class BrowseStremioAddonsViewModel @Inject constructor(
                 val nextPriority = (stremioRepository.getAllAddons().maxOfOrNull { it.priority } ?: -1) + 1
                 installer.installFromUrl(listing.transportUrl, priority = nextPriority)
             }
-                .onSuccess { sources -> sources.forEach(sourceRepository::registerDynamic) }
+                .onSuccess { sources ->
+                    sources.forEach(sourceRepository::registerDynamic)
+                    UiMessages.show("Installed ${listing.name}")
+                }
                 .onFailure { failure ->
                     if (failure is CancellationException) throw failure
                     error.value = failure.message ?: "Failed to install addon"

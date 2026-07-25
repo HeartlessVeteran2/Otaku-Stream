@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.otakustream.core.database.stremio.StremioAddonRecord
 import com.otakustream.core.database.stremio.StremioRepository
 import com.otakustream.core.sources.api.stableSourceId
+import com.otakustream.core.sources.api.UiMessages
 import com.otakustream.core.sources.stremio.StremioAddonInstaller
 import com.otakustream.core.sources.stremio.model.parseManifest
 import com.otakustream.feature.sources.SourceRepository
@@ -95,6 +96,7 @@ class ManageStremioSourcesViewModel @Inject constructor(
                 .onSuccess { sources ->
                     sources.forEach(sourceRepository::registerDynamic)
                     urlInput.value = ""
+                    UiMessages.show("Add-on installed")
                 }
                 .onFailure { failure ->
                     if (failure is CancellationException) throw failure

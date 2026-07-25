@@ -66,6 +66,7 @@ fun MediaDetailsScreen(
     mediaTitle: String,
     onPlayVideo: (videoUrl: String) -> Unit,
     onOpenTracking: () -> Unit,
+    onBack: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: MediaDetailsViewModel = hiltViewModel(),
 ) {
@@ -90,7 +91,10 @@ fun MediaDetailsScreen(
         }
     }
 
-    Scaffold(modifier = modifier.fillMaxSize()) { padding ->
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        topBar = { BackTopBar(title = mediaTitle, onBack = onBack) },
+    ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
             Box(modifier = Modifier.fillMaxWidth().height(280.dp).clip(MaterialTheme.shapes.large)) {
                 CoverImage(
