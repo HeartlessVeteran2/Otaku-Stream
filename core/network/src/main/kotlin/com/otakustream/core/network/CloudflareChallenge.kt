@@ -1,4 +1,4 @@
-package com.otakustream.core.sources.scripting.net
+package com.otakustream.core.network
 
 // Pure challenge-detection + cookie-parsing logic, split out from CloudflareInterceptor so it can be
 // unit-tested without a WebView or the network. Getting this wrong is costly both ways: a false

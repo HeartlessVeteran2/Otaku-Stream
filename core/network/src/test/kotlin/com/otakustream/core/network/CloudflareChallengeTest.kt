@@ -1,4 +1,4 @@
-package com.otakustream.core.sources.scripting.net
+package com.otakustream.core.network
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

@@ -1,5 +1,7 @@
 package com.otakustream.core.sources.stremio.model
 
+import com.otakustream.core.common.stringOrEmpty
+import com.otakustream.core.common.stringOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -10,12 +12,6 @@ data class OfficialAddonListing(
     val transportUrl: String,
     val types: List<String>,
 )
-
-// Mirrors StremioModels.kt's null-handling: JSONObject/JSONArray optString return the literal
-// string "null" for JSON-null values, so every read here goes through these guards.
-private fun JSONObject.stringOrEmpty(key: String): String = if (isNull(key)) "" else optString(key)
-private fun JSONObject.stringOrNull(key: String): String? = stringOrEmpty(key).ifEmpty { null }
-private fun JSONArray.stringOrNull(index: Int): String? = if (isNull(index)) null else optString(index).ifEmpty { null }
 
 // Parses https://raw.githubusercontent.com/Stremio/stremio-official-addons/master/index.json —
 // an array of { manifest: {...}, transportUrl, flags: { official, protected } }. transportUrl is

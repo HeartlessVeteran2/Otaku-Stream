@@ -1,8 +1,8 @@
-package com.otakustream.core.sources.scripting.di
+package com.otakustream.core.network.di
 
 import android.content.Context
-import com.otakustream.core.sources.scripting.net.CloudflareInterceptor
-import com.otakustream.core.sources.scripting.net.CloudflareSettings
+import com.otakustream.core.network.CloudflareInterceptor
+import com.otakustream.core.network.CloudflareSettings
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -19,7 +19,7 @@ import javax.inject.Singleton
 
 @Module
 @InstallIn(SingletonComponent::class)
-object ScriptingModule {
+object NetworkModule {
 
     // The app-wide shared OkHttp client (SingletonComponent) reused by every network client —
     // AniList, AniSkip, Stremio, scripted sources, source catalog. Timeouts bound any slow or

@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.otakustream.core.sources.stremio"
+    namespace = "com.otakustream.core.network"
     compileSdk = 35
 
     defaultConfig {
@@ -24,17 +24,13 @@ android {
 }
 
 dependencies {
-    api(project(":core:sources-api"))
-    api(project(":core:database"))
-    implementation(project(":core:common"))
-
     implementation(libs.androidx.core.ktx)
+    implementation(libs.kotlinx.coroutines.android)
     implementation(libs.okhttp)
+    implementation(libs.okhttp.urlconnection)
 
     implementation(libs.hilt.android)
     kapt(libs.hilt.compiler)
 
     testImplementation(libs.junit)
-    // Real org.json for JVM unit tests (the android.jar stub throws "not mocked").
-    testImplementation(libs.json)
 }

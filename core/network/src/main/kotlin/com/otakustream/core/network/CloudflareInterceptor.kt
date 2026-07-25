@@ -1,4 +1,4 @@
-package com.otakustream.core.sources.scripting.net
+package com.otakustream.core.network
 
 import android.content.Context
 import android.os.Handler

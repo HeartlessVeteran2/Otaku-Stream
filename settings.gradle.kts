@@ -17,6 +17,9 @@ dependencyResolutionManagement {
 rootProject.name = "Otaku-Stream"
 
 include(":app")
+include(":core:common")
+include(":core:ui")
+include(":core:network")
 include(":core:player")
 include(":core:database")
 include(":core:sources-api")

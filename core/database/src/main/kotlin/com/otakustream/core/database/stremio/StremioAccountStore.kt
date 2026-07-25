@@ -1,9 +1,7 @@
 package com.otakustream.core.database.stremio
 
 import android.content.Context
-import android.content.SharedPreferences
-import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
+import com.otakustream.core.database.security.openEncryptedPrefs
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,20 +21,7 @@ import javax.inject.Singleton
 class StremioAccountStore @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
-    private val prefs: SharedPreferences? by lazy {
-        runCatching {
-            val masterKey = MasterKey.Builder(context)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
-            EncryptedSharedPreferences.create(
-                context,
-                PREFS_FILE_NAME,
-                masterKey,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
-            )
-        }.getOrNull()
-    }
+    private val prefs by lazy { openEncryptedPrefs(context, PREFS_FILE_NAME) }
 
     // Loaded off the main thread (Keystore derivation + file read) so it can't stall cold start.
     private val _authKey = MutableStateFlow<String?>(null)
