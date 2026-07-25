@@ -7,12 +7,13 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import javax.inject.Inject
-
 // The result of loading the directory. `listings` is whatever loaded; `customListError` reports a
 // user-supplied list that failed, separately, so a bad custom URL is visible without pretending the
 // whole directory is broken.
@@ -35,9 +36,18 @@ class StremioAddonDirectoryClient @Inject constructor(
         val official = async { fetchListing(OFFICIAL_ADDON_COLLECTION_URL, AddonListOrigin.OFFICIAL) }
         val community = async { fetchListing(COMMUNITY_ADDON_COLLECTION_URL, AddonListOrigin.COMMUNITY) }
         // Fetched as a Result rather than null-on-failure: unlike the two built-in collections, a
-        // custom URL was typed by a person who needs to be told when it's wrong.
+        // custom URL was typed by a person who needs to be told when it's wrong. Cancellation is
+        // rethrown rather than reported — a cancelled load is not a broken list.
         val custom = customUrl?.let { url ->
-            async { runCatching { fetchListingOrThrow(url, AddonListOrigin.CUSTOM) } }
+            async {
+                try {
+                    Result.success(fetchListingOrThrow(url, AddonListOrigin.CUSTOM))
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
+            }
         }
 
         val builtIn = awaitAll(official, community)
@@ -76,9 +86,18 @@ class StremioAddonDirectoryClient @Inject constructor(
         origin: AddonListOrigin,
     ): List<OfficialAddonListing> = withContext(Dispatchers.IO) {
         val request = Request.Builder().url(url).build()
-        val content = httpClient.newCall(request).execute().use { response ->
-            require(response.isSuccessful) { "HTTP ${response.code}" }
-            response.body?.string() ?: error("Empty response body")
+        val call = httpClient.newCall(request)
+        // Cancel the blocking OkHttp call when the coroutine is cancelled (navigating away, or a
+        // newer load superseding this one) instead of leaving it to occupy a thread until it
+        // finishes on its own. Same pattern as SourceCatalogClient.
+        val cancellation = currentCoroutineContext()[Job]?.invokeOnCompletion { call.cancel() }
+        val content = try {
+            call.execute().use { response ->
+                require(response.isSuccessful) { "HTTP ${response.code}" }
+                response.body?.string() ?: error("Empty response body")
+            }
+        } finally {
+            cancellation?.dispose()
         }
         val parsed = parseOfficialAddonCollection(content)
         // A URL that returns 200 but isn't an add-on list (an HTML page, say) parses to nothing.

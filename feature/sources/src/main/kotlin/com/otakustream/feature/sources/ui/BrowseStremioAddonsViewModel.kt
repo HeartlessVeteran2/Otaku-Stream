@@ -10,11 +10,11 @@ import com.otakustream.core.sources.stremio.model.OfficialAddonListing
 import com.otakustream.feature.sources.SourceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -71,11 +71,17 @@ class BrowseStremioAddonsViewModel @Inject constructor(
         load()
     }
 
+    // A newer load supersedes an older one rather than racing it: Retry and Save both call this, and
+    // two in-flight fetches could otherwise finish out of order and leave the screen showing the
+    // earlier result. Same job-cancelling shape the other loading ViewModels here use.
+    private var loadJob: Job? = null
+
     fun load() {
+        loadJob?.cancel()
         isLoading.value = true
         error.value = null
         customListError.value = null
-        viewModelScope.launch {
+        loadJob = viewModelScope.launch {
             runCatching { directoryClient.fetchAddonCatalog() }
                 .onSuccess { directory ->
                     listings.value = directory.listings
@@ -89,10 +95,14 @@ class BrowseStremioAddonsViewModel @Inject constructor(
         }
     }
 
-    // Saving re-fetches, so the list the user just added (or removed) is reflected immediately.
+    // Saving re-fetches so the list the user just added (or removed) is reflected immediately. The
+    // save is awaited first — the fetch reads the same store, so starting it before the write landed
+    // would reload with the *old* URL and show a stale list right after the user changed it.
     fun saveCustomListUrl(url: String) {
-        directorySettings.set(url)
-        load()
+        viewModelScope.launch {
+            directorySettings.set(url)
+            load()
+        }
     }
 
     fun install(listing: OfficialAddonListing) {

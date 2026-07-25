@@ -46,14 +46,19 @@ class StremioDirectorySettings @Inject constructor(
     }
 
     // Blank clears it, so the UI's text field doubles as the remove control.
-    fun set(url: String?) {
+    //
+    // suspend, and commit() rather than apply(): the caller re-fetches the directory immediately
+    // after saving, and that fetch reads this store. An asynchronous write would let the reload race
+    // the save and use the *previous* URL — showing the user the old list right after they changed it.
+    // Returning only once the value is durable makes the sequence deterministic.
+    suspend fun set(url: String?) {
         val cleaned = url?.trim()?.takeIf { it.isNotEmpty() }
         _customListUrl.value = cleaned
-        ioScope.launch {
+        withContext(Dispatchers.IO) {
             runCatching {
                 prefs.edit().apply {
                     if (cleaned == null) remove(KEY_CUSTOM_LIST_URL) else putString(KEY_CUSTOM_LIST_URL, cleaned)
-                }.apply()
+                }.commit()
             }
         }
     }
