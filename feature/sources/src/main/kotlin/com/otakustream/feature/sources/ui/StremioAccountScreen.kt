@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -193,10 +194,16 @@ private fun LoggedInContent(uiState: StremioAccountUiState, viewModel: StremioAc
                 ) {
                     items(uiState.library, key = { it.mediaUrl }) { item ->
                         Column(modifier = Modifier.padding(8.dp)) {
+                            // aspectRatio gives the tile a real height: CoverImage's image uses
+                            // matchParentSize, so a width-only modifier measures to 0 height once
+                            // the poster loads.
                             CoverImage(
                                 url = item.poster,
                                 contentDescription = item.name,
-                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(2f / 3f)
+                                    .clip(RoundedCornerShape(8.dp)),
                             )
                             Text(
                                 text = item.name,

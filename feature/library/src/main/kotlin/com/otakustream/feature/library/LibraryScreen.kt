@@ -113,6 +113,15 @@ private fun WatchlistTab(
     viewModel: LibraryViewModel,
     onMediaClick: (Long, String, String) -> Unit,
 ) {
+    // One section per non-empty status bucket. Unmigrated rows (status not one of the known values)
+    // fall back into "Plan to watch" so nothing is ever hidden. Remembered and hoisted above the
+    // LazyColumn: the content lambda re-runs whenever the list is re-laid out, so grouping inside it
+    // rebuilt the map and all its sublists each time.
+    val byStatus = remember(uiState.watchlist) {
+        uiState.watchlist.groupBy { entry ->
+            if (LIBRARY_STATUS_SECTIONS.any { it.first == entry.status }) entry.status else LIBRARY_STATUS_PLANNED
+        }
+    }
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         if (uiState.continueWatching.isNotEmpty()) {
             item {
@@ -137,11 +146,6 @@ private fun WatchlistTab(
             }
         }
 
-        // One section per non-empty status bucket. Unmigrated rows (status not one of the known
-        // values) fall back into "Plan to watch" so nothing is ever hidden.
-        val byStatus = uiState.watchlist.groupBy { entry ->
-            if (LIBRARY_STATUS_SECTIONS.any { it.first == entry.status }) entry.status else LIBRARY_STATUS_PLANNED
-        }
         LIBRARY_STATUS_SECTIONS.forEach { (status, label) ->
             val entries = byStatus[status].orEmpty()
             if (entries.isNotEmpty()) {

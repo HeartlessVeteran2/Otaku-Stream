@@ -13,8 +13,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 
 // Poster/cover thumbnail with a graceful fallback: shows the image when we have a URL and it loads,
 // otherwise a placeholder film icon on the surface-variant background. Shared across every feature
@@ -22,10 +24,15 @@ import coil.compose.AsyncImage
 @Composable
 fun CoverImage(url: String?, contentDescription: String?, modifier: Modifier = Modifier) {
     val isError = remember(url) { mutableStateOf(false) }
+    val context = LocalContext.current
     Box(modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
         if (!url.isNullOrBlank() && !isError.value) {
+            // Crossfade so a cache miss fades in over the placeholder instead of popping. The
+            // request is remembered on url so scrolling a grid doesn't rebuild it every recomposition.
             AsyncImage(
-                model = url,
+                model = remember(url, context) {
+                    ImageRequest.Builder(context).data(url).crossfade(CROSSFADE_MS).build()
+                },
                 contentDescription = contentDescription,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.matchParentSize(),
@@ -41,3 +48,5 @@ fun CoverImage(url: String?, contentDescription: String?, modifier: Modifier = M
         }
     }
 }
+
+private const val CROSSFADE_MS = 180

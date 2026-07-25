@@ -51,3 +51,11 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
         db.execSQL("ALTER TABLE `library_entries` ADD COLUMN `status` TEXT NOT NULL DEFAULT 'PLANNED'")
     }
 }
+
+val MIGRATION_10_11 = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Index name must match what Room generates for Index("addedAtEpochMs"), or the schema
+        // validation on open will fail.
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_library_entries_addedAtEpochMs` ON `library_entries` (`addedAtEpochMs`)")
+    }
+}

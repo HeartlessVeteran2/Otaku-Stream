@@ -6,11 +6,14 @@ import com.otakustream.core.ui.EmptyState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Extension
@@ -30,6 +33,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -110,10 +114,18 @@ fun AniListWatchScreen(
                             ListItem(
                                 headlineContent = { Text(item.title) },
                                 leadingContent = {
+                                    // Explicit poster bounds: CoverImage lays its image out with
+                                    // matchParentSize, which contributes nothing to measurement —
+                                    // without a size here the row's thumbnail collapses to 0x0 as
+                                    // soon as the image loads and replaces the placeholder icon.
                                     CoverImage(
                                         url = item.coverUrl,
                                         contentDescription = item.title,
-                                        modifier = Modifier.padding(4.dp),
+                                        modifier = Modifier
+                                            .padding(4.dp)
+                                            .width(40.dp)
+                                            .aspectRatio(2f / 3f)
+                                            .clip(RoundedCornerShape(4.dp)),
                                     )
                                 },
                                 modifier = Modifier

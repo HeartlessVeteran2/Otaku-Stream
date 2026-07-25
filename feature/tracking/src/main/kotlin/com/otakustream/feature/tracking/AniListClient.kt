@@ -23,13 +23,19 @@ class AniListClient @Inject constructor(
 ) {
     // ---- Discovery (unauthenticated) ----
 
+    // Discovery rails are slow-moving and re-requested every time the Home ViewModel is created
+    // (navigating away from Play and back, or a process-alive relaunch), so they're memoized on this
+    // singleton for DISCOVERY_TTL_MS. Same idea as malIdCache below, just time-bounded.
     suspend fun fetchTrending(page: Int = 1): AniListPage =
-        fetchPageSortedBy("TRENDING_DESC", page)
+        cachedPage("trending", page) { fetchPageSortedBy("TRENDING_DESC", page) }
 
     suspend fun fetchAllTimePopular(page: Int = 1): AniListPage =
-        fetchPageSortedBy("POPULARITY_DESC", page)
+        cachedPage("all-time", page) { fetchPageSortedBy("POPULARITY_DESC", page) }
 
-    suspend fun fetchPopularThisSeason(page: Int = 1): AniListPage = withContext(Dispatchers.IO) {
+    suspend fun fetchPopularThisSeason(page: Int = 1): AniListPage =
+        cachedPage("season", page) { fetchPopularThisSeasonUncached(page) }
+
+    private suspend fun fetchPopularThisSeasonUncached(page: Int): AniListPage = withContext(Dispatchers.IO) {
         val (season, year) = currentSeasonAndYear()
         val query = """
             query (${'$'}page: Int, ${'$'}season: MediaSeason, ${'$'}seasonYear: Int) {
@@ -63,8 +69,18 @@ class AniListClient @Inject constructor(
         parsePage(execute(gql, variables, token = null).requireField("Page"))
     }
 
-    // Full detail incl. relations + recommendations for the AniList detail screen.
-    suspend fun fetchMediaDetail(id: Long): AniListMedia = withContext(Dispatchers.IO) {
+    // Full detail incl. relations + recommendations for the AniList detail screen. Memoized so
+    // re-opening a title (a very common back-and-forth) doesn't refetch a large payload.
+    suspend fun fetchMediaDetail(id: Long): AniListMedia {
+        detailCache[id]?.let { return it }
+        return fetchMediaDetailUncached(id).also { detail ->
+            // Bounded: the detail payloads are large, so don't let this grow without limit.
+            if (detailCache.size >= DETAIL_CACHE_MAX) detailCache.clear()
+            detailCache[id] = detail
+        }
+    }
+
+    private suspend fun fetchMediaDetailUncached(id: Long): AniListMedia = withContext(Dispatchers.IO) {
         val gql = """
             query (${'$'}id: Int) {
               Media(id: ${'$'}id, type: ANIME) {
@@ -117,7 +133,14 @@ class AniListClient @Inject constructor(
             parseViewerEntry(execute(gql, JSONObject().put("id", mediaId), token).requireField("Media"))
         }
 
-    suspend fun fetchViewer(token: String): AniListViewer = withContext(Dispatchers.IO) {
+    // Cached per token: continue-watching resolves the viewer before listing their anime, and the
+    // viewer identity can't change without the token changing.
+    suspend fun fetchViewer(token: String): AniListViewer {
+        viewerCache[token]?.let { return it }
+        return fetchViewerUncached(token).also { viewerCache[token] = it }
+    }
+
+    private suspend fun fetchViewerUncached(token: String): AniListViewer = withContext(Dispatchers.IO) {
         val gql = """
             query {
               Viewer { id name avatar { large } }
@@ -195,6 +218,22 @@ class AniListClient @Inject constructor(
     // singleton so the mapping is resolved once per anime across every screen/playback.
     private val malIdCache = ConcurrentHashMap<Long, Long>()
 
+    private class CachedPage(val page: AniListPage, val fetchedAtMs: Long)
+
+    private val discoveryCache = ConcurrentHashMap<String, CachedPage>()
+    private val detailCache = ConcurrentHashMap<Long, AniListMedia>()
+    private val viewerCache = ConcurrentHashMap<String, AniListViewer>()
+
+    // Serves a fresh cached page when one exists, otherwise fetches and stores. A failed fetch
+    // throws without poisoning the cache, so the next attempt retries.
+    private suspend fun cachedPage(key: String, page: Int, fetch: suspend () -> AniListPage): AniListPage {
+        val cacheKey = "$key:$page"
+        discoveryCache[cacheKey]
+            ?.takeIf { System.currentTimeMillis() - it.fetchedAtMs < DISCOVERY_TTL_MS }
+            ?.let { return it.page }
+        return fetch().also { discoveryCache[cacheKey] = CachedPage(it, System.currentTimeMillis()) }
+    }
+
     suspend fun getMalId(aniListId: Long): Long? = withContext(Dispatchers.IO) {
         // 0L is the "known to have no MAL id" sentinel: cache negatives too so a show without a MAL
         // id doesn't re-hit the network on every AniSkip attempt (only transient errors — which
@@ -250,6 +289,11 @@ class AniListClient @Inject constructor(
 
     private companion object {
         const val PAGE_SIZE = 30
+
+        // Discovery rails change on the order of hours, not seconds; 10 minutes keeps a session's
+        // repeat visits free without ever showing genuinely stale rails.
+        const val DISCOVERY_TTL_MS = 10 * 60 * 1000L
+        const val DETAIL_CACHE_MAX = 50
 
         // Shared GraphQL selection so every media-returning query yields the same fields the
         // AniListMedia parser expects.

@@ -8,10 +8,12 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import okhttp3.Cache
 import okhttp3.Interceptor
 import okhttp3.JavaNetCookieJar
 import okhttp3.OkHttpClient
 import okhttp3.Response
+import java.io.File
 import java.net.CookieManager
 import java.net.CookiePolicy
 import java.util.concurrent.TimeUnit
@@ -36,6 +38,11 @@ object NetworkModule {
         // etc.). ACCEPT_ALL because these are third-party streaming hosts, not our own domain.
         val cookieManager = CookieManager().apply { setCookiePolicy(CookiePolicy.ACCEPT_ALL) }
         return OkHttpClient.Builder()
+            // Disk cache so repeat GETs of slow-changing metadata (source directories, the
+            // Mangayomi extension index, Stremio add-on manifests) are served locally instead of
+            // refetched every time a screen opens. Honours the servers' own cache headers; AniList
+            // is POST and therefore unaffected, and images have Coil's own cache.
+            .cache(Cache(File(context.cacheDir, "http"), HTTP_CACHE_BYTES))
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
             .writeTimeout(20, TimeUnit.SECONDS)
@@ -60,6 +67,8 @@ object NetworkModule {
             return chain.proceed(request.newBuilder().header("User-Agent", userAgent).build())
         }
     }
+
+    private const val HTTP_CACHE_BYTES = 20L * 1024 * 1024
 
     private const val DESKTOP_USER_AGENT =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
