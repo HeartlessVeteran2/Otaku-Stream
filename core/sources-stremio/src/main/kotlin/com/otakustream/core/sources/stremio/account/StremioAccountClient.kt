@@ -25,6 +25,8 @@ data class StremioLibraryItem(
     val name: String,
     val poster: String?,
     val removed: Boolean,
+    // Server-assigned creation time, kept when re-pushing an existing item so we don't rewrite it.
+    val ctime: String? = null,
 ) {
     // The app encodes Stremio catalog items as "type|id", so a pulled item lines up with the same
     // local library key a saved catalog item would use.
@@ -58,6 +60,7 @@ class StremioAccountClient @Inject constructor(
                 name = obj.optString("name").ifEmpty { id },
                 poster = obj.optString("poster").ifEmpty { null },
                 removed = obj.optBoolean("removed", false),
+                ctime = obj.optString("_ctime").ifEmpty { null },
             )
         }
     }
@@ -85,7 +88,9 @@ class StremioAccountClient @Inject constructor(
             .put("year", "")
             .put("removed", item.removed)
             .put("temp", false)
-            .put("_ctime", now)
+            // Preserve the server's original creation time for an existing item; only brand-new
+            // pushes stamp "now". _mtime always advances.
+            .put("_ctime", item.ctime ?: now)
             .put("_mtime", now)
             .put("state", defaultState())
 

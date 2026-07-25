@@ -53,6 +53,9 @@ dependencies {
     implementation(libs.media3.cast)
     implementation(libs.play.services.cast.framework)
     implementation(libs.androidx.mediarouter)
+    // Cast's MediaRouteButton dialogs require an AppCompat-descended theme; the app theme isn't
+    // AppCompat, so the button's context is wrapped in an AppCompat theme at the call site.
+    implementation(libs.androidx.appcompat)
 
     implementation(libs.hilt.android)
     implementation(libs.hilt.navigation.compose)

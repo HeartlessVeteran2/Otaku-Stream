@@ -6,6 +6,7 @@ import com.otakustream.core.database.library.LibraryRepository
 import com.otakustream.core.database.stremio.StremioAccountStore
 import com.otakustream.core.sources.stremio.account.StremioAccountClient
 import com.otakustream.core.sources.stremio.account.StremioLibraryItem
+import com.otakustream.core.sources.stremio.account.stremioLibraryItemFor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -102,8 +103,14 @@ class StremioAccountViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(isBusy = true, error = null, message = null)
         viewModelScope.launch {
             runCatching {
+                // Preserve the server's _ctime for items already in the account, and only push
+                // genuine Stremio catalog saves (stremioLibraryItemFor filters non-Stremio keys).
+                val existingById = accountClient.fetchLibrary(authKey).associateBy { it.id }
                 val local = libraryRepository.observeLibrary().first()
-                val items = local.mapNotNull { entry -> entry.toStremioLibraryItem() }
+                val items = local.mapNotNull { entry ->
+                    stremioLibraryItemFor(entry.mediaUrl, entry.title, entry.coverUrl)
+                        ?.copy(ctime = existingById[entry.mediaUrl.substringAfter("|").trim()]?.ctime)
+                }
                 accountClient.putLibraryItems(authKey, items)
                 items.size
             }.onSuccess { count ->
@@ -129,14 +136,4 @@ class StremioAccountViewModel @Inject constructor(
     fun consumeMessage() {
         _uiState.value = _uiState.value.copy(message = null, error = null)
     }
-}
-
-// Local saves store Stremio catalog items as "type|id" (no URL scheme). Only those map onto a
-// Stremio library item; anything with a real URL (scripted/mangayomi sources, local files) is skipped.
-private fun com.otakustream.core.database.library.LibraryEntry.toStremioLibraryItem(): StremioLibraryItem? {
-    if (mediaUrl.contains("://") || !mediaUrl.contains("|")) return null
-    val type = mediaUrl.substringBefore("|")
-    val id = mediaUrl.substringAfter("|")
-    if (type.isBlank() || id.isBlank()) return null
-    return StremioLibraryItem(id = id, type = type, name = title, poster = coverUrl, removed = false)
 }

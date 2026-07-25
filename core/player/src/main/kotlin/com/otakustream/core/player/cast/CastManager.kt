@@ -57,6 +57,9 @@ class CastManager @Inject constructor(
     }
 
     // Loads the current item onto the Cast device at [positionMs]. Main-thread only.
+    // Limitation: the default Cast media receiver fetches the URL itself and ignores per-request
+    // HTTP headers (Referer/cookies/UA), so a header-gated stream may 403 on the receiver even
+    // though it plays locally. PlayerController only offers cast for remote http(s) media.
     fun castItem(mediaItem: MediaItem, positionMs: Long) {
         val player = castPlayer ?: return
         player.setMediaItem(mediaItem, positionMs)
