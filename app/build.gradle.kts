@@ -39,10 +39,10 @@ android {
 
     buildTypes {
         release {
-            // Minification stays off until there are enough tests to catch R8 stripping something
-            // the JS runtimes reach reflectively; proguard-rules.pro stages the keep rules for then.
+            // No minification. The app runs untrusted JS source extensions that call app code by
+            // name via reflection, which R8 would rename or strip; and it isn't distributed through
+            // the Play Store, so the smaller-APK payoff isn't worth that risk.
             isMinifyEnabled = false
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             val releaseSigning = signingConfigs.getByName("release")
             signingConfig = if (releaseSigning.storeFile != null) {
                 releaseSigning
