@@ -39,4 +39,27 @@ class TrackingManager @Inject constructor(
             Log.w(TAG, "AniList progress update failed", it)
         }
     }
+
+    // Called when the user explicitly changes a title's Library status (the Library is the single
+    // source of truth). If the title is linked to AniList and the viewer is signed in, mirror the
+    // new bucket up — Plan↔PLANNING, Watching↔CURRENT, Completed↔COMPLETED. Unlinked titles never
+    // force-create an AniList entry, and a finished entry is never silently downgraded (see
+    // decideStatusMirror), so this can't erase a completion.
+    suspend fun onLibraryStatusChanged(mediaUrl: String, localStatus: String) {
+        val token = trackingRepository.getToken() ?: return
+        val link = trackingRepository.getLink(mediaUrl) ?: return
+        val desired = libraryStatusToAniList(localStatus) ?: return
+        runCatching {
+            val current = aniListClient.fetchViewerListEntry(token, link.trackerMediaId)
+            val status = decideStatusMirror(current?.status, desired) ?: return@runCatching
+            aniListClient.saveMediaListEntry(
+                token = token,
+                mediaId = link.trackerMediaId,
+                status = status,
+            )
+        }.onFailure {
+            if (it is CancellationException) throw it
+            Log.w(TAG, "AniList status mirror failed", it)
+        }
+    }
 }

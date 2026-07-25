@@ -151,7 +151,11 @@ class MediaDetailsViewModel @Inject constructor(
 
     fun setLibraryStatus(status: String) {
         val mediaUrl = currentMediaUrl.value ?: return
-        viewModelScope.launch { libraryRepository.setStatus(mediaUrl, status) }
+        viewModelScope.launch {
+            libraryRepository.setStatus(mediaUrl, status)
+            // Local Library is the source of truth; mirror the change up to AniList when linked.
+            trackingManager.onLibraryStatusChanged(mediaUrl, status)
+        }
     }
 
     fun toggleWatchlist() {
