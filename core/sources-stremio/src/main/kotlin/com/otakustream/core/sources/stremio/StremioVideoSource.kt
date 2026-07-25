@@ -128,10 +128,11 @@ class StremioVideoSource(
             val ownStreamsDeferred = async { fetchStreams("$baseUrl/stream/$type/$videoId.json") }
             // Exclude this add-on's own base URL — an all-in-one add-on (catalog + stream) would
             // otherwise be queried twice.
-            val providerStreamDeferreds = streamProviderRegistry.providersFor(type, videoId)
+            val providerStreamDeferreds = streamProviderRegistry
+                .providersFor(STREMIO_RESOURCE_STREAM, type, videoId)
                 .filter { it.baseUrl != baseUrl }
                 .map { provider -> async { fetchStreams("${provider.baseUrl}/stream/$type/$videoId.json") } }
-            val subtitleTracksDeferred = async { fetchSubtitleTracks(type, videoId) }
+            val subtitleTracksDeferred = async { fetchAllSubtitleTracks(type, videoId) }
             val serverBaseUrl = stremioRepository.getServerBaseUrl()
             val allStreams = ownStreamsDeferred.await() + providerStreamDeferreds.awaitAll().flatten()
             val subtitleTracks = subtitleTracksDeferred.await()
@@ -148,16 +149,51 @@ class StremioVideoSource(
             emptyList()
         }
 
-    // The subtitles resource is a separate endpoint from /stream — only probe it when the
-    // manifest actually declares support, and never let a failure break stream resolution.
-    private fun fetchSubtitleTracks(type: String, videoId: String): List<SubtitleTrack> {
-        if ("subtitles" !in resources) return emptyList()
-        return runCatching {
-            parseSubtitlesResponse(get("$baseUrl/subtitles/$type/$videoId.json")).subtitles.map {
-                SubtitleTrack(url = it.url, lang = it.lang, label = it.lang)
+    // Subtitles are aggregated the same way streams are: this add-on's own /subtitles endpoint plus
+    // every installed add-on that declares the subtitles resource for this type/id. Without the
+    // fan-out a subtitle-only add-on (OpenSubtitles) could be installed and would never be asked
+    // for anything, since it has no catalog and therefore no VideoSource of its own (issue #12).
+    private suspend fun fetchAllSubtitleTracks(type: String, videoId: String): List<SubtitleTrack> =
+        coroutineScope {
+            // Own endpoint only when the manifest declares support — no point probing otherwise.
+            val ownDeferred = if (STREMIO_RESOURCE_SUBTITLES in resources) {
+                async { fetchSubtitleTracks("$baseUrl/subtitles/$type/$videoId.json", providerName = null) }
+            } else {
+                null
             }
-        }.getOrDefault(emptyList())
-    }
+            // Self-excluded by base URL so an all-in-one add-on isn't queried twice.
+            val providerDeferreds = streamProviderRegistry
+                .providersFor(STREMIO_RESOURCE_SUBTITLES, type, videoId)
+                .filter { it.baseUrl != baseUrl }
+                .map { provider ->
+                    async {
+                        fetchSubtitleTracks(
+                            "${provider.baseUrl}/subtitles/$type/$videoId.json",
+                            providerName = provider.name,
+                        )
+                    }
+                }
+            (ownDeferred?.await().orEmpty() + providerDeferreds.awaitAll().flatten())
+                .distinctBy { it.url }
+        }
+
+    // Best-effort, per-provider: a dead or slow subtitle add-on yields no tracks rather than
+    // sinking the others or breaking stream resolution. Tracks from another add-on carry its name
+    // in the label, because merging several providers otherwise gives the user a list of
+    // indistinguishable "English" entries.
+    private fun fetchSubtitleTracks(url: String, providerName: String?): List<SubtitleTrack> =
+        runCatching {
+            parseSubtitlesResponse(get(url)).subtitles.map {
+                SubtitleTrack(
+                    url = it.url,
+                    lang = it.lang,
+                    label = if (providerName.isNullOrBlank()) it.lang else "${it.lang} — $providerName",
+                )
+            }
+        }.getOrElse { error ->
+            if (error is CancellationException) throw error
+            emptyList()
+        }
 
     private fun StremioStream.toVideo(serverBaseUrl: String?, subtitleTracks: List<SubtitleTrack>): Video? = when {
         !url.isNullOrBlank() -> Video(
