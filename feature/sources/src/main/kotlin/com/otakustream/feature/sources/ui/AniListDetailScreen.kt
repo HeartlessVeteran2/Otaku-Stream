@@ -168,8 +168,13 @@ private fun DetailContent(
 
         // Your-list controls (signed in) or a prompt to connect AniList (signed out).
         if (uiState.isSignedIn) {
-            ListControls(
-                uiState = uiState,
+            AniListListControls(
+                status = uiState.listStatus,
+                progress = uiState.listProgress,
+                episodeCount = uiState.media?.episodes,
+                score = uiState.listScore,
+                isSaving = uiState.isSaving,
+                saveError = uiState.saveError,
                 onSetStatus = onSetStatus,
                 onSetScore = onSetScore,
                 onSetProgress = onSetProgress,
@@ -232,85 +237,6 @@ private fun DetailContent(
         }
 
         Spacer(modifier = Modifier.height(24.dp))
-    }
-}
-
-@Composable
-private fun ListControls(
-    uiState: AniListDetailUiState,
-    onSetStatus: (String) -> Unit,
-    onSetScore: (Double) -> Unit,
-    onSetProgress: (Int) -> Unit,
-) {
-    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Text("Your list", style = MaterialTheme.typography.titleSmall)
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Status dropdown
-            var statusExpanded by remember { mutableStateOf(false) }
-            Box {
-                OutlinedButton(onClick = { statusExpanded = true }, enabled = !uiState.isSaving) {
-                    Text(aniListStatusLabel(uiState.listStatus))
-                    Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
-                }
-                DropdownMenu(expanded = statusExpanded, onDismissRequest = { statusExpanded = false }) {
-                    ANILIST_STATUSES.forEach { status ->
-                        DropdownMenuItem(
-                            text = { Text(aniListStatusLabel(status)) },
-                            onClick = {
-                                statusExpanded = false
-                                onSetStatus(status)
-                            },
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Progress stepper
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Episode", modifier = Modifier.weight(1f))
-                IconButton(
-                    onClick = { onSetProgress(uiState.listProgress - 1) },
-                    enabled = !uiState.isSaving && uiState.listProgress > 0,
-                ) { Icon(Icons.Filled.Remove, contentDescription = "One fewer episode") }
-                Text(
-                    text = uiState.media?.episodes?.let { "${uiState.listProgress} / $it" }
-                        ?: "${uiState.listProgress}",
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-                IconButton(
-                    onClick = { onSetProgress(uiState.listProgress + 1) },
-                    enabled = !uiState.isSaving,
-                ) { Icon(Icons.Filled.Add, contentDescription = "One more episode") }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Score stepper (AniList POINT_10 scale)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Score", modifier = Modifier.weight(1f))
-                IconButton(
-                    onClick = { onSetScore((uiState.listScore ?: 0.0) - 1.0) },
-                    enabled = !uiState.isSaving && (uiState.listScore ?: 0.0) > 0.0,
-                ) { Icon(Icons.Filled.Remove, contentDescription = "Lower score") }
-                Text(
-                    text = uiState.listScore?.let { "${it.toInt()} / 10" } ?: "–",
-                    style = MaterialTheme.typography.bodyLarge,
-                )
-                IconButton(
-                    onClick = { onSetScore((uiState.listScore ?: 0.0) + 1.0) },
-                    enabled = !uiState.isSaving && (uiState.listScore ?: 0.0) < 10.0,
-                ) { Icon(Icons.Filled.Add, contentDescription = "Raise score") }
-            }
-
-            if (uiState.saveError != null) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(uiState.saveError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-            }
-        }
     }
 }
 

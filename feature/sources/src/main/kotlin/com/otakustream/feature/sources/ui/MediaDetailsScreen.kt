@@ -75,6 +75,7 @@ fun MediaDetailsScreen(
     val watchedEpisodeUrls by viewModel.watchedEpisodeUrls.collectAsState()
     val trackerLink by viewModel.trackerLink.collectAsState()
     val hasTrackerToken by viewModel.hasTrackerToken.collectAsState()
+    val aniListEntry by viewModel.aniListEntry.collectAsState()
     val autoPlayEnabled by viewModel.autoPlayEnabled.collectAsState()
     var showLinkDialog by remember { mutableStateOf(false) }
 
@@ -147,6 +148,19 @@ fun MediaDetailsScreen(
                     )
                     TextButton(onClick = viewModel::unlinkTracker) { Text("Unlink") }
                 }
+                // The same status/score/progress editor as the AniList detail screen, so a linked
+                // title is managed here without leaving for the AniList tab.
+                AniListListControls(
+                    status = aniListEntry.status,
+                    progress = aniListEntry.progress,
+                    episodeCount = uiState.episodes.size.takeIf { it > 0 },
+                    score = aniListEntry.score,
+                    isSaving = aniListEntry.isSaving,
+                    saveError = aniListEntry.saveError,
+                    onSetStatus = viewModel::setAniListStatus,
+                    onSetScore = viewModel::setAniListScore,
+                    onSetProgress = viewModel::setAniListProgress,
+                )
             } ?: if (hasTrackerToken) {
                 TextButton(onClick = { showLinkDialog = true }) { Text("Link to AniList") }
             } else {

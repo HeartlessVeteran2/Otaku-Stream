@@ -27,6 +27,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -45,6 +47,18 @@ data class MediaDetailsUiState(
     // The episode whose stream is currently being resolved (getVideoList in flight) — drives the
     // per-row spinner so a tap gives immediate feedback instead of feeling dead for a few seconds.
     val resolvingEpisodeUrl: String? = null,
+)
+
+// The viewer's AniList list entry for the currently-linked title, so the status/score/progress
+// editor can live on this screen and edit the same entry as the AniList detail screen. Only
+// meaningful when signed in and linked; otherwise it stays at its empty default.
+data class AniListListState(
+    val onList: Boolean = false,
+    val status: String? = null,
+    val score: Double? = null,
+    val progress: Int = 0,
+    val isSaving: Boolean = false,
+    val saveError: String? = null,
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -92,6 +106,32 @@ class MediaDetailsViewModel @Inject constructor(
     val hasTrackerToken: StateFlow<Boolean> = trackingRepository.observeToken()
         .map { !it.isNullOrBlank() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    // The viewer's AniList list entry for the linked title, driving the on-screen status/score/
+    // progress editor. Latest sign-in token, kept off the flow so the edit setters can read it.
+    private val _aniListEntry = MutableStateFlow(AniListListState())
+    val aniListEntry: StateFlow<AniListListState> = _aniListEntry.asStateFlow()
+
+    @Volatile
+    private var trackerToken: String? = null
+
+    init {
+        // Load (and reload) the viewer's AniList entry whenever the link or the sign-in token
+        // changes, so the editor on this screen reflects — and writes to — the same AniList entry
+        // as the dedicated AniList detail screen. collectLatest cancels an in-flight load if the
+        // link/token changes again.
+        viewModelScope.launch {
+            combine(trackerLink, trackingRepository.observeToken()) { link, token -> link to token }
+                .collectLatest { (link, token) ->
+                    trackerToken = token
+                    if (link == null || token.isNullOrBlank()) {
+                        _aniListEntry.value = AniListListState()
+                    } else {
+                        loadAniListEntry(link.trackerMediaId, token)
+                    }
+                }
+        }
+    }
 
     private var loadedFor: Pair<Long, String>? = null
     private var loadJob: Job? = null
@@ -313,6 +353,64 @@ class MediaDetailsViewModel @Inject constructor(
     fun unlinkTracker() {
         val mediaUrl = currentMediaUrl.value ?: return
         viewModelScope.launch { trackingRepository.removeLink(mediaUrl) }
+    }
+
+    fun setAniListStatus(status: String) = applyAniListEdit(status = status)
+
+    fun setAniListScore(score: Double) = applyAniListEdit(score = score.coerceIn(0.0, 10.0))
+
+    fun setAniListProgress(progress: Int) = applyAniListEdit(progress = progress.coerceAtLeast(0))
+
+    private suspend fun loadAniListEntry(mediaId: Long, token: String) {
+        runCatching { aniListClient.fetchViewerListEntry(token, mediaId) }
+            .onSuccess { entry ->
+                _aniListEntry.value = _aniListEntry.value.copy(
+                    onList = entry != null,
+                    status = entry?.status,
+                    score = entry?.score,
+                    progress = entry?.progress ?: 0,
+                    isSaving = false,
+                    saveError = null,
+                )
+            }
+            .onFailure { if (it is CancellationException) throw it }
+    }
+
+    // Sends only the changed field to SaveMediaListEntry for the linked title, optimistically
+    // reflects it, then reloads the canonical entry. Mirrors AniListDetailViewModel.applyEdit but
+    // keyed on the current TrackerLink so it edits the same AniList entry from this screen.
+    private fun applyAniListEdit(status: String? = null, score: Double? = null, progress: Int? = null) {
+        val token = trackerToken
+        val link = trackerLink.value
+        if (token == null || link == null) {
+            _aniListEntry.value = _aniListEntry.value.copy(saveError = "Sign in and link to AniList to manage your list")
+            return
+        }
+        val mediaId = link.trackerMediaId
+        val current = _aniListEntry.value
+        _aniListEntry.value = current.copy(
+            isSaving = true,
+            saveError = null,
+            onList = true,
+            status = status ?: current.status,
+            score = score ?: current.score,
+            progress = progress ?: current.progress,
+        )
+        viewModelScope.launch {
+            runCatching { aniListClient.saveMediaListEntry(token, mediaId, status, score, progress) }
+                .onSuccess {
+                    _aniListEntry.value = _aniListEntry.value.copy(isSaving = false, saveError = null)
+                    loadAniListEntry(mediaId, token)
+                }
+                .onFailure {
+                    if (it is CancellationException) throw it
+                    _aniListEntry.value = _aniListEntry.value.copy(
+                        isSaving = false,
+                        saveError = it.message ?: "Couldn't update your list",
+                    )
+                    loadAniListEntry(mediaId, token)
+                }
+        }
     }
 
     fun consumeResolvedVideoUrl() {
