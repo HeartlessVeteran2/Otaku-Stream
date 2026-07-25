@@ -1,0 +1,86 @@
+name: Release
+
+# Publishing a release is a deliberate act: push a tag matching the app's versionName
+# (e.g. v1.0.0) and this builds the release APK and attaches it to a GitHub Release, so people
+# can install the app without a GitHub login or an expiring CI artifact.
+#
+# workflow_dispatch is here for dry runs — it builds and uploads an artifact but publishes nothing.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write # required to create the Release and upload its assets
+
+jobs:
+  release:
+    name: Build and publish release APK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up build environment
+        uses: ./.github/actions/setup-android-build
+
+      # Signing is optional so a fork can tag a release without any secrets configured. With a
+      # keystore secret the APK is properly signed and upgradable in place; without one, Gradle
+      # falls back to the debug key and the release notes say so explicitly.
+      - name: Decode release keystore
+        id: keystore
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$RELEASE_KEYSTORE_BASE64" ]; then
+            echo "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No RELEASE_KEYSTORE_BASE64 secret set — the APK will be signed with the debug key."
+          fi
+
+      - name: Assemble release APK
+        env:
+          # Consumed by app/build.gradle.kts (signingConfigs.release / AniList BuildConfig field).
+          RELEASE_STORE_FILE: ${{ steps.keystore.outputs.signed == 'true' && format('{0}/release.keystore', runner.temp) || '' }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          ANILIST_CLIENT_ID: ${{ secrets.ANILIST_CLIENT_ID }}
+        run: ./gradlew clean :app:assembleRelease --stacktrace
+
+      # Name the asset after the version so a downloaded file is self-describing and multiple
+      # releases don't all sit in the Downloads folder as "app-release.apk".
+      - name: Stage the APK under its version
+        id: apk
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then VERSION="dev-${GITHUB_SHA::7}"; fi
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk "dist/otaku-stream-${VERSION}.apk"
+          echo "path=dist/otaku-stream-${VERSION}.apk" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      # Dry run (workflow_dispatch): keep the APK as an artifact, publish nothing.
+      - name: Upload APK artifact
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: otaku-stream-${{ steps.apk.outputs.version }}
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Otaku Stream ${{ steps.apk.outputs.version }}
+          files: ${{ steps.apk.outputs.path }}
+          generate_release_notes: true
+          body: |
+            Install the APK below on Android 7.0 (API 24) or newer. You'll need to allow
+            installing from outside the Play Store the first time.
+
+            ${{ steps.keystore.outputs.signed == 'true' && '' || '> **Note:** this build is signed with the debug key because no release keystore secret is configured, so it cannot be upgraded in place by a future properly-signed release.' }}

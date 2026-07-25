@@ -54,7 +54,15 @@ one library, one watch history.
   automatically as you watch. Requires a one-time developer setup — see
   [docs/anilist-setup.md](docs/anilist-setup.md).
 
-## Getting started
+## Install
+
+Grab the latest APK from the [**Releases**](https://github.com/HeartlessVeteran2/Otaku-Stream/releases)
+page and open it on your phone. Android will ask you to allow installing apps from outside the Play
+Store the first time — that's expected; Otaku Stream isn't distributed there.
+
+Requires Android 7.0 (API 24) or newer.
+
+## Building it yourself
 
 ```bash
 git clone https://github.com/HeartlessVeteran2/Otaku-Stream.git
@@ -70,6 +78,11 @@ cd Otaku-Stream
 
 The debug APK lands in `app/build/outputs/apk/debug/`. CI runs `lintDebug`, `assembleDebug`, and
 `assembleRelease` on every PR.
+
+To publish a release, push a tag matching the app's `versionName` (`v1.0.0`): the release workflow
+builds the signed APK and attaches it to a GitHub Release. Signing keys and the AniList client id
+come from repository secrets — without them the build still succeeds, using the debug key (the
+release notes say so) and with AniList sign-in disabled.
 
 ## Documentation
 
