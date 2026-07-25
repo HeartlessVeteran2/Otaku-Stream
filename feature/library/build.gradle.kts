@@ -32,6 +32,7 @@ dependencies {
     implementation(project(":core:ui"))
     implementation(project(":core:database"))
     implementation(project(":core:sources-api"))
+    implementation(project(":feature:tracking"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

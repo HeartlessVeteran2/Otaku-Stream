@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.otakustream.core.database.library.LibraryEntry
 import com.otakustream.core.database.library.LibraryRepository
 import com.otakustream.core.database.library.WatchHistoryEntry
+import com.otakustream.feature.tracking.TrackingManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -23,6 +24,7 @@ data class LibraryUiState(
 @HiltViewModel
 class LibraryViewModel @Inject constructor(
     private val libraryRepository: LibraryRepository,
+    private val trackingManager: TrackingManager,
 ) : ViewModel() {
 
     val uiState: StateFlow<LibraryUiState> = combine(
@@ -41,7 +43,11 @@ class LibraryViewModel @Inject constructor(
     }
 
     fun setStatus(mediaUrl: String, status: String) {
-        viewModelScope.launch { libraryRepository.setStatus(mediaUrl, status) }
+        viewModelScope.launch {
+            libraryRepository.setStatus(mediaUrl, status)
+            // Local Library is the source of truth; mirror the change up to AniList when linked.
+            trackingManager.onLibraryStatusChanged(mediaUrl, status)
+        }
     }
 
     fun clearHistory() {
