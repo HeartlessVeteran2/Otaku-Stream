@@ -1,5 +1,6 @@
 package com.otakustream.app.navigation
 
+import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -33,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
@@ -409,5 +411,37 @@ private fun SettingsScreen(
 
         SectionHeader("Advanced")
         CloudflareSettingRow()
+
+        SectionHeader("About")
+        val context = LocalContext.current
+        // Read the version from the package rather than BuildConfig so :app doesn't need the
+        // buildConfig feature turned on — same approach the crash reporter already uses.
+        val versionName = remember(context) {
+            runCatching {
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName
+            }.getOrNull().orEmpty()
+        }
+        ListItem(
+            headlineContent = { Text("Otaku Stream") },
+            supportingContent = { Text(if (versionName.isBlank()) "Version unavailable" else "Version $versionName") },
+        )
+        ListItem(
+            headlineContent = { Text("Source code & releases") },
+            supportingContent = { Text(PROJECT_URL) },
+            modifier = Modifier.clickable {
+                runCatching {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PROJECT_URL)))
+                }
+            },
+        )
+        Text(
+            text = "Otaku Stream is a player and library app: it ships no content and no " +
+                "third-party add-ons. What you play with it is up to you.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
+        )
     }
 }
+
+private const val PROJECT_URL = "https://github.com/HeartlessVeteran2/Otaku-Stream"

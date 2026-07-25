@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
@@ -6,12 +8,31 @@ plugins {
     alias(libs.plugins.kotlin.kapt)
 }
 
+// AniList sign-in needs a client id registered by whoever builds the app (see
+// docs/anilist-setup.md). It is a public OAuth client id, not a secret — but it's still kept out of
+// git so forks don't ship someone else's client. Resolution order: local.properties, then a Gradle
+// property (-PanilistClientId=...), then the ANILIST_CLIENT_ID env var (for CI). Absent, the app
+// builds fine and Settings explains that sign-in isn't configured in this build.
+val anilistClientId: String = run {
+    val local = rootProject.file("local.properties")
+    val fromLocal = if (local.exists()) {
+        Properties().apply { local.inputStream().use(::load) }.getProperty("anilistClientId")
+    } else {
+        null
+    }
+    fromLocal
+        ?: providers.gradleProperty("anilistClientId").orNull
+        ?: System.getenv("ANILIST_CLIENT_ID")
+        ?: ""
+}
+
 android {
     namespace = "com.otakustream.feature.tracking"
     compileSdk = 35
 
     defaultConfig {
         minSdk = 24
+        buildConfigField("String", "ANILIST_CLIENT_ID", "\"$anilistClientId\"")
     }
 
     compileOptions {
@@ -25,6 +46,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

@@ -16,21 +16,33 @@ runs fine — the sign-in screen simply explains that sign-in isn't configured i
      — this must match **exactly**; it's how AniList hands the token back to the app.
 4. Save, and copy the numeric **Client ID** shown for the new client.
 
-## Put the Client ID in the app
+## Give the build your Client ID
 
-Open
-[`feature/tracking/src/main/kotlin/com/otakustream/feature/tracking/AniListAuth.kt`](../feature/tracking/src/main/kotlin/com/otakustream/feature/tracking/AniListAuth.kt)
-and replace the placeholder:
+The client ID is supplied at build time and kept out of git, so a fork never ships someone else's
+client. Pick whichever of these fits how you build — they're checked in this order:
 
-```kotlin
-object AniListAuth {
-    const val CLIENT_ID = "12345"                          // ← your numeric client id
-    const val REDIRECT_URI = "otakustream://anilist-auth"  // do not change
-    ...
-}
+**1. `local.properties`** (easiest for local builds; the file is already gitignored):
+
+```properties
+anilistClientId=12345
 ```
 
-Rebuild (`./gradlew :app:assembleDebug`) and the sign-in button goes live.
+**2. A Gradle property** on the command line:
+
+```bash
+./gradlew :app:assembleRelease -PanilistClientId=12345
+```
+
+**3. The `ANILIST_CLIENT_ID` environment variable** — use this in CI, where it can come from a
+repository secret:
+
+```yaml
+env:
+  ANILIST_CLIENT_ID: ${{ secrets.ANILIST_CLIENT_ID }}
+```
+
+Rebuild and the sign-in button goes live. Supply nothing and the app still builds and runs — the
+AniList screen just explains that sign-in isn't configured in this build.
 
 ## Verify it works
 
@@ -51,15 +63,16 @@ Rebuild (`./gradlew :app:assembleDebug`) and the sign-in button goes live.
   never touches AniList's servers as a query parameter and never leaves the device. It's stored
   locally in the app's Room database.
 - **The client ID is not a secret.** Implicit-grant client IDs are public by design (they're
-  visible in the browser URL on every sign-in), which is why it lives in source rather than in
-  secret storage. There is no client secret in this flow.
+  visible in the browser URL on every sign-in), so there's no client secret to protect in this
+  flow. It's kept out of git for hygiene — so forks don't accidentally ship your client — not for
+  secrecy, and it's baked into the APK as `BuildConfig.ANILIST_CLIENT_ID`.
 - Tokens are long-lived (about a year). Sign out and back in to refresh.
 
 ## Troubleshooting
 
 | Symptom | Cause / fix |
 | --- | --- |
-| Button says sign-in isn't configured | `CLIENT_ID` is still the placeholder — do the steps above. |
+| Button says sign-in isn't configured | No client ID reached the build — set one of the three options above, then rebuild. |
 | Browser opens but never returns to the app | Redirect URL on the AniList client doesn't exactly match `otakustream://anilist-auth`. |
 | "No browser found" message | The device has no browser app installed. Install one — sign-in requires a browser; there is no manual token entry. |
 | Signed in but "Link to AniList" is missing on details pages | The token didn't save — sign out and in again, and check Logcat for `TrackingManager` warnings. |
