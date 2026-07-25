@@ -204,7 +204,7 @@ class MangayomiRuntime(
 
     private fun Array<out Any?>?.str(index: Int): String = (this?.getOrNull(index) as? String).orEmpty()
     private fun Array<out Any?>?.int(index: Int): Int = (this?.getOrNull(index) as? Number)?.toInt() ?: -1
-    private fun Array<out Any?>?.bool(index: Int): Boolean = (this?.getOrNull(index) as? Boolean) ?: false
+    private fun Array<out Any?>?.bool(index: Int): Boolean = this?.getOrNull(index) as? Boolean ?: false
 
     private companion object {
         const val TAG = "MangayomiExtension"
