@@ -61,7 +61,8 @@ AniList screen just explains that sign-in isn't configured in this build.
   (the scheme is registered in the tracking module's manifest) and stores the token.
 - The token is parsed from the URL **fragment** (`encodedFragment`, decoded exactly once) — it
   never touches AniList's servers as a query parameter and never leaves the device. It's stored
-  locally in the app's Room database.
+  on the device in EncryptedSharedPreferences (AES256, with the key held in the Android Keystore)
+  and excluded from cloud backup — not in the app's database.
 - **The client ID is not a secret.** Implicit-grant client IDs are public by design (they're
   visible in the browser URL on every sign-in), so there's no client secret to protect in this
   flow. It's kept out of git for hygiene — so forks don't accidentally ship your client — not for
