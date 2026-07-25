@@ -7,7 +7,10 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.security.MessageDigest
+import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -73,11 +76,7 @@ class AniListClient @Inject constructor(
     // re-opening a title (a very common back-and-forth) doesn't refetch a large payload.
     suspend fun fetchMediaDetail(id: Long): AniListMedia {
         detailCache[id]?.let { return it }
-        return fetchMediaDetailUncached(id).also { detail ->
-            // Bounded: the detail payloads are large, so don't let this grow without limit.
-            if (detailCache.size >= DETAIL_CACHE_MAX) detailCache.clear()
-            detailCache[id] = detail
-        }
+        return fetchMediaDetailUncached(id).also { detail -> detailCache[id] = detail }
     }
 
     private suspend fun fetchMediaDetailUncached(id: Long): AniListMedia = withContext(Dispatchers.IO) {
@@ -134,11 +133,20 @@ class AniListClient @Inject constructor(
         }
 
     // Cached per token: continue-watching resolves the viewer before listing their anime, and the
-    // viewer identity can't change without the token changing.
+    // viewer identity can't change without the token changing. See viewerCache for why the key is a
+    // digest of the token rather than the token.
     suspend fun fetchViewer(token: String): AniListViewer {
-        viewerCache[token]?.let { return it }
-        return fetchViewerUncached(token).also { viewerCache[token] = it }
+        val key = tokenFingerprint(token)
+        viewerCache.get()?.takeIf { it.first == key }?.let { return it.second }
+        return fetchViewerUncached(token).also { viewer ->
+            viewerCache.set(key to viewer)
+        }
     }
+
+    private fun tokenFingerprint(token: String): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(token.toByteArray())
+            .joinToString("") { "%02x".format(it) }
 
     private suspend fun fetchViewerUncached(token: String): AniListViewer = withContext(Dispatchers.IO) {
         val gql = """
@@ -221,8 +229,24 @@ class AniListClient @Inject constructor(
     private class CachedPage(val page: AniListPage, val fetchedAtMs: Long)
 
     private val discoveryCache = ConcurrentHashMap<String, CachedPage>()
-    private val detailCache = ConcurrentHashMap<Long, AniListMedia>()
-    private val viewerCache = ConcurrentHashMap<String, AniListViewer>()
+
+    // A real LRU, not a periodic flush: access-ordered LinkedHashMap evicting only the least
+    // recently used entry once it's full. The obvious `if (size >= MAX) clear()` looks equivalent
+    // but isn't — it throws away all MAX warm entries the moment the MAX+1'th title is opened, so
+    // browsing a long rail would leave nothing cached at exactly the point caching starts to pay.
+    private val detailCache: MutableMap<Long, AniListMedia> = Collections.synchronizedMap(
+        object : LinkedHashMap<Long, AniListMedia>(DETAIL_CACHE_MAX, 0.75f, true) {
+            override fun removeEldestEntry(eldest: Map.Entry<Long, AniListMedia>): Boolean =
+                size > DETAIL_CACHE_MAX
+        },
+    )
+
+    // Keyed by a SHA-256 digest of the token, never the token itself, and holding a single entry.
+    // This is a process-lifetime singleton, so keying by the raw bearer token would leave a
+    // plaintext copy of it in memory after the user signs out and the encrypted store has already
+    // dropped it — and would accumulate one entry per account switch. A digest can't be replayed as
+    // a credential, and one slot means a new token simply displaces the old viewer.
+    private val viewerCache = AtomicReference<Pair<String, AniListViewer>?>(null)
 
     // Serves a fresh cached page when one exists, otherwise fetches and stores. A failed fetch
     // throws without poisoning the cache, so the next attempt retries.

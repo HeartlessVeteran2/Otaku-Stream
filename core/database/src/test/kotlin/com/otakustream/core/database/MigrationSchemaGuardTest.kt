@@ -98,10 +98,31 @@ class MigrationSchemaGuardTest {
     }
 
     @Test
+    fun `migration 10 to 11 only adds the library_entries addedAtEpochMs index`() {
+        assertEquals(10, MIGRATION_10_11.startVersion)
+        assertEquals(11, MIGRATION_10_11.endVersion)
+
+        val v10 = columnsByTable(loadSchema(10))
+        val v11 = columnsByTable(loadSchema(11))
+
+        // Index-only migration: no table gains or loses a column.
+        assertTrue("10\u219211 must not add columns", addedColumns(v10, v11).all { it.value.isEmpty() })
+        assertTrue("10\u219211 must not drop columns", removedColumns(v10, v11).all { it.value.isEmpty() })
+
+        // The index the migration creates must be present in v11 and absent in v10.
+        val name = "index_library_entries_addedAtEpochMs"
+        val v10Indices = indicesByTable(loadSchema(10))["library_entries"].orEmpty()
+        val v11Indices = indicesByTable(loadSchema(11))["library_entries"].orEmpty()
+        assertTrue("$name should not exist in v10", name !in v10Indices)
+        assertTrue("$name missing in v11", name in v11Indices)
+    }
+
+    @Test
     fun `every registered migration has committed from and to schemas`() {
         // Each addMigrations() entry must have both its start and end schema exported; a missing
         // file means a version was bumped (or a migration added) without committing the schema.
-        listOf(MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10).forEach { migration ->
+        val registered = listOf(MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+        registered.forEach { migration ->
             assertTrue(
                 "${migration.startVersion}.json missing for migration ${migration.startVersion}→${migration.endVersion}",
                 loadFile(migration.startVersion).exists(),
@@ -117,7 +138,7 @@ class MigrationSchemaGuardTest {
     fun `every exported schema version has a committed json`() {
         // The current DB version must have an exported schema (exportSchema = true); a missing file
         // means someone bumped the version without committing the schema.
-        assertTrue("10.json missing — export the schema after bumping the DB version", loadFile(10).exists())
+        assertTrue("11.json missing \u2014 export the schema after bumping the DB version", loadFile(11).exists())
     }
 
     private fun loadFile(version: Int) = File(schemaDir, "$version.json")
