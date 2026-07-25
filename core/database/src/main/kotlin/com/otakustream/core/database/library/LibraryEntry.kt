@@ -1,6 +1,7 @@
 package com.otakustream.core.database.library
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
 // Where the user is with a saved title. Kept as plain strings (not a Room enum converter) so the
@@ -9,7 +10,13 @@ const val LIBRARY_STATUS_PLANNED = "PLANNED"
 const val LIBRARY_STATUS_WATCHING = "WATCHING"
 const val LIBRARY_STATUS_COMPLETED = "COMPLETED"
 
-@Entity(tableName = "library_entries")
+// addedAtEpochMs is indexed because observeAll() orders the whole table by it on every emission —
+// and Room invalidates that query on any write to this table. watch_history already does the same
+// for watchedAtEpochMs.
+@Entity(
+    tableName = "library_entries",
+    indices = [Index("addedAtEpochMs")],
+)
 data class LibraryEntry(
     @PrimaryKey val mediaUrl: String,
     val sourceId: Long,

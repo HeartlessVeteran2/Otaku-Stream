@@ -79,14 +79,17 @@ class MediaDetailsViewModel @Inject constructor(
     private var currentTitle: String = ""
     private var currentSourceId: Long = 0L
 
-    val inLibrary: StateFlow<Boolean> = currentMediaUrl
-        .flatMapLatest { url -> if (url == null) flowOf(false) else libraryRepository.observeInLibrary(url) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
-
     // The saved title's watch status (null when not in the library), driving the status selector.
+    // One subscription, not two: Room invalidates per table, so an EXISTS query and a status query
+    // against the same row both re-ran on every library write anywhere — and the status already
+    // answers both questions, since a row exists exactly when its status is non-null.
     val libraryStatus: StateFlow<String?> = currentMediaUrl
         .flatMapLatest { url -> if (url == null) flowOf(null) else libraryRepository.observeStatus(url) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val inLibrary: StateFlow<Boolean> = libraryStatus
+        .map { it != null }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
 
     // Episodes the user has started (recordWatch fires at play start) — drives the checkmarks
     // on episode rows. Reactive, so returning from playback updates the list with no extra wiring.

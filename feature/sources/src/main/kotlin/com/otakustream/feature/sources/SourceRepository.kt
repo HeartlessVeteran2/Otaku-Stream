@@ -25,11 +25,20 @@ class SourceRegistry @Inject constructor(
     private val _dynamicSources = MutableStateFlow<List<VideoSource>>(emptyList())
     val dynamicSources: StateFlow<List<VideoSource>> = _dynamicSources.asStateFlow()
 
-    override fun getSources(): List<VideoSource> = builtInSources.toList() + _dynamicSources.value
+    // Snapshotted once: the built-in set never changes, so re-materializing it into a list on every
+    // getSources()/getSource()/observeSources() emission was pure allocation.
+    private val builtIns: List<VideoSource> = builtInSources.toList()
 
-    override fun getSource(id: Long): VideoSource? = getSources().firstOrNull { it.id == id }
+    override fun getSources(): List<VideoSource> = builtIns + _dynamicSources.value
 
-    override fun observeSources(): Flow<List<VideoSource>> = _dynamicSources.map { builtInSources.toList() + it }
+    // O(1) rather than a linear scan over a freshly concatenated list: this is called per episode
+    // tap and again when resolving the next episode, not just once per screen.
+    override fun getSource(id: Long): VideoSource? =
+        builtInsById[id] ?: _dynamicSources.value.firstOrNull { it.id == id }
+
+    private val builtInsById: Map<Long, VideoSource> = builtIns.associateBy { it.id }
+
+    override fun observeSources(): Flow<List<VideoSource>> = _dynamicSources.map { builtIns + it }
 
     override fun registerDynamic(source: VideoSource) {
         if (_dynamicSources.value.any { it.id == source.id }) return

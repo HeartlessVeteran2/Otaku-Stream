@@ -201,7 +201,7 @@ private fun DetailContent(
 
         media.description?.takeIf { it.isNotBlank() }?.let { description ->
             Text(
-                text = stripHtml(description),
+                text = remember(description) { stripHtml(description) },
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
@@ -251,8 +251,11 @@ private fun RailHeading(title: String) {
 
 // AniList descriptions come back with a few inline HTML tags even with asHtml:false (br, i, b).
 // A light strip keeps the synopsis readable without pulling in an HTML renderer.
+// Compiled once rather than on every call: stripHtml runs during composition of the synopsis.
+private val BR_TAG = Regex("<br\\s*/?>", RegexOption.IGNORE_CASE)
+
 private fun stripHtml(raw: String): String = raw
-    .replace(Regex("<br\\s*/?>", RegexOption.IGNORE_CASE), "\n")
+    .replace(BR_TAG, "\n")
     .replace(Regex("<[^>]+>"), "")
     .replace("&mdash;", "—")
     .replace("&amp;", "&")
