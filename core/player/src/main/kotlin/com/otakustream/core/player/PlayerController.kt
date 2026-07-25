@@ -130,10 +130,13 @@ class PlayerController @Inject constructor(
     private var loudnessEnhancer: LoudnessEnhancer? = null
 
     init {
-        _uiState.value = _uiState.value.copy(
-            autoSkipEnabled = playerSettingsPrefs.autoSkipEnabled,
-            seekDurationMs = playerSettingsPrefs.seekDurationMs,
-        )
+        // Read persisted toggles off the main thread — this @Singleton is built during activity
+        // creation, so touching the prefs file here would be a StrictMode disk read on cold start.
+        scope.launch(Dispatchers.IO) {
+            val autoSkip = playerSettingsPrefs.autoSkipEnabled
+            val seek = playerSettingsPrefs.seekDurationMs
+            _uiState.value = _uiState.value.copy(autoSkipEnabled = autoSkip, seekDurationMs = seek)
+        }
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 _uiState.value = _uiState.value.copy(isPlaying = isPlaying)
@@ -205,11 +208,17 @@ class PlayerController @Inject constructor(
         scope.launch {
             castManager.isConnected.collect { connected ->
                 if (connected) {
+                    // Only remote http(s) media can be cast — the receiver can't reach a phone-local
+                    // content://file:// URI, and casting a null item would just black the screen out
+                    // under a "casting" overlay. In those cases leave local playback running.
                     val item = currentMediaItem
-                    val position = player.currentPosition.coerceAtLeast(0L)
-                    player.pause()
-                    if (item != null) castManager.castItem(item, position)
-                    _uiState.value = _uiState.value.copy(isCasting = true)
+                    val url = currentMediaUrl
+                    if (item != null && url != null && isCastableUrl(url)) {
+                        val position = player.currentPosition.coerceAtLeast(0L)
+                        player.pause()
+                        castManager.castItem(item, position)
+                        _uiState.value = _uiState.value.copy(isCasting = true)
+                    }
                 } else if (_uiState.value.isCasting) {
                     val resumeMs = castManager.currentPositionMs().coerceAtLeast(0L)
                     castManager.stop()
@@ -223,6 +232,11 @@ class PlayerController @Inject constructor(
 
     // Bring the Cast session listener online so the Cast button reflects device availability.
     fun warmUpCast() = castManager.warmUp()
+
+    // A Cast receiver can only fetch remote http(s) URLs — local file/content URIs on the phone
+    // aren't reachable from the TV.
+    private fun isCastableUrl(url: String): Boolean =
+        url.startsWith("http://", ignoreCase = true) || url.startsWith("https://", ignoreCase = true)
 
     private fun startPositionTicker() {
         scope.launch {

@@ -28,3 +28,12 @@
 # Kotlin metadata + coroutines internals that reflection-based libraries expect.
 -keepclassmembers class kotlin.Metadata { *; }
 -dontwarn kotlinx.coroutines.**
+
+# The app's OWN JS host-API / bridge classes. QuickJS (Mangayomi/AnymeX) and Rhino (scripted
+# sources) call these Kotlin methods by name across the JS↔native boundary via reflection, so R8
+# would otherwise rename or strip them and break every installed source at runtime. These are the
+# keeps that make enabling minification safe — see docs/enabling-r8.md before flipping the switch.
+-keep class com.otakustream.core.sources.scripting.** { *; }
+-keep class com.otakustream.core.sources.mangayomi.runtime.** { *; }
+# Mangayomi data/DTO types passed across the boundary (kept broad; trim if you profile the mapping).
+-keep class com.otakustream.core.sources.mangayomi.model.** { *; }

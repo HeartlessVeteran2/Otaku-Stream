@@ -9,7 +9,9 @@ import javax.inject.Singleton
 // PlayerOnboardingPrefs / SubtitleStylePrefs).
 @Singleton
 class PlayerSettingsPrefs @Inject constructor(@ApplicationContext context: Context) {
-    private val prefs = context.getSharedPreferences("player_settings", Context.MODE_PRIVATE)
+    // Lazy so constructing this @Singleton (which happens when MainActivity injects PlayerController)
+    // doesn't load the prefs file on the main thread; the file loads on first actual read/write.
+    private val prefs by lazy { context.getSharedPreferences("player_settings", Context.MODE_PRIVATE) }
 
     var autoSkipEnabled: Boolean
         get() = prefs.getBoolean(KEY_AUTO_SKIP, false)

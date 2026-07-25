@@ -3,6 +3,7 @@ package com.otakustream.core.player.ui
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.view.ContextThemeWrapper
 import android.content.Intent
 import android.provider.OpenableColumns
 import android.util.Log
@@ -266,9 +267,17 @@ fun PlayerScreen(
             if (controlsVisible && !isInPip) {
                 AndroidView(
                     factory = { ctx ->
-                        MediaRouteButton(ctx).apply {
+                        // MediaRouteButton inflates the Cast chooser/controller dialogs, which
+                        // require an AppCompat-descended theme. The app theme is framework Material,
+                        // so wrap the button's context in an AppCompat theme — otherwise tapping the
+                        // button throws "requires Theme.AppCompat" at dialog-inflation time.
+                        val themedContext = ContextThemeWrapper(
+                            ctx,
+                            androidx.appcompat.R.style.Theme_AppCompat_DayNight_NoActionBar,
+                        )
+                        MediaRouteButton(themedContext).apply {
                             runCatching {
-                                CastButtonFactory.setUpMediaRouteButton(ctx.applicationContext, this)
+                                CastButtonFactory.setUpMediaRouteButton(themedContext, this)
                             }
                         }
                     },

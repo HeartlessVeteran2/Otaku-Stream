@@ -19,6 +19,8 @@ import java.util.concurrent.TimeUnit
 private const val TAG = "CloudflareInterceptor"
 private const val CHALLENGE_TIMEOUT_SECONDS = 15L
 private const val CLEARANCE_COOKIE = "cf_clearance"
+// Cap the body peek used for challenge detection so a huge page can't be fully buffered.
+private const val BODY_PEEK_BYTES = 64L * 1024L
 
 // Transparently clears Cloudflare's "Just a moment…" JS challenge for third-party stream hosts.
 // A real request to a gated host comes back 403/503 with a challenge; a headless WebView loads the
@@ -53,7 +55,7 @@ class CloudflareInterceptor(
         synchronized(lock) {
             // A concurrent request to the same host may have already solved it while we waited.
             if (!hasClearanceCookie(url)) {
-                runCatching { solveChallenge(url.toString()) }
+                runCatching { solveChallenge(url.toString()) { chain.call().isCanceled() } }
                     .onFailure { Log.w(TAG, "WebView clearance failed for ${url.host}", it) }
                 copyWebViewCookies(url)
             }
@@ -62,11 +64,16 @@ class CloudflareInterceptor(
     }
 
     private fun isCloudflareChallenge(response: Response): Boolean {
-        if (response.code != 403 && response.code != 503) return false
-        val server = response.header("Server").orEmpty()
-        if (!server.contains("cloudflare", ignoreCase = true)) return false
-        // Modern managed challenges set cf-mitigated: challenge; the classic interstitial is a 503.
-        return response.header("cf-mitigated") != null || response.code == 503
+        val server = response.header("Server")
+        val cfMitigated = response.header("cf-mitigated")
+        // Only a 403/503 warrants a body peek; everything else is decided on headers alone, so a
+        // normal 200 from a Cloudflare-fronted site is never buffered.
+        val bodySnippet = if (response.code == 403 || response.code == 503) {
+            runCatching { response.peekBody(BODY_PEEK_BYTES).string() }.getOrNull().orEmpty()
+        } else {
+            ""
+        }
+        return isCloudflareChallengeResponse(response.code, server, cfMitigated, bodySnippet)
     }
 
     private fun hasClearanceCookie(url: HttpUrl): Boolean =
@@ -75,8 +82,9 @@ class CloudflareInterceptor(
             ?.contains(CLEARANCE_COOKIE) == true
 
     // Loads the URL in an off-screen WebView on the main thread and waits (bounded) for the
-    // challenge to clear, signalled by the cf_clearance cookie appearing.
-    private fun solveChallenge(url: String) {
+    // challenge to clear, signalled by the cf_clearance cookie appearing. [isCanceled] lets the wait
+    // bail out promptly if OkHttp cancels the call rather than blocking the whole timeout.
+    private fun solveChallenge(url: String, isCanceled: () -> Boolean) {
         val latch = CountDownLatch(1)
         val mainHandler = Handler(Looper.getMainLooper())
         var webViewRef: WebView? = null
@@ -107,8 +115,15 @@ class CloudflareInterceptor(
             }
         }
 
-        val solved = latch.await(CHALLENGE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-        if (!solved) Log.w(TAG, "Cloudflare challenge timed out for $url")
+        // Poll in short slices so a cancelled call doesn't block a dispatcher thread for the full
+        // timeout, while still capping the total wait at CHALLENGE_TIMEOUT_SECONDS.
+        val deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(CHALLENGE_TIMEOUT_SECONDS)
+        var solved = false
+        while (System.nanoTime() < deadlineNanos) {
+            if (isCanceled()) break
+            if (latch.await(250, TimeUnit.MILLISECONDS)) { solved = true; break }
+        }
+        if (!solved) Log.w(TAG, "Cloudflare challenge unsolved (timeout/cancel) for $url")
         // Always tear the WebView down on the main thread, whether or not we solved it.
         mainHandler.post {
             runCatching {
@@ -125,18 +140,14 @@ class CloudflareInterceptor(
             android.webkit.CookieManager.getInstance().getCookie(url.toString())
         }.getOrNull() ?: return
         val uri = URI(url.toString())
-        cookieString.split(";").forEach { pair ->
-            val eq = pair.indexOf('=')
-            if (eq <= 0) return@forEach
-            val name = pair.substring(0, eq).trim()
-            val value = pair.substring(eq + 1).trim()
+        // getCookie() exposes no domain/path attributes, so register each cookie both host-only
+        // (matches the immediate retry to this exact host) and domain-wide with a leading dot
+        // (so sibling subdomains that share the cf_clearance also match on later requests).
+        val registrableDomain = ".${url.topPrivateDomain() ?: uri.host}"
+        parseCookiePairs(cookieString).forEach { (name, value) ->
             runCatching {
-                val cookie = HttpCookie(name, value).apply {
-                    domain = uri.host
-                    path = "/"
-                    version = 0
-                }
-                cookieManager.cookieStore.add(uri, cookie)
+                cookieManager.cookieStore.add(uri, HttpCookie(name, value).apply { domain = uri.host; path = "/"; version = 0 })
+                cookieManager.cookieStore.add(uri, HttpCookie(name, value).apply { domain = registrableDomain; path = "/"; version = 0 })
             }
         }
     }
