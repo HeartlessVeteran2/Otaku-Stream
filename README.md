@@ -45,8 +45,10 @@ Everything installable lives under one roof: **Settings → Sources**.
 - **Stremio add-ons** — install any add-on by URL, or browse a built-in directory. Catalogs,
   metadata, streams, and add-on subtitles all flow through. Enable, disable, and reorder them.
 - **Anime extensions** — install extensions from AnymeX/Mangayomi repositories, which run in an
-  embedded QuickJS engine with the host API they expect (HTTP, crypto and deobfuscation helpers,
-  common video extractors, per-extension preferences).
+  embedded QuickJS engine against a host API covering HTTP, the crypto and deobfuscation helpers,
+  a `p.a.c.k.e.r` unpacker with a stream extractor built on it, and per-extension preferences.
+  That's a useful subset rather than the full Mangayomi host surface, so an extension reaching for
+  a helper that isn't implemented yet will fail — if one doesn't work, that's why.
 - **A curated source directory** for one-tap installs.
 - **Custom sources** — paste a `.js` URL and it becomes a full source at runtime, sandboxed in an
   embedded Rhino interpreter. See [docs/scripted-sources.md](docs/scripted-sources.md).
@@ -86,8 +88,9 @@ Store the first time — that's expected; Otaku Stream isn't distributed there.
 Requires Android 7.0 (API 24) or newer.
 
 **A fresh install ships no sources.** That's deliberate — the app is a player and a library, not a
-content catalog. The Play and Browse tabs will point you at **Settings → Sources** to add the first
-one.
+content catalog. Both the Play and Browse tabs offer a **Browse add-ons** action that takes you
+straight to the add-on directory to install the first one; everything else lives under
+**Settings → Sources**.
 
 ## Building it yourself
 

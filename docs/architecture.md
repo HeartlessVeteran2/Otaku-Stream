@@ -10,9 +10,10 @@ Room for persistence, Media3/ExoPlayer for playback.
 :app                      shell — navigation, theme, bottom bar, Settings, splash, crash reporter,
                           intent handling (ACTION_VIEW, stremio://, otakustream://anilist-auth)
 
-:core:common              tiny pure-Kotlin helpers shared everywhere (runCatchingCancellable,
-                          JSON extensions)
-:core:ui                  the handful of composables used by every feature (CoverImage, EmptyState)
+:core:common              tiny pure-Kotlin helpers available to any module that needs them
+                          (runCatchingCancellable, JSON extensions)
+:core:ui                  composables shared by more than one feature — currently :feature:sources
+                          and :feature:library (CoverImage, EmptyState)
 :core:network             the app-wide OkHttpClient: timeouts, desktop UA, cookie jar, disk cache,
                           and the WebView-based Cloudflare challenge interceptor
 
@@ -62,10 +63,11 @@ Every play path converges on `PlayerController.play(url)`:
 3. Progress is persisted per url; `content://` URIs from MediaStore are stable, so resume works
    for local files too.
 
-High-frequency player state (position, duration, the currently active skip segment) lives in its own
-`StateFlow`, separate from `PlayerUiState`, and is collected only by the controls overlay. The
-overlay is gated behind `controlsVisible`, so the 500 ms position ticker recomposes nothing at all
-while the controls are hidden.
+Position and duration — the two fields that change twice a second for the whole length of a video —
+live in their own `PlaybackProgress` `StateFlow`, separate from `PlayerUiState`, and are collected
+only by the controls overlay. The overlay is gated behind `controlsVisible`, so the 500 ms ticker
+recomposes nothing at all while the controls are hidden. Everything else, including
+`activeSkipSegment`, stays in `PlayerUiState`, which only changes on real events.
 
 ### Unified watch history
 
@@ -82,8 +84,10 @@ the details page.
 plus dynamic ones — scripted, Stremio, Mangayomi — registered by their bootstrappers from the
 database. Registration dedupes by stable id, so multiple screens can safely bootstrap.
 
-`SourceBootstrapper` runs the rehydrate exactly once per process and hands every caller the same
-`Deferred`. Inside it, the three source kinds load **concurrently** under a `supervisorScope`, each
+`SourceBootstrapper` runs the rehydrate once and hands every concurrent and later caller the same
+`Deferred`, so it isn't repeated per screen. A failed or cancelled attempt is deliberately *not*
+cached — the `Deferred` is cleared so the next caller retries, rather than every future caller
+awaiting the same dead result until the process restarts. Inside it, the three source kinds load **concurrently** under a `supervisorScope`, each
 in its own failure boundary — a broken extension of one kind can't cancel the others or blank the
 registry. Browse and home then fan out across the registered sources in parallel, and one failing
 source degrades gracefully instead of blanking the screen.
@@ -98,8 +102,9 @@ source degrades gracefully instead of blanking the screen.
    time, so the QuickJS context is created on first real use instead of during startup. Cold start
    therefore stops scaling with the number of installed extensions.
 4. At runtime the extension calls into the `MProvider` host API: HTTP through the shared
-   OkHttpClient, crypto/deobfuscation helpers, the common video extractors, and its own
-   preferences.
+   OkHttpClient, crypto/deobfuscation helpers, a `p.a.c.k.e.r` unpacker with a stream extractor
+   built on it, and its own preferences. This is a subset of Mangayomi's full host surface, so an
+   extension calling something unimplemented fails at that call rather than at install.
 
 ### AniList status mirror
 
@@ -144,8 +149,11 @@ migration has both its schemas committed. Add a migration → add it to that tes
 - **R8 is off, on purpose.** The app isn't on the Play Store, and shrinking a codebase that
   evaluates third-party JavaScript through two different engines trades a smaller APK for a class
   of breakage that only shows up in release builds.
-- **Cleartext HTTP is permitted.** Many third-party source hosts still serve plain HTTP; refusing
-  it would silently break sources rather than protect anyone.
+- **Cleartext HTTP is permitted**, and that is a real tradeoff rather than a free one: traffic to
+  plain-HTTP source hosts can be intercepted and tampered with. Many third-party hosts still serve
+  only HTTP, so refusing it would silently break those sources; the app accepts that exposure for
+  source traffic instead. Nothing sensitive travels over it — credentials go to AniList and Stremio
+  over HTTPS.
 - CI (`.github/workflows/ci.yml`) runs `testDebugUnitTest`, `lintDebug`, `:app:assembleDebug`, and
   `:app:assembleRelease` on every PR; lint is blocking. `release.yml` builds and publishes the APK
   on a `v*` tag.
