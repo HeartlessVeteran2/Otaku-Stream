@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import com.otakustream.app.navigation.AppNavHost
 import com.otakustream.app.ui.theme.OtakuStreamTheme
 import com.otakustream.core.player.PlayerController
+import dagger.Lazy
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -29,8 +30,16 @@ private val MAX_PIP_ASPECT_RATIO = 2.39
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
+    // dagger.Lazy: PlayerController is a @Singleton that builds an ExoPlayer (renderers, track
+    // selector, audio-capability probe) in its constructor. Plain field injection made Hilt do all
+    // of that on the main thread during onCreate of every cold start — even though this Activity
+    // only reads it in onUserLeaveHint for Picture-in-Picture, and the user may never play
+    // anything. The player screen's ViewModel constructs it for real when playback starts.
+    //
+    // Leaving the app without ever playing does construct it here, once, to answer "is something
+    // playing?" — that is off the cold-start critical path, which is what this is about.
     @Inject
-    lateinit var playerController: PlayerController
+    lateinit var playerControllerLazy: Lazy<PlayerController>
 
     private var pendingStremioInstallUrl by mutableStateOf<String?>(null)
     private var pendingPlayUrl by mutableStateOf<String?>(null)
@@ -101,7 +110,7 @@ class MainActivity : ComponentActivity() {
         super.onUserLeaveHint()
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
 
-        val state = playerController.uiState.value
+        val state = playerControllerLazy.get().uiState.value
         if (!state.isPlaying || state.videoWidth <= 0 || state.videoHeight <= 0) return
 
         val rawRatio = state.videoWidth.toDouble() / state.videoHeight

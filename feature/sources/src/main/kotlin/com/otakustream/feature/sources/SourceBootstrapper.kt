@@ -9,6 +9,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
@@ -49,12 +50,19 @@ class SourceBootstrapper @Inject constructor(
         }
     }
 
-    private suspend fun bootstrap() {
-        runCatching { scriptedBootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic) }
-            .onFailure { if (it is CancellationException) throw it }
-        runCatching { stremioBootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic) }
-            .onFailure { if (it is CancellationException) throw it }
-        runCatching { mangayomiBootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic) }
-            .onFailure { if (it is CancellationException) throw it }
+    // The three source kinds are independent (separate tables, separate engines), so they load
+    // concurrently rather than one after another — the first screen waits on the slowest, not the
+    // sum. Registration still happens on this coroutine as each finishes; one kind failing does not
+    // take the others down.
+    private suspend fun bootstrap() = coroutineScope {
+        val loaders = listOf(
+            async { scriptedBootstrapper.loadPersistedSources() },
+            async { stremioBootstrapper.loadPersistedSources() },
+            async { mangayomiBootstrapper.loadPersistedSources() },
+        )
+        loaders.forEach { loader ->
+            runCatching { loader.await().forEach(sourceRepository::registerDynamic) }
+                .onFailure { if (it is CancellationException) throw it }
+        }
     }
 }

@@ -21,11 +21,16 @@ class MangayomiSourceFactory @Inject constructor(
         source: String,
         override: MangayomiSourceMetadata? = null,
         prefsJson: String? = null,
+        // Bring the JS engine up now rather than on first use. Worth it when installing — a
+        // malformed extension should fail while the user is still looking at the Install button —
+        // but not at cold-start bootstrap, where it means a native QuickJS context per installed
+        // extension before the home screen can render. Ignored when no metadata override is
+        // supplied, since reading the extension's own metadata needs the engine anyway.
+        forceBringup: Boolean = true,
     ): MangayomiVideoSource {
         val runtime = MangayomiRuntime(source, httpClient, prefsJson)
         return try {
-            // Force bringup so a malformed extension fails now (install/bootstrap), not on first use.
-            runtime.ensureLoaded()
+            if (forceBringup || override == null) runtime.ensureLoaded()
             val metadata = override ?: readSelfMetadata(runtime)
             MangayomiVideoSource(metadata, runtime)
         } catch (t: Throwable) {
