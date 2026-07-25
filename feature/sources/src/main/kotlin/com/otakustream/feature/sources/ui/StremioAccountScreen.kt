@@ -162,7 +162,14 @@ private fun LoggedInContent(uiState: StremioAccountUiState, viewModel: StremioAc
         Text(
             text = "Your Stremio library",
             style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp),
+        )
+        Text(
+            text = "Synced from your Stremio account for reference. To watch a title, search it on the " +
+                "Play or Catalog tab with your installed sources.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
         )
 
         when {

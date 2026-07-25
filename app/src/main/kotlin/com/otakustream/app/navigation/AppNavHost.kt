@@ -2,6 +2,8 @@ package com.otakustream.app.navigation
 
 import android.net.Uri
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -42,6 +44,8 @@ import com.otakustream.feature.sources.ui.MangayomiPreferencesScreen
 import com.otakustream.feature.sources.ui.ManageSourcesScreen
 import com.otakustream.feature.sources.ui.ManageStremioSourcesScreen
 import com.otakustream.feature.sources.ui.MediaDetailsScreen
+import com.otakustream.feature.sources.ui.SectionHeader
+import com.otakustream.feature.sources.ui.SourcesScreen
 import com.otakustream.feature.sources.ui.StremioAccountScreen
 import com.otakustream.feature.tracking.TrackingSettingsScreen
 
@@ -49,6 +53,7 @@ private const val ROUTE_PLAY = "play"
 private const val ROUTE_CATALOG = "catalog"
 private const val ROUTE_LIBRARY = "library"
 private const val ROUTE_SETTINGS = "settings"
+private const val ROUTE_SOURCES = "sources"
 private const val ROUTE_MANAGE_SOURCES = "manage-sources"
 private const val ROUTE_TRACKING_SETTINGS = "tracking-settings"
 private const val ROUTE_MANAGE_STREMIO = "manage-stremio"
@@ -152,7 +157,7 @@ fun AppNavHost(
             composable(ROUTE_CATALOG) {
                 CatalogScreen(
                     onMediaClick = { sourceId, mediaUrl, title -> navController.navigateToDetails(sourceId, mediaUrl, title) },
-                    onManageSourcesClick = { navController.navigate(ROUTE_MANAGE_SOURCES) },
+                    onManageSourcesClick = { navController.navigate(ROUTE_SOURCES) },
                     onBrowseAddons = { navController.navigate(ROUTE_BROWSE_STREMIO) },
                 )
             }
@@ -164,11 +169,19 @@ fun AppNavHost(
             }
             composable(ROUTE_SETTINGS) {
                 SettingsScreen(
-                    onManageSourcesClick = { navController.navigate(ROUTE_MANAGE_SOURCES) },
+                    onSourcesClick = { navController.navigate(ROUTE_SOURCES) },
                     onTrackingClick = { navController.navigate(ROUTE_TRACKING_SETTINGS) },
-                    onManageStremioClick = { navController.navigate(ROUTE_MANAGE_STREMIO) },
                     onStremioAccountClick = { navController.navigate(ROUTE_STREMIO_ACCOUNT) },
-                    onAnymexExtensionsClick = { navController.navigate(ROUTE_ANYMEX_EXTENSIONS) },
+                )
+            }
+            composable(ROUTE_SOURCES) {
+                SourcesScreen(
+                    onBack = { navController.popBackStack() },
+                    onBrowseAddons = { navController.navigate(ROUTE_BROWSE_STREMIO) },
+                    onBrowseInstallableSources = { navController.navigate(ROUTE_BROWSE_SOURCE_CATALOG) },
+                    onManageAddons = { navController.navigate(ROUTE_MANAGE_STREMIO) },
+                    onAnymexExtensions = { navController.navigate(ROUTE_ANYMEX_EXTENSIONS) },
+                    onCustomSources = { navController.navigate(ROUTE_MANAGE_SOURCES) },
                 )
             }
             composable(ROUTE_MANAGE_SOURCES) {
@@ -321,38 +334,31 @@ private fun NavHostController.navigateToDetails(sourceId: Long, mediaUrl: String
 
 @Composable
 private fun SettingsScreen(
-    onManageSourcesClick: () -> Unit,
+    onSourcesClick: () -> Unit,
     onTrackingClick: () -> Unit,
-    onManageStremioClick: () -> Unit,
     onStremioAccountClick: () -> Unit,
-    onAnymexExtensionsClick: () -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        SectionHeader("Content")
         ListItem(
-            headlineContent = { Text("Add-ons") },
-            supportingContent = { Text("Install add-ons that fill your catalog") },
-            modifier = Modifier.clickable(onClick = onManageStremioClick),
+            headlineContent = { Text("Sources") },
+            supportingContent = { Text("Add and manage add-ons, extensions, and custom sources") },
+            modifier = Modifier.clickable(onClick = onSourcesClick),
         )
-        ListItem(
-            headlineContent = { Text("Stremio account") },
-            supportingContent = { Text("Sign in to sync your Stremio library") },
-            modifier = Modifier.clickable(onClick = onStremioAccountClick),
-        )
-        ListItem(
-            headlineContent = { Text("AnymeX extensions") },
-            supportingContent = { Text("Install anime extensions from an AnymeX/Mangayomi repository") },
-            modifier = Modifier.clickable(onClick = onAnymexExtensionsClick),
-        )
+
+        SectionHeader("Accounts & sync")
         ListItem(
             headlineContent = { Text("AniList tracking") },
             supportingContent = { Text("Sync watch progress to your AniList account") },
             modifier = Modifier.clickable(onClick = onTrackingClick),
         )
         ListItem(
-            headlineContent = { Text("Custom sources") },
-            supportingContent = { Text("Advanced: add script-based video sources") },
-            modifier = Modifier.clickable(onClick = onManageSourcesClick),
+            headlineContent = { Text("Stremio account") },
+            supportingContent = { Text("Sign in to sync your Stremio library") },
+            modifier = Modifier.clickable(onClick = onStremioAccountClick),
         )
+
+        SectionHeader("Advanced")
         CloudflareSettingRow()
     }
 }
