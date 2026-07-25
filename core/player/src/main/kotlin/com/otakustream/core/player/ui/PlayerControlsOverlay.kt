@@ -26,6 +26,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -35,12 +36,17 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.otakustream.core.database.skip.SkipSegmentType
+import com.otakustream.core.player.PlaybackProgress
 import com.otakustream.core.player.PlayerUiState
+import kotlinx.coroutines.flow.StateFlow
 import java.util.Locale
 
 @Composable
 fun PlayerControlsOverlay(
     uiState: PlayerUiState,
+    // Taken as a flow rather than a value so the ~2Hz position tick invalidates only this overlay
+    // (and only while the controls are actually on screen), never the whole player screen.
+    progressFlow: StateFlow<PlaybackProgress>,
     onPlayPauseClick: () -> Unit,
     onSeekTo: (Long) -> Unit,
     onTracksClick: () -> Unit,
@@ -49,7 +55,8 @@ fun PlayerControlsOverlay(
     modifier: Modifier = Modifier,
     trailingControls: @Composable RowScope.() -> Unit = {},
 ) {
-    val durationMs = uiState.durationMs.coerceAtLeast(0L)
+    val progress by progressFlow.collectAsState()
+    val durationMs = progress.durationMs.coerceAtLeast(0L)
     var draftPositionMs by remember { mutableStateOf<Float?>(null) }
 
     Column(
@@ -63,7 +70,7 @@ fun PlayerControlsOverlay(
         val highlightColor = MaterialTheme.colorScheme.tertiary
         Box(modifier = Modifier.fillMaxWidth()) {
             Slider(
-                value = (draftPositionMs ?: uiState.positionMs.toFloat()).coerceIn(0f, durationMs.toFloat().coerceAtLeast(1f)),
+                value = (draftPositionMs ?: progress.positionMs.toFloat()).coerceIn(0f, durationMs.toFloat().coerceAtLeast(1f)),
                 onValueChange = { draftPositionMs = it },
                 onValueChangeFinished = {
                     draftPositionMs?.let { onSeekTo(it.toLong()) }
@@ -98,7 +105,7 @@ fun PlayerControlsOverlay(
         }
         Row(modifier = Modifier.fillMaxWidth()) {
             Text(
-                text = formatDurationMs(draftPositionMs?.toLong() ?: uiState.positionMs),
+                text = formatDurationMs(draftPositionMs?.toLong() ?: progress.positionMs),
                 color = MaterialTheme.colorScheme.onBackground,
             )
             Spacer(modifier = Modifier.weight(1f))
