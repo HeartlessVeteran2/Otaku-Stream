@@ -9,7 +9,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
@@ -52,9 +52,14 @@ class SourceBootstrapper @Inject constructor(
 
     // The three source kinds are independent (separate tables, separate engines), so they load
     // concurrently rather than one after another — the first screen waits on the slowest, not the
-    // sum. Registration still happens on this coroutine as each finishes; one kind failing does not
-    // take the others down.
-    private suspend fun bootstrap() = coroutineScope {
+    // sum.
+    //
+    // supervisorScope, NOT coroutineScope: under coroutineScope a single failing loader cancels its
+    // siblings, and awaiting a cancelled sibling yields CancellationException, which the rethrow
+    // below propagates — so one broken source kind would take the whole bootstrap down and leave
+    // Home/Catalog with nothing registered. With a supervisor, each await fails (or succeeds) on its
+    // own and the runCatching per loader actually isolates it.
+    private suspend fun bootstrap() = supervisorScope {
         val loaders = listOf(
             async { scriptedBootstrapper.loadPersistedSources() },
             async { stremioBootstrapper.loadPersistedSources() },
