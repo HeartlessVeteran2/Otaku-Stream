@@ -1,4 +1,4 @@
-package com.otakustream.feature.sources.ui
+package com.otakustream.core.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -16,8 +16,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 
+// Poster/cover thumbnail with a graceful fallback: shows the image when we have a URL and it loads,
+// otherwise a placeholder film icon on the surface-variant background. Shared across every feature
+// module (catalog grids, detail heroes, library rows) so the fallback behaves identically everywhere.
 @Composable
-internal fun CoverImage(url: String?, contentDescription: String?, modifier: Modifier = Modifier) {
+fun CoverImage(url: String?, contentDescription: String?, modifier: Modifier = Modifier) {
     val isError = remember(url) { mutableStateOf(false) }
     Box(modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
         if (!url.isNullOrBlank() && !isError.value) {

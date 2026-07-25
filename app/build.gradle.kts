@@ -68,6 +68,7 @@ android {
 
 dependencies {
     implementation(project(":core:player"))
+    implementation(project(":core:network"))
     implementation(project(":core:sources-api"))
     implementation(project(":core:sources-mangayomi"))
     implementation(project(":feature:sources"))

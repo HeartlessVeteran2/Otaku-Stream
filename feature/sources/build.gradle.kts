@@ -29,6 +29,8 @@ android {
 }
 
 dependencies {
+    implementation(project(":core:ui"))
+    implementation(project(":core:network"))
     implementation(project(":core:sources-api"))
     implementation(project(":core:sources-scripting"))
     implementation(project(":core:sources-stremio"))

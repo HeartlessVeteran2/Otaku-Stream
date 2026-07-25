@@ -1,5 +1,7 @@
 package com.otakustream.feature.sources.ui
 
+import com.otakustream.core.ui.CoverImage
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable

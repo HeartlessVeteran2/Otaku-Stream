@@ -1,5 +1,7 @@
 package com.otakustream.feature.sources.ui
 
+import com.otakustream.core.ui.CoverImage
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column

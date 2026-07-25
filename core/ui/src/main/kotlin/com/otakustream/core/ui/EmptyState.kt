@@ -1,4 +1,4 @@
-package com.otakustream.feature.library
+package com.otakustream.core.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -16,10 +16,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 
-// Same shape as feature:sources' EmptyState — duplicated per the repo's small-composable
-// precedent (CoverImage) rather than adding a shared UI module.
+// A friendly placeholder for "there's nothing here (yet)" states: an icon, a short title, a
+// plain-language explanation, and an optional call-to-action button. Shared across every feature
+// module so empty/first-run states read consistently.
 @Composable
-internal fun EmptyState(
+fun EmptyState(
     icon: ImageVector,
     title: String,
     message: String,

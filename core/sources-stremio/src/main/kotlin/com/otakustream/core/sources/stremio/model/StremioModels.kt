@@ -1,5 +1,9 @@
 package com.otakustream.core.sources.stremio.model
 
+import com.otakustream.core.common.intOrNull
+import com.otakustream.core.common.stringListOrEmpty
+import com.otakustream.core.common.stringOrEmpty
+import com.otakustream.core.common.stringOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -58,18 +62,6 @@ data class StremioStreamResponse(val streams: List<StremioStream>)
 data class StremioSubtitle(val id: String, val url: String, val lang: String)
 
 data class StremioSubtitleResponse(val subtitles: List<StremioSubtitle>)
-
-// Android's JSONObject/JSONArray optString return the literal string "null" for JSON-null
-// values — every array/object string read in this file goes through one of these two helpers
-// so a JSON null never turns into the four-character string "null".
-private fun JSONObject.stringOrEmpty(key: String): String = if (isNull(key)) "" else optString(key)
-private fun JSONObject.stringOrNull(key: String): String? = stringOrEmpty(key).ifEmpty { null }
-private fun JSONObject.intOrNull(key: String): Int? = if (has(key) && !isNull(key)) getInt(key) else null
-private fun JSONObject.stringListOrEmpty(key: String): List<String> {
-    val array = optJSONArray(key) ?: return emptyList()
-    return (0 until array.length()).mapNotNull { array.stringOrNull(it) }
-}
-private fun JSONArray.stringOrNull(index: Int): String? = if (isNull(index)) null else optString(index).ifEmpty { null }
 
 fun parseManifest(json: String): StremioManifest {
     val root = JSONObject(json)
