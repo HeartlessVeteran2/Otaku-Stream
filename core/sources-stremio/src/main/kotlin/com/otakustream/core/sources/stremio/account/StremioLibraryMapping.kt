@@ -25,5 +25,5 @@ fun isStremioMetaId(id: String): Boolean {
     if (id.isBlank()) return false
     if (id.length > 2 && id.startsWith("tt") && id.drop(2).all { it.isDigit() }) return true
     val colon = id.indexOf(':')
-    return colon in 1 until (id.length - 1)
+    return colon in 1 until id.length - 1
 }
