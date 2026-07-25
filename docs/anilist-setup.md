@@ -57,11 +57,15 @@ AniList screen just explains that sign-in isn't configured in this build.
 
 - The flow is OAuth 2.0 **implicit grant**: `authorizeUrl()` opens
   `https://anilist.co/api/v2/oauth/authorize?client_id=…&response_type=token`, and AniList
-  redirects to `otakustream://anilist-auth#access_token=…`. `MainActivity` catches that intent
-  (the scheme is registered in the tracking module's manifest) and stores the token.
+  redirects to `otakustream://anilist-auth#access_token=…`. The scheme is registered on
+  `MainActivity` in **`app/src/main/AndroidManifest.xml`**; `MainActivity` parses the token out of
+  the intent and hands it to `AppNavHost`, which forwards it to the AniList screen. That screen
+  persists it once via `TrackingRepository` — so if you're debugging sign-in, the three files that
+  matter are the app manifest, `MainActivity.aniListToken()`, and `TrackingSettingsScreen`.
 - The token is parsed from the URL **fragment** (`encodedFragment`, decoded exactly once) — it
   never touches AniList's servers as a query parameter and never leaves the device. It's stored
-  locally in the app's Room database.
+  on the device in EncryptedSharedPreferences (AES256, with the key held in the Android Keystore)
+  and excluded from cloud backup — not in the app's database.
 - **The client ID is not a secret.** Implicit-grant client IDs are public by design (they're
   visible in the browser URL on every sign-in), so there's no client secret to protect in this
   flow. It's kept out of git for hygiene — so forks don't accidentally ship your client — not for

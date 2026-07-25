@@ -1,8 +1,8 @@
 # Writing a scripted source
 
 Scripted sources let you add a new content source **at runtime** — no fork, no rebuild. Paste a
-URL to a `.js` file under **Settings → Manage sources** and it becomes a fully-fledged source:
-it shows up in Catalog and the home rails, is searchable, and plays through the normal pipeline.
+URL to a `.js` file under **Settings → Sources → Custom sources** and it becomes a fully-fledged source:
+it shows up on the Browse tab and the home rails, is searchable, and plays through the normal pipeline.
 
 Scripts run inside an embedded [Mozilla Rhino](https://github.com/mozilla/rhino) interpreter in
 **interpreted mode**, sandboxed: the only capability exposed to a script is a
@@ -61,5 +61,5 @@ is a complete working source against public-domain sample videos — copy it as 
 ## Hosting and installing
 
 Host the file anywhere that serves raw text over HTTPS (a raw GitHub URL works fine), then add
-its URL under **Settings → Manage sources**. The script is fetched once and stored in the app's
+its URL under **Settings → Sources → Custom sources**. The script is fetched once and stored in the app's
 database; remove or re-add it from the same screen to update.
