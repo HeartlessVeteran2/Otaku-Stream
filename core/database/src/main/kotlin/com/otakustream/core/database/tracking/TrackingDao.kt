@@ -31,24 +31,22 @@ interface TrackingDao {
     )
     fun observeLink(mediaUrl: String, season: Int): Flow<TrackerLink?>
 
-    // Every link for a title, for UI that shows which seasons are linked.
-    @Query("SELECT * FROM tracker_links WHERE mediaUrl = :mediaUrl ORDER BY season")
-    fun observeLinksFor(mediaUrl: String): Flow<List<TrackerLink>>
-
-    // Reverse lookup: the source mapping remembered for an AniList media id. Most recent-ish by
-    // rowid; there's normally only one.
+    // Reverse lookup: which local title an AniList media id was linked from, used to reopen it in
+    // its source. A title can now hold one link per season, but each of those points at a *different*
+    // AniList media id (AniList models seasons as separate entries), so a given id still normally
+    // matches exactly one row. When it doesn't — the same id linked from two sources, or linked to
+    // both a season and the whole series — the policy is the most recently created link wins, which
+    // is what ORDER BY rowid DESC gives.
     @Query("SELECT * FROM tracker_links WHERE trackerMediaId = :trackerMediaId ORDER BY rowid DESC LIMIT 1")
     suspend fun getLinkByTrackerId(trackerMediaId: Long): TrackerLink?
 
     @Upsert
     suspend fun upsertLink(link: TrackerLink)
 
+    // Removes exactly one season's link (the whole-series sentinel included) rather than the title's
+    // links wholesale, so unlinking a season the user linked separately leaves the rest intact.
     @Query("DELETE FROM tracker_links WHERE mediaUrl = :mediaUrl AND season = :season")
     suspend fun deleteLink(mediaUrl: String, season: Int)
-
-    // Unlinking a title as a whole, regardless of how many seasons were linked individually.
-    @Query("DELETE FROM tracker_links WHERE mediaUrl = :mediaUrl")
-    suspend fun deleteAllLinksFor(mediaUrl: String)
 
     @Query("SELECT * FROM tracker_tokens WHERE id = 0")
     suspend fun getToken(): TrackerToken?

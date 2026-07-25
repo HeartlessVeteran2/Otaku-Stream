@@ -122,13 +122,6 @@ class MediaDetailsViewModel @Inject constructor(
         if (url == null) flowOf(null) else trackingRepository.observeLink(url, season.toTrackerSeason())
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
-    // Every season already linked for this title, so the UI can say which are done rather than
-    // making the user click through each one to find out.
-    val linkedSeasons: StateFlow<Set<Int>> = currentMediaUrl
-        .flatMapLatest { url -> if (url == null) flowOf(emptyList()) else trackingRepository.observeLinksFor(url) }
-        .map { links -> links.map { it.season }.toSet() }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
-
     // Whether the user is signed in to AniList at all — the "Link to AniList" affordance only
     // makes sense once they are.
     val hasTrackerToken: StateFlow<Boolean> = trackingRepository.observeToken()
@@ -174,6 +167,12 @@ class MediaDetailsViewModel @Inject constructor(
     }
 
     fun load(sourceId: Long, mediaUrl: String, mediaTitle: String) {
+        // Navigating to a different title must drop the previous title's season selection, or the
+        // link row and the progress push target a season the new title may not even have. The
+        // screen's own effect can't catch this — it keys on the derived season list, and two titles
+        // with the same seasons produce an identical list, so it never re-fires. Comparing the url
+        // (not `loadedFor`) keeps retryLoad() from clearing a selection on the same title.
+        if (currentMediaUrl.value != mediaUrl) _selectedSeason.value = null
         currentMediaUrl.value = mediaUrl
         currentTitle = mediaTitle
         currentSourceId = sourceId
@@ -382,15 +381,15 @@ class MediaDetailsViewModel @Inject constructor(
         }
     }
 
-    // Unlinks what the row is currently showing. If the selected season has its own link, only that
-    // one goes; otherwise this removes the whole-series link, which is what the row was displaying.
+    // Unlinks exactly the row the UI is showing. The season comes from the resolved link itself
+    // rather than from the selection, so this can't disagree with what's on screen: if the row is
+    // displaying the whole-series fallback, that's what gets removed; if it's displaying the
+    // season's own link, that's what gets removed. Reading it off a second flow would let the two
+    // drift apart between emissions and delete the wrong one.
     fun unlinkTracker() {
         val mediaUrl = currentMediaUrl.value ?: return
-        val season = _selectedSeason.value.toTrackerSeason()
-        viewModelScope.launch {
-            val hasOwnLink = season != TRACKER_SEASON_WHOLE_SERIES && season in linkedSeasons.value
-            trackingRepository.removeLink(mediaUrl, if (hasOwnLink) season else TRACKER_SEASON_WHOLE_SERIES)
-        }
+        val season = trackerLink.value?.season ?: return
+        viewModelScope.launch { trackingRepository.removeLink(mediaUrl, season) }
     }
 
     fun setAniListStatus(status: String) = applyAniListEdit(status = status)

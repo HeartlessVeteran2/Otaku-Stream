@@ -79,13 +79,16 @@ class LinkAniListViewModel @Inject constructor(
 
     // `season` is the season being linked, or null to link the title as a whole. AniList models each
     // season as its own media entry, so a multi-season show can be linked season by season.
-    fun link(mediaUrl: String, media: AniListMedia, season: Int?, onDone: () -> Unit) {
+    // `sourceId` records which installed source `mediaUrl` came from, so the AniList detail screen
+    // can reopen this title in that source directly instead of re-searching every source.
+    fun link(mediaUrl: String, sourceId: Long, media: AniListMedia, season: Int?, onDone: () -> Unit) {
         viewModelScope.launch {
             trackingRepository.saveLink(
                 TrackerLink(
                     mediaUrl = mediaUrl,
                     trackerMediaId = media.id,
                     trackerTitle = media.title,
+                    sourceId = sourceId,
                     season = season.toTrackerSeason(),
                 ),
             )
@@ -97,6 +100,8 @@ class LinkAniListViewModel @Inject constructor(
 @Composable
 fun LinkAniListDialog(
     mediaUrl: String,
+    // The source `mediaUrl` belongs to, stored on the link so the AniList side can reopen it there.
+    sourceId: Long,
     defaultQuery: String,
     onDismiss: () -> Unit,
     // Which season this link is for; null links the title as a whole (single-season shows, sources
@@ -135,7 +140,9 @@ fun LinkAniListDialog(
                         ListItem(
                             headlineContent = { Text(media.title) },
                             supportingContent = { media.episodes?.let { Text("$it episodes") } },
-                            modifier = Modifier.clickable { viewModel.link(mediaUrl, media, season, onDismiss) },
+                            modifier = Modifier.clickable {
+                                viewModel.link(mediaUrl, sourceId, media, season, onDismiss)
+                            },
                         )
                     }
                 }
