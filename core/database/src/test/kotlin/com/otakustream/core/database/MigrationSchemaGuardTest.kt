@@ -118,10 +118,35 @@ class MigrationSchemaGuardTest {
     }
 
     @Test
+    fun `migration 11 to 12 adds season to tracker_links and makes the key composite`() {
+        assertEquals(11, MIGRATION_11_12.startVersion)
+        assertEquals(12, MIGRATION_11_12.endVersion)
+
+        val v11 = columnsByTable(loadSchema(11))
+        val v12 = columnsByTable(loadSchema(12))
+
+        // Exactly one column appears, on exactly one table, and nothing is lost — the rows are
+        // copied across the table rebuild rather than recreated empty.
+        assertEquals(mapOf("tracker_links" to setOf("season")), addedColumns(v11, v12).filterValues { it.isNotEmpty() })
+        assertTrue("no table should lose columns", removedColumns(v11, v12).all { it.value.isEmpty() })
+
+        // season is the new primary-key component, so it must be NOT NULL and INTEGER.
+        val season = fieldsByTable(loadSchema(12)).getValue("tracker_links").getValue("season")
+        assertEquals("INTEGER", season.getString("affinity"))
+        assertTrue("season must be NOT NULL", season.getBoolean("notNull"))
+
+        // The point of the migration: a per-series key becomes a per-season key. This is the part a
+        // hand-written table rebuild gets wrong most easily, and Room only complains at runtime.
+        assertEquals(listOf("mediaUrl"), primaryKeyOf(loadSchema(11), "tracker_links"))
+        assertEquals(listOf("mediaUrl", "season"), primaryKeyOf(loadSchema(12), "tracker_links"))
+    }
+
+    @Test
     fun `every registered migration has committed from and to schemas`() {
         // Each addMigrations() entry must have both its start and end schema exported; a missing
         // file means a version was bumped (or a migration added) without committing the schema.
-        val registered = listOf(MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+        val registered =
+            listOf(MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
         registered.forEach { migration ->
             assertTrue(
                 "${migration.startVersion}.json missing for migration ${migration.startVersion}→${migration.endVersion}",
@@ -138,7 +163,7 @@ class MigrationSchemaGuardTest {
     fun `every exported schema version has a committed json`() {
         // The current DB version must have an exported schema (exportSchema = true); a missing file
         // means someone bumped the version without committing the schema.
-        assertTrue("11.json missing \u2014 export the schema after bumping the DB version", loadFile(11).exists())
+        assertTrue("12.json missing \u2014 export the schema after bumping the DB version", loadFile(12).exists())
     }
 
     private fun loadFile(version: Int) = File(schemaDir, "$version.json")
@@ -168,6 +193,12 @@ class MigrationSchemaGuardTest {
                 .map { fields.getJSONObject(it) }
                 .associateBy { it.getString("columnName") }
         }
+
+    private fun primaryKeyOf(schema: JSONObject, table: String): List<String> {
+        val entity = entities(schema).first { it.getString("tableName") == table }
+        val columns = entity.getJSONObject("primaryKey").getJSONArray("columnNames")
+        return (0 until columns.length()).map { columns.getString(it) }
+    }
 
     private fun indicesByTable(schema: JSONObject): Map<String, Set<String>> =
         entities(schema).associate { entity ->

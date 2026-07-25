@@ -56,8 +56,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.database.library.LIBRARY_STATUS_COMPLETED
 import com.otakustream.core.database.library.LIBRARY_STATUS_PLANNED
 import com.otakustream.core.database.library.LIBRARY_STATUS_WATCHING
+import com.otakustream.core.database.tracking.toTrackerSeason
 import com.otakustream.core.sources.api.Video
 import com.otakustream.feature.tracking.LinkAniListDialog
+
+// Which link the AniList dialog is being opened to create. A nullable holder rather than a bare
+// `Int?`, because "closed" and "open, linking the whole series" are both null-ish and must stay
+// distinguishable.
+private data class LinkTarget(val season: Int?)
 
 @Composable
 fun MediaDetailsScreen(
@@ -75,10 +81,12 @@ fun MediaDetailsScreen(
     val libraryStatus by viewModel.libraryStatus.collectAsState()
     val watchedEpisodeUrls by viewModel.watchedEpisodeUrls.collectAsState()
     val trackerLink by viewModel.trackerLink.collectAsState()
+    val selectedSeason by viewModel.selectedSeason.collectAsState()
     val hasTrackerToken by viewModel.hasTrackerToken.collectAsState()
     val aniListEntry by viewModel.aniListEntry.collectAsState()
     val autoPlayEnabled by viewModel.autoPlayEnabled.collectAsState()
-    var showLinkDialog by remember { mutableStateOf(false) }
+    // null = dialog closed. Open, it carries which link to create — see LinkTarget.
+    var linkTarget by remember { mutableStateOf<LinkTarget?>(null) }
 
     LaunchedEffect(sourceId, mediaUrl) {
         viewModel.load(sourceId, mediaUrl, mediaTitle)
@@ -144,13 +152,32 @@ fun MediaDetailsScreen(
             }
 
             trackerLink?.let { link ->
+                // When the selected season has no link of its own, this row is showing the
+                // whole-series link as a fallback. Say so, and offer to link this season
+                // specifically — otherwise every season would silently report the same AniList entry
+                // and push progress at it. Derived from the resolved link itself rather than from a
+                // second "which seasons are linked" flow: the two are separate Room queries that
+                // emit independently, so between emissions they'd disagree and this row would
+                // describe a link it isn't showing.
+                val isFallback = link.season != selectedSeason.toTrackerSeason()
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = "AniList: ${link.trackerTitle}",
+                        text = if (isFallback) {
+                            "AniList (whole series): ${link.trackerTitle}"
+                        } else if (link.season > 0) {
+                            "AniList (season ${link.season}): ${link.trackerTitle}"
+                        } else {
+                            "AniList: ${link.trackerTitle}"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary,
                     )
                     TextButton(onClick = viewModel::unlinkTracker) { Text("Unlink") }
+                }
+                if (isFallback && hasTrackerToken) {
+                    TextButton(onClick = { linkTarget = LinkTarget(season = selectedSeason) }) {
+                        Text("Link season $selectedSeason separately")
+                    }
                 }
                 // The same status/score/progress editor as the AniList detail screen, so a linked
                 // title is managed here without leaving for the AniList tab.
@@ -166,7 +193,13 @@ fun MediaDetailsScreen(
                     onSetProgress = viewModel::setAniListProgress,
                 )
             } ?: if (hasTrackerToken) {
-                TextButton(onClick = { showLinkDialog = true }) { Text("Link to AniList") }
+                // The first link a title gets is deliberately the whole-series one (season = null),
+                // even on a multi-season show with a season selected. Everything that looks up a
+                // link without a season in hand — library status changes, sources with no season
+                // data — resolves through that row, so creating only a season-N row here would
+                // leave the title reading as unlinked everywhere else. Per-season links are then
+                // added on top via "Link season N separately".
+                TextButton(onClick = { linkTarget = LinkTarget(season = null) }) { Text("Link to AniList") }
             } else {
                 // Not signed in — a link dialog would only fail, so make this a tappable shortcut
                 // straight to AniList sign-in instead of plain text telling the user to hunt for it.
@@ -228,7 +261,12 @@ fun MediaDetailsScreen(
             }
 
             val seasons = remember(uiState.episodes) { uiState.episodes.mapNotNull { it.season }.distinct().sorted() }
-            var selectedSeason by remember(uiState.episodes) { mutableStateOf(seasons.firstOrNull()) }
+            // Selection lives in the ViewModel now: it decides which episodes are listed *and* which
+            // AniList entry the link row above targets, since AniList models each season separately.
+            // Keyed on mediaUrl too: two titles can have the same season numbers, so `seasons` alone
+            // wouldn't change on navigation and the selection the ViewModel just cleared would never
+            // be re-seeded, leaving the episode list filtered to a season that matches nothing.
+            LaunchedEffect(mediaUrl, seasons) { viewModel.selectSeason(seasons.firstOrNull()) }
             val visibleEpisodes = remember(uiState.episodes, selectedSeason) {
                 if (seasons.isEmpty()) uiState.episodes else uiState.episodes.filter { it.season == selectedSeason }
             }
@@ -238,7 +276,7 @@ fun MediaDetailsScreen(
                     items(seasons, key = { it }) { season ->
                         FilterChip(
                             selected = season == selectedSeason,
-                            onClick = { selectedSeason = season },
+                            onClick = { viewModel.selectSeason(season) },
                             label = { Text("Season $season") },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = MaterialTheme.colorScheme.tertiary,
@@ -319,11 +357,16 @@ fun MediaDetailsScreen(
         }
     }
 
-    if (showLinkDialog) {
+    linkTarget?.let { target ->
         LinkAniListDialog(
             mediaUrl = mediaUrl,
-            defaultQuery = mediaTitle,
-            onDismiss = { showLinkDialog = false },
+            sourceId = sourceId,
+            // Seed the search with the season, since AniList lists them as separate titles
+            // ("Show Season 2"), so the right entry is usually the first result. The whole-series
+            // link searches the plain title.
+            defaultQuery = target.season?.takeIf { it > 1 }?.let { "$mediaTitle Season $it" } ?: mediaTitle,
+            onDismiss = { linkTarget = null },
+            season = target.season,
         )
     }
 

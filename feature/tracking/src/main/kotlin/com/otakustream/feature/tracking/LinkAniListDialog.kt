@@ -27,6 +27,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.otakustream.core.database.tracking.TrackerLink
+import com.otakustream.core.database.tracking.toTrackerSeason
 import com.otakustream.core.database.tracking.TrackingRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.isActive
@@ -76,9 +77,21 @@ class LinkAniListViewModel @Inject constructor(
         }
     }
 
-    fun link(mediaUrl: String, media: AniListMedia, onDone: () -> Unit) {
+    // `season` is the season being linked, or null to link the title as a whole. AniList models each
+    // season as its own media entry, so a multi-season show can be linked season by season.
+    // `sourceId` records which installed source `mediaUrl` came from, so the AniList detail screen
+    // can reopen this title in that source directly instead of re-searching every source.
+    fun link(mediaUrl: String, sourceId: Long, media: AniListMedia, season: Int?, onDone: () -> Unit) {
         viewModelScope.launch {
-            trackingRepository.saveLink(TrackerLink(mediaUrl = mediaUrl, trackerMediaId = media.id, trackerTitle = media.title))
+            trackingRepository.saveLink(
+                TrackerLink(
+                    mediaUrl = mediaUrl,
+                    trackerMediaId = media.id,
+                    trackerTitle = media.title,
+                    sourceId = sourceId,
+                    season = season.toTrackerSeason(),
+                ),
+            )
             onDone()
         }
     }
@@ -87,8 +100,13 @@ class LinkAniListViewModel @Inject constructor(
 @Composable
 fun LinkAniListDialog(
     mediaUrl: String,
+    // The source `mediaUrl` belongs to, stored on the link so the AniList side can reopen it there.
+    sourceId: Long,
     defaultQuery: String,
     onDismiss: () -> Unit,
+    // Which season this link is for; null links the title as a whole (single-season shows, sources
+    // with no season data, and the "whole series" case).
+    season: Int? = null,
     viewModel: LinkAniListViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -122,7 +140,9 @@ fun LinkAniListDialog(
                         ListItem(
                             headlineContent = { Text(media.title) },
                             supportingContent = { media.episodes?.let { Text("$it episodes") } },
-                            modifier = Modifier.clickable { viewModel.link(mediaUrl, media, onDismiss) },
+                            modifier = Modifier.clickable {
+                                viewModel.link(mediaUrl, sourceId, media, season, onDismiss)
+                            },
                         )
                     }
                 }

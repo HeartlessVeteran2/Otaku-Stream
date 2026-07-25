@@ -36,7 +36,7 @@ import com.otakustream.core.database.tracking.TrackingDao
         StremioCatalogToggleEntity::class,
         MangayomiSourceEntity::class,
     ],
-    version = 11,
+    version = 12,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {

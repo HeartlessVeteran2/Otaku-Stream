@@ -5,7 +5,9 @@ import androidx.lifecycle.viewModelScope
 import com.otakustream.core.database.library.LibraryEntry
 import com.otakustream.core.database.library.LibraryRepository
 import com.otakustream.core.database.library.WatchHistoryEntry
+import com.otakustream.core.database.tracking.TRACKER_SEASON_WHOLE_SERIES
 import com.otakustream.core.database.tracking.TrackerLink
+import com.otakustream.core.database.tracking.toTrackerSeason
 import com.otakustream.core.database.tracking.TrackingRepository
 import com.otakustream.core.sources.api.Episode
 import com.otakustream.core.sources.api.MediaDetails
@@ -32,6 +34,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -100,9 +103,34 @@ class MediaDetailsViewModel @Inject constructor(
         .map { it.toSet() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
-    val trackerLink: StateFlow<TrackerLink?> = currentMediaUrl
-        .flatMapLatest { url -> if (url == null) flowOf(null) else trackingRepository.observeLink(url) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    // Which season the user is looking at. Hoisted out of the screen because it now decides more
+    // than which episodes are listed: AniList models each season as its own media entry, so it also
+    // decides which entry the link row and the list editor target (issue #9). It deliberately does
+    // *not* decide where watch progress goes — that follows the played episode's own season, since
+    // auto-play can carry playback out of the season the user was looking at (registerAniListSync).
+    // null until episodes load, and stays null for sources with no season data.
+    private val _selectedSeason = MutableStateFlow<Int?>(null)
+    val selectedSeason: StateFlow<Int?> = _selectedSeason.asStateFlow()
+
+    fun selectSeason(season: Int?) {
+        _selectedSeason.value = season
+    }
+
+    // The link that applies to what's on screen: the selected season's own, or the whole-series one
+    // as a fallback. A single-season show and a source with no seasons both land on the fallback,
+    // which is how this stays invisible for everything that isn't multi-season.
+    val trackerLink: StateFlow<TrackerLink?> = combine(currentMediaUrl, _selectedSeason) { url, season ->
+        url to season
+    }.flatMapLatest { (url, season) ->
+        if (url == null) {
+            flowOf(null)
+        } else {
+            // Clear first: a StateFlow keeps its last value while the new Room query runs, so
+            // without this the row would still show — and Unlink would still target — the previous
+            // season's link for the moment after switching seasons.
+            trackingRepository.observeLink(url, season.toTrackerSeason()).onStart { emit(null) }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     // Whether the user is signed in to AniList at all — the "Link to AniList" affordance only
     // makes sense once they are.
@@ -149,6 +177,12 @@ class MediaDetailsViewModel @Inject constructor(
     }
 
     fun load(sourceId: Long, mediaUrl: String, mediaTitle: String) {
+        // Navigating to a different title must drop the previous title's season selection, or the
+        // link row and the progress push target a season the new title may not even have. The
+        // screen's own effect can't catch this — it keys on the derived season list, and two titles
+        // with the same seasons produce an identical list, so it never re-fires. Comparing the url
+        // (not `loadedFor`) keeps retryLoad() from clearing a selection on the same title.
+        if (currentMediaUrl.value != mediaUrl) _selectedSeason.value = null
         currentMediaUrl.value = mediaUrl
         currentTitle = mediaTitle
         currentSourceId = sourceId
@@ -348,14 +382,24 @@ class MediaDetailsViewModel @Inject constructor(
         val mediaUrl = currentMediaUrl.value ?: return
         val manager = trackingManager
         val episodeNumber = episode.episodeNumber
+        // The episode's own season, not the selected one: auto-play-next can carry playback into a
+        // different season than the user was looking at when they pressed play, and progress has to
+        // land on the AniList entry for the episode that actually played.
+        val season = episode.season
         PlaybackCompletion.register(videoUrl) {
-            manager.onEpisodeWatched(mediaUrl, episodeNumber)
+            manager.onEpisodeWatched(mediaUrl, episodeNumber, season)
         }
     }
 
+    // Unlinks exactly the row the UI is showing. The season comes from the resolved link itself
+    // rather than from the selection, so this can't disagree with what's on screen: if the row is
+    // displaying the whole-series fallback, that's what gets removed; if it's displaying the
+    // season's own link, that's what gets removed. Reading it off a second flow would let the two
+    // drift apart between emissions and delete the wrong one.
     fun unlinkTracker() {
         val mediaUrl = currentMediaUrl.value ?: return
-        viewModelScope.launch { trackingRepository.removeLink(mediaUrl) }
+        val season = trackerLink.value?.season ?: return
+        viewModelScope.launch { trackingRepository.removeLink(mediaUrl, season) }
     }
 
     fun setAniListStatus(status: String) = applyAniListEdit(status = status)
@@ -364,9 +408,16 @@ class MediaDetailsViewModel @Inject constructor(
 
     fun setAniListProgress(progress: Int) = applyAniListEdit(progress = progress.coerceAtLeast(0))
 
+    // True while `mediaId` is still the AniList entry the screen is pointing at. Every write to
+    // _aniListEntry from an in-flight request is gated on this: switching season (or title) retargets
+    // the editor at a different AniList media, and a request that started before the switch must not
+    // land its result on the new season's editor.
+    private fun stillEditing(mediaId: Long) = trackerLink.value?.trackerMediaId == mediaId
+
     private suspend fun loadAniListEntry(mediaId: Long, token: String) {
         runCatching { aniListClient.fetchViewerListEntry(token, mediaId) }
             .onSuccess { entry ->
+                if (!stillEditing(mediaId)) return
                 _aniListEntry.value = _aniListEntry.value.copy(
                     onList = entry != null,
                     status = entry?.status,
@@ -402,11 +453,15 @@ class MediaDetailsViewModel @Inject constructor(
         viewModelScope.launch {
             runCatching { aniListClient.saveMediaListEntry(token, mediaId, status, score, progress) }
                 .onSuccess {
+                    // The save itself still went through for the right AniList entry — only the
+                    // on-screen editor state is skipped, because it now belongs to another entry.
+                    if (!stillEditing(mediaId)) return@launch
                     _aniListEntry.value = _aniListEntry.value.copy(isSaving = false, saveError = null)
                     loadAniListEntry(mediaId, token)
                 }
                 .onFailure {
                     if (it is CancellationException) throw it
+                    if (!stillEditing(mediaId)) return@launch
                     _aniListEntry.value = _aniListEntry.value.copy(
                         isSaving = false,
                         saveError = it.message ?: "Couldn't update your list",
