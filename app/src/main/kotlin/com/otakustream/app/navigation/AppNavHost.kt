@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -143,7 +144,10 @@ fun AppNavHost(
         NavHost(
             navController = navController,
             startDestination = ROUTE_PLAY,
-            modifier = Modifier.padding(padding),
+            // consumeWindowInsets: this padding already applies the system-bar insets, so inner
+            // Scaffolds/TopAppBars must not re-apply them — without it every screen with its own
+            // top bar gets a status-bar-height empty band above the bar.
+            modifier = Modifier.padding(padding).consumeWindowInsets(padding),
         ) {
             composable(ROUTE_PLAY) {
                 PlayScreen(

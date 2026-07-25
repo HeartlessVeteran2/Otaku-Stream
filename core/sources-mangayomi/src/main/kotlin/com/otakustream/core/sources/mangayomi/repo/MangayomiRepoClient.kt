@@ -55,7 +55,7 @@ class MangayomiRepoClient @Inject constructor(
         val DEFAULT_LISTINGS = listOf(
             MangayomiExtensionListing(
                 id = 100000001L,
-                name = "Mangayomi Example",
+                name = "Sample: Mangayomi Example",
                 lang = "en",
                 baseUrl = "https://example.invalid",
                 iconUrl = null,
