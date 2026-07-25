@@ -1,7 +1,7 @@
 package com.otakustream.core.sources.stremio
 
 import com.otakustream.core.sources.stremio.model.AddonListOrigin
-import com.otakustream.core.sources.stremio.model.parseOfficialAddonCollection
+import com.otakustream.core.sources.stremio.model.parseAddonCollection
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -24,7 +24,7 @@ class StremioParsingTest {
               }
             ]
         """.trimIndent()
-        val listings = parseOfficialAddonCollection(json)
+        val listings = parseAddonCollection(json, AddonListOrigin.OFFICIAL)
         assertEquals(1, listings.size)
         val listing = listings.first()
         assertEquals("Cinemeta", listing.name)
@@ -43,7 +43,7 @@ class StremioParsingTest {
               {"transportUrl":"https://ok/manifest.json","manifest":{"name":"Ok"}}
             ]
         """.trimIndent()
-        val listings = parseOfficialAddonCollection(json)
+        val listings = parseAddonCollection(json, AddonListOrigin.OFFICIAL)
         assertEquals(1, listings.size)
         assertEquals("Ok", listings.first().name)
     }
@@ -54,13 +54,16 @@ class StremioParsingTest {
     @Test
     fun `a json array that is not an addon collection parses to nothing`() {
         val json = """[{"unrelated":true},{"also":"not an addon"}]"""
-        assertTrue(parseOfficialAddonCollection(json).isEmpty())
+        assertTrue(parseAddonCollection(json, AddonListOrigin.OFFICIAL).isEmpty())
     }
 
+    // The origin is a required argument rather than a defaulted field, so a caller can't accidentally
+    // label a community or user-supplied add-on as vetted Official by forgetting to stamp it.
     @Test
-    fun `listings default to the official origin until the caller stamps one`() {
+    fun `listings carry the origin the caller declared`() {
         val json = """[{"transportUrl":"https://x/manifest.json","manifest":{"name":"N"}}]"""
-        assertEquals(AddonListOrigin.OFFICIAL, parseOfficialAddonCollection(json).single().origin)
+        assertEquals(AddonListOrigin.CUSTOM, parseAddonCollection(json, AddonListOrigin.CUSTOM).single().origin)
+        assertEquals(AddonListOrigin.COMMUNITY, parseAddonCollection(json, AddonListOrigin.COMMUNITY).single().origin)
     }
 
     @Test
@@ -68,7 +71,7 @@ class StremioParsingTest {
         val json = """
             [{"transportUrl":"https://x/manifest.json","manifest":{"name":"N","description":null,"logo":null}}]
         """.trimIndent()
-        val listing = parseOfficialAddonCollection(json).single()
+        val listing = parseAddonCollection(json, AddonListOrigin.OFFICIAL).single()
         assertNull(listing.description)
         assertNull(listing.logoUrl)
         assertTrue(listing.types.isEmpty())

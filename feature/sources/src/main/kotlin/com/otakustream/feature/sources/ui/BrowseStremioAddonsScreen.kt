@@ -28,11 +28,13 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.sources.stremio.model.AddonListOrigin
@@ -112,17 +114,21 @@ private fun CustomListField(
     error: String?,
     onSave: (String) -> Unit,
 ) {
-    var draft by remember { mutableStateOf(savedUrl) }
-    // The saved value arrives asynchronously from prefs, so adopt it once it lands — but only when
-    // it differs, so this never fights the user mid-edit.
+    // rememberSaveable: a half-typed URL survives a rotation or a process-death restore, which
+    // plain remember would discard.
+    var draft by rememberSaveable { mutableStateOf(savedUrl) }
+    // The saved value arrives asynchronously from prefs, so it can land after the user has already
+    // started typing. Adopt it only while the field is untouched — comparing draft to savedUrl would
+    // detect an edit and then overwrite it, which is the opposite of what's wanted.
+    var edited by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(savedUrl) {
-        if (savedUrl != draft) draft = savedUrl
+        if (!edited) draft = savedUrl
     }
 
     Column(modifier = Modifier.fillMaxWidth().padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         OutlinedTextField(
             value = draft,
-            onValueChange = { draft = it },
+            onValueChange = { draft = it; edited = true },
             label = { Text("Add your own list (optional)") },
             placeholder = { Text("https://…") },
             supportingText = {
@@ -130,13 +136,19 @@ private fun CustomListField(
             },
             singleLine = true,
             isError = error != null,
-            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                keyboardType = KeyboardType.Uri,
+                imeAction = ImeAction.Done,
+            ),
             modifier = Modifier.fillMaxWidth(),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = { onSave(draft) }, enabled = draft != savedUrl) { Text("Save list") }
+            TextButton(
+                onClick = { edited = false; onSave(draft) },
+                enabled = draft != savedUrl,
+            ) { Text("Save list") }
             if (savedUrl.isNotBlank()) {
-                TextButton(onClick = { draft = ""; onSave("") }) { Text("Remove") }
+                TextButton(onClick = { draft = ""; edited = false; onSave("") }) { Text("Remove") }
             }
         }
         error?.let {
@@ -188,10 +200,15 @@ private fun OriginChip(origin: AddonListOrigin) {
         AddonListOrigin.COMMUNITY -> MaterialTheme.colorScheme.tertiary
         AddonListOrigin.CUSTOM -> MaterialTheme.colorScheme.secondary
     }
+    val label = when (origin) {
+        AddonListOrigin.OFFICIAL -> "Official"
+        AddonListOrigin.COMMUNITY -> "Community"
+        AddonListOrigin.CUSTOM -> "Custom list"
+    }
     AssistChip(
         onClick = {},
         enabled = false,
-        label = { Text(origin.label, style = MaterialTheme.typography.labelSmall) },
+        label = { Text(label, style = MaterialTheme.typography.labelSmall) },
         colors = AssistChipDefaults.assistChipColors(disabledLabelColor = color),
     )
 }

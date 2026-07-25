@@ -28,11 +28,18 @@ class StremioDirectorySettings @Inject constructor(
 
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    // Set once the user has saved something this process. The startup read must not publish its
+    // (by then stale) value over a save that landed while the read was still in flight — that would
+    // revert the field in front of the user despite the newer value being the one on disk.
+    @Volatile
+    private var locallyModified = false
+
     init {
         // Off the main thread: touching `prefs` forces the file read, and this is constructed during
         // DI graph setup. Starts null and fills in shortly after.
         ioScope.launch {
-            _customListUrl.value = runCatching { prefs.getString(KEY_CUSTOM_LIST_URL, null) }.getOrNull()
+            val stored = runCatching { prefs.getString(KEY_CUSTOM_LIST_URL, null) }.getOrNull()
+            if (!locallyModified) _customListUrl.value = stored
         }
     }
 
@@ -53,6 +60,7 @@ class StremioDirectorySettings @Inject constructor(
     // Returning only once the value is durable makes the sequence deterministic.
     suspend fun set(url: String?) {
         val cleaned = url?.trim()?.takeIf { it.isNotEmpty() }
+        locallyModified = true
         _customListUrl.value = cleaned
         withContext(Dispatchers.IO) {
             runCatching {

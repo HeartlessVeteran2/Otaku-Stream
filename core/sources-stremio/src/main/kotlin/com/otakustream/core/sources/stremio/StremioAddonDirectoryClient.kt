@@ -2,7 +2,7 @@ package com.otakustream.core.sources.stremio
 
 import com.otakustream.core.sources.stremio.model.AddonListOrigin
 import com.otakustream.core.sources.stremio.model.OfficialAddonListing
-import com.otakustream.core.sources.stremio.model.parseOfficialAddonCollection
+import com.otakustream.core.sources.stremio.model.parseAddonCollection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -26,7 +26,7 @@ data class AddonDirectory(
 // small official curated list plus Stremio's own community collection (the exact list the official
 // app shows as "Community Add-ons"), and optionally a list the user supplied themselves (issue #10).
 // All three are plain GETs of the same `[{ manifest, transportUrl, ... }]` shape, so
-// parseOfficialAddonCollection consumes all of them and each result is stamped with where it came from.
+// parseAddonCollection consumes all of them, taking the origin so results carry where they came from.
 class StremioAddonDirectoryClient @Inject constructor(
     private val httpClient: OkHttpClient,
     private val directorySettings: StremioDirectorySettings,
@@ -99,14 +99,14 @@ class StremioAddonDirectoryClient @Inject constructor(
         } finally {
             cancellation?.dispose()
         }
-        val parsed = parseOfficialAddonCollection(content)
+        val parsed = parseAddonCollection(content, origin)
         // A URL that returns 200 but isn't an add-on list (an HTML page, say) parses to nothing.
         // Treat that as an error for a custom list rather than silently showing zero add-ons, since
         // "nothing appeared" is the least useful thing to tell someone who just typed a URL.
         if (parsed.isEmpty() && origin == AddonListOrigin.CUSTOM) {
             error("no add-ons found — is it a Stremio add-on collection?")
         }
-        parsed.map { it.copy(origin = origin) }
+        parsed
     }
 
     private companion object {
