@@ -81,6 +81,7 @@ fun MediaDetailsScreen(
     val aniListEntry by viewModel.aniListEntry.collectAsState()
     val autoPlayEnabled by viewModel.autoPlayEnabled.collectAsState()
     var showLinkDialog by remember { mutableStateOf(false) }
+    var linkSeason by remember { mutableStateOf<Int?>(null) }
 
     LaunchedEffect(sourceId, mediaUrl) {
         viewModel.load(sourceId, mediaUrl, mediaTitle)
@@ -150,7 +151,8 @@ fun MediaDetailsScreen(
                 // whole-series link as a fallback. Say so, and offer to link this season
                 // specifically — otherwise every season would silently report the same AniList entry
                 // and push progress at it.
-                val isFallback = selectedSeason != null && link.season !in linkedSeasons
+                val isFallback = selectedSeason != null && selectedSeason > 0 &&
+                    link.season == 0 && selectedSeason !in linkedSeasons
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = if (isFallback) {
@@ -166,7 +168,10 @@ fun MediaDetailsScreen(
                     TextButton(onClick = viewModel::unlinkTracker) { Text("Unlink") }
                 }
                 if (isFallback && hasTrackerToken) {
-                    TextButton(onClick = { showLinkDialog = true }) {
+                    TextButton(onClick = {
+                        linkSeason = selectedSeason
+                        showLinkDialog = true
+                    }) {
                         Text("Link season $selectedSeason separately")
                     }
                 }
@@ -184,7 +189,10 @@ fun MediaDetailsScreen(
                     onSetProgress = viewModel::setAniListProgress,
                 )
             } ?: if (hasTrackerToken) {
-                TextButton(onClick = { showLinkDialog = true }) { Text("Link to AniList") }
+                TextButton(onClick = {
+                    linkSeason = null
+                    showLinkDialog = true
+                }) { Text("Link to AniList") }
             } else {
                 // Not signed in — a link dialog would only fail, so make this a tappable shortcut
                 // straight to AniList sign-in instead of plain text telling the user to hunt for it.
@@ -346,7 +354,7 @@ fun MediaDetailsScreen(
             // ("Show Season 2"), so the right entry is usually the first result.
             defaultQuery = selectedSeason?.takeIf { it > 1 }?.let { "$mediaTitle Season $it" } ?: mediaTitle,
             onDismiss = { showLinkDialog = false },
-            season = selectedSeason,
+            season = linkSeason,
         )
     }
 
