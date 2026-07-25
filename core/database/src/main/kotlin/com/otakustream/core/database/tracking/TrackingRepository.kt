@@ -8,11 +8,16 @@ import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 
 interface TrackingRepository {
-    suspend fun getLink(mediaUrl: String): TrackerLink?
-    fun observeLink(mediaUrl: String): Flow<TrackerLink?>
+    // season defaults to the whole-series sentinel, so existing callers that don't know or care
+    // about seasons behave exactly as before. Both of these resolve an exact-season link first and
+    // fall back to the whole-series one.
+    suspend fun getLink(mediaUrl: String, season: Int = TRACKER_SEASON_WHOLE_SERIES): TrackerLink?
+    fun observeLink(mediaUrl: String, season: Int = TRACKER_SEASON_WHOLE_SERIES): Flow<TrackerLink?>
+    fun observeLinksFor(mediaUrl: String): Flow<List<TrackerLink>>
     suspend fun getLinkByTrackerId(trackerMediaId: Long): TrackerLink?
     suspend fun saveLink(link: TrackerLink)
-    suspend fun removeLink(mediaUrl: String)
+    suspend fun removeLink(mediaUrl: String, season: Int = TRACKER_SEASON_WHOLE_SERIES)
+    suspend fun removeAllLinksFor(mediaUrl: String)
 
     suspend fun getToken(): String?
     fun observeToken(): Flow<String?>
@@ -24,12 +29,14 @@ class TrackingRepositoryImpl @Inject constructor(
     private val dao: TrackingDao,
     private val tokenStore: EncryptedTokenStore,
 ) : TrackingRepository {
-    override suspend fun getLink(mediaUrl: String): TrackerLink? = dao.getLink(mediaUrl)
-    override fun observeLink(mediaUrl: String): Flow<TrackerLink?> = dao.observeLink(mediaUrl)
+    override suspend fun getLink(mediaUrl: String, season: Int): TrackerLink? = dao.getLink(mediaUrl, season)
+    override fun observeLink(mediaUrl: String, season: Int): Flow<TrackerLink?> = dao.observeLink(mediaUrl, season)
+    override fun observeLinksFor(mediaUrl: String): Flow<List<TrackerLink>> = dao.observeLinksFor(mediaUrl)
     override suspend fun getLinkByTrackerId(trackerMediaId: Long): TrackerLink? =
         dao.getLinkByTrackerId(trackerMediaId)
     override suspend fun saveLink(link: TrackerLink) = dao.upsertLink(link)
-    override suspend fun removeLink(mediaUrl: String) = dao.deleteLink(mediaUrl)
+    override suspend fun removeLink(mediaUrl: String, season: Int) = dao.deleteLink(mediaUrl, season)
+    override suspend fun removeAllLinksFor(mediaUrl: String) = dao.deleteAllLinksFor(mediaUrl)
 
     // The token now lives in the Keystore-backed EncryptedTokenStore. Reads/observes migrate any
     // pre-existing plaintext Room token into the encrypted store once, then wipe the Room row.

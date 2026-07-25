@@ -59,3 +59,37 @@ val MIGRATION_10_11 = object : Migration(10, 11) {
         db.execSQL("CREATE INDEX IF NOT EXISTS `index_library_entries_addedAtEpochMs` ON `library_entries` (`addedAtEpochMs`)")
     }
 }
+
+// v11 → v12: tracker_links gains a `season` column and a composite (mediaUrl, season) primary key,
+// so a multi-season series can link each season to its own AniList media entry (issue #9).
+//
+// A table rebuild rather than an ALTER: SQLite cannot change a primary key in place. Every existing
+// row is preserved at season = 0 ("whole series"), which is also the fallback lookups land on — so
+// links made before this migration keep behaving exactly as they did.
+//
+// The CREATE must match Room's generated schema for the new entity exactly (column order, types,
+// NOT NULL, and the composite PK), or validation fails when the database is next opened.
+val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `tracker_links_new` (
+                `mediaUrl` TEXT NOT NULL,
+                `trackerMediaId` INTEGER NOT NULL,
+                `trackerTitle` TEXT NOT NULL,
+                `sourceId` INTEGER NOT NULL,
+                `season` INTEGER NOT NULL,
+                PRIMARY KEY(`mediaUrl`, `season`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            """
+            INSERT INTO `tracker_links_new` (`mediaUrl`, `trackerMediaId`, `trackerTitle`, `sourceId`, `season`)
+            SELECT `mediaUrl`, `trackerMediaId`, `trackerTitle`, `sourceId`, 0 FROM `tracker_links`
+            """.trimIndent(),
+        )
+        db.execSQL("DROP TABLE `tracker_links`")
+        db.execSQL("ALTER TABLE `tracker_links_new` RENAME TO `tracker_links`")
+    }
+}
