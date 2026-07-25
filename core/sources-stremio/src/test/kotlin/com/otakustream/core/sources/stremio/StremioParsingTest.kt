@@ -1,5 +1,6 @@
 package com.otakustream.core.sources.stremio
 
+import com.otakustream.core.sources.stremio.model.AddonListOrigin
 import com.otakustream.core.sources.stremio.model.parseOfficialAddonCollection
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -45,6 +46,21 @@ class StremioParsingTest {
         val listings = parseOfficialAddonCollection(json)
         assertEquals(1, listings.size)
         assertEquals("Ok", listings.first().name)
+    }
+
+    // A user-supplied list URL (issue #10) is parsed by this same function, and the client turns an
+    // empty result into "no add-ons found" rather than silently showing nothing. That only works if
+    // a well-formed JSON array of unrelated objects really does parse to empty.
+    @Test
+    fun `a json array that is not an addon collection parses to nothing`() {
+        val json = """[{"unrelated":true},{"also":"not an addon"}]"""
+        assertTrue(parseOfficialAddonCollection(json).isEmpty())
+    }
+
+    @Test
+    fun `listings default to the official origin until the caller stamps one`() {
+        val json = """[{"transportUrl":"https://x/manifest.json","manifest":{"name":"N"}}]"""
+        assertEquals(AddonListOrigin.OFFICIAL, parseOfficialAddonCollection(json).single().origin)
     }
 
     @Test
