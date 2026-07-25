@@ -33,14 +33,17 @@ import com.otakustream.core.sources.mangayomi.repo.MangayomiExtensionListing
 @Composable
 fun MangayomiExtensionsScreen(
     modifier: Modifier = Modifier,
+    onBack: () -> Unit = {},
     onConfigure: (Long) -> Unit = {},
     viewModel: MangayomiExtensionsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    Scaffold(modifier = modifier.fillMaxSize()) { padding ->
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        topBar = { BackTopBar(title = "Extensions", onBack = onBack) },
+    ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-            Text(text = "AnymeX extensions", style = MaterialTheme.typography.titleMedium)
             Text(
                 text = "Install AnymeX/Mangayomi anime extensions from a repository. Paste a repo's " +
                     "anime index URL, or use the built-in example. The app ships no sources itself.",
@@ -57,7 +60,7 @@ fun MangayomiExtensionsScreen(
                     value = uiState.repoUrl,
                     onValueChange = viewModel::onRepoUrlChange,
                     label = { Text("Extension repo URL") },
-                    supportingText = { Text("Link to a Mangayomi anime index (JSON). Leave blank for the built-in example.") },
+                    supportingText = { Text("Paste an extension repository link, or leave blank for the built-in sample.") },
                     modifier = Modifier.weight(1f),
                 )
                 Button(onClick = viewModel::saveRepoUrl, enabled = !uiState.isLoading) { Text("Load") }

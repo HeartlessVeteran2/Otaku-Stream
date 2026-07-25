@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
+import com.otakustream.core.sources.api.UiMessages
 
 data class MangayomiExtensionsUiState(
     val isLoading: Boolean = false,
@@ -86,6 +87,7 @@ class MangayomiExtensionsViewModel @Inject constructor(
                 // live QuickJS engine that's neither registered nor closed.
                 val source = installer.install(listing)
                 withContext(NonCancellable) { sourceRepository.registerDynamic(source) }
+                UiMessages.show("Installed ${listing.name}")
             }.onFailure { failure ->
                 if (failure is CancellationException) throw failure
                 _uiState.value = _uiState.value.copy(error = failure.message ?: "Failed to install extension")
@@ -103,6 +105,7 @@ class MangayomiExtensionsViewModel @Inject constructor(
                     installer.uninstall(listing.id)
                     sourceRepository.unregisterDynamic(listing.id)
                 }
+                UiMessages.show("Removed ${listing.name}")
             }.onFailure { failure ->
                 if (failure is CancellationException) throw failure
                 _uiState.value = _uiState.value.copy(error = failure.message ?: "Failed to uninstall extension")

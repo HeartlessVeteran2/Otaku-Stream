@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.otakustream.core.sources.api.UiMessages
 
 data class BrowseSourceCatalogUiState(
     val isLoading: Boolean = false,
@@ -100,6 +101,7 @@ class BrowseSourceCatalogViewModel @Inject constructor(
                             .forEach(sourceRepository::registerDynamic)
                     }
                 }
+                UiMessages.show("Installed ${entry.name}")
             }.onFailure { failure ->
                 if (failure is CancellationException) throw failure
                 _uiState.value = _uiState.value.copy(error = failure.message ?: "Failed to install source")

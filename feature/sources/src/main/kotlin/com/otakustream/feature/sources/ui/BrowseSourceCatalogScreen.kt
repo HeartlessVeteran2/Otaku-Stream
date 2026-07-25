@@ -27,13 +27,16 @@ import com.otakustream.feature.sources.SourceCatalogEntry
 @Composable
 fun BrowseSourceCatalogScreen(
     modifier: Modifier = Modifier,
+    onBack: () -> Unit = {},
     viewModel: BrowseSourceCatalogViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    Scaffold(modifier = modifier.fillMaxSize()) { padding ->
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        topBar = { BackTopBar(title = "Source directory", onBack = onBack) },
+    ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-            Text(text = "Browse sources", style = MaterialTheme.typography.titleMedium)
             Text(
                 text = "One-tap install sources from a directory. Point at a source repository, or " +
                     "use the built-in example.",
@@ -47,7 +50,7 @@ fun BrowseSourceCatalogScreen(
                     value = uiState.repoUrl,
                     onValueChange = viewModel::onRepoUrlChange,
                     label = { Text("Source repository URL") },
-                    supportingText = { Text("A link to a source directory (JSON). Leave blank for the built-in list.") },
+                    supportingText = { Text("Paste a source directory link, or leave blank for the built-in list.") },
                     modifier = Modifier.weight(1f),
                 )
                 Button(onClick = viewModel::saveRepoUrl, enabled = !uiState.isLoading) { Text("Load") }

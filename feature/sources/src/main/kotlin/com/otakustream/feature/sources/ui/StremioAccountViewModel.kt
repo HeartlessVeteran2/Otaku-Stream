@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.otakustream.core.sources.api.UiMessages
 
 data class StremioAccountUiState(
     val isLoggedIn: Boolean = false,
@@ -74,6 +75,7 @@ class StremioAccountViewModel @Inject constructor(
     fun logout() {
         accountStore.clear()
         _uiState.value = _uiState.value.copy(library = emptyList(), message = null, error = null)
+        UiMessages.show("Signed out of Stremio")
     }
 
     fun refreshLibrary() {

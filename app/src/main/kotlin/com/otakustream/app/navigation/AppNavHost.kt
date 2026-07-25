@@ -1,6 +1,10 @@
 package com.otakustream.app.navigation
 
 import android.net.Uri
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -9,21 +13,28 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -32,6 +43,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.otakustream.core.player.ui.PlayerScreen
+import com.otakustream.core.sources.api.UiMessages
 import com.otakustream.feature.library.LibraryScreen
 import com.otakustream.feature.sources.ui.AniListDetailScreen
 import com.otakustream.feature.sources.ui.AniListSearchScreen
@@ -49,6 +61,7 @@ import com.otakustream.feature.sources.ui.SectionHeader
 import com.otakustream.feature.sources.ui.SourcesScreen
 import com.otakustream.feature.sources.ui.StremioAccountScreen
 import com.otakustream.feature.tracking.TrackingSettingsScreen
+import kotlinx.coroutines.launch
 
 private const val ROUTE_PLAY = "play"
 private const val ROUTE_CATALOG = "catalog"
@@ -74,7 +87,7 @@ private data class BottomTab(val route: String, val label: String, val icon: Ima
 
 private val bottomTabs = listOf(
     BottomTab(ROUTE_PLAY, "Play", Icons.Filled.PlayCircle),
-    BottomTab(ROUTE_CATALOG, "Catalog", Icons.Filled.Home),
+    BottomTab(ROUTE_CATALOG, "Browse", Icons.Filled.Explore),
     BottomTab(ROUTE_LIBRARY, "Library", Icons.Filled.VideoLibrary),
     BottomTab(ROUTE_SETTINGS, "Settings", Icons.Filled.Settings),
 )
@@ -119,7 +132,22 @@ fun AppNavHost(
         }
     }
 
+    // One snackbar host for the whole app: feature ViewModels announce confirmations through
+    // UiMessages without knowing which screen is on top. Errors stay inline with a Retry instead.
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    DisposableEffect(Unit) {
+        UiMessages.setSink { message ->
+            scope.launch {
+                snackbarHostState.currentSnackbarData?.dismiss()
+                snackbarHostState.showSnackbar(message)
+            }
+        }
+        onDispose { UiMessages.setSink(null) }
+    }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         bottomBar = {
             if (showBottomBar) {
                 NavigationBar {
@@ -148,6 +176,13 @@ fun AppNavHost(
             // Scaffolds/TopAppBars must not re-apply them — without it every screen with its own
             // top bar gets a status-bar-height empty band above the bar.
             modifier = Modifier.padding(padding).consumeWindowInsets(padding),
+            // Subtle forward/back motion instead of the default hard cross-fade: pushes slide in
+            // from the right, pops slide back out. Tab switches read as pushes too, which is
+            // acceptable — a per-destination split isn't worth the ceremony here.
+            enterTransition = { slideInHorizontally(initialOffsetX = { it / 4 }) + fadeIn() },
+            exitTransition = { fadeOut() },
+            popEnterTransition = { fadeIn() },
+            popExitTransition = { slideOutHorizontally(targetOffsetX = { it / 4 }) + fadeOut() },
         ) {
             composable(ROUTE_PLAY) {
                 PlayScreen(
@@ -191,13 +226,15 @@ fun AppNavHost(
             composable(ROUTE_MANAGE_SOURCES) {
                 ManageSourcesScreen(
                     onBrowseCatalogClick = { navController.navigate(ROUTE_BROWSE_SOURCE_CATALOG) },
+                    onBack = { navController.popBackStack() },
                 )
             }
             composable(ROUTE_BROWSE_SOURCE_CATALOG) {
-                BrowseSourceCatalogScreen()
+                BrowseSourceCatalogScreen(onBack = { navController.popBackStack() })
             }
             composable(ROUTE_ANYMEX_EXTENSIONS) {
                 MangayomiExtensionsScreen(
+                    onBack = { navController.popBackStack() },
                     onConfigure = { sourceId -> navController.navigate("anymex-extension-prefs/$sourceId") },
                 )
             }
@@ -205,10 +242,11 @@ fun AppNavHost(
                 ROUTE_ANYMEX_EXTENSION_PREFS,
                 arguments = listOf(navArgument("sourceId") { type = NavType.StringType }),
             ) {
-                MangayomiPreferencesScreen()
+                MangayomiPreferencesScreen(onBack = { navController.popBackStack() })
             }
             composable(ROUTE_TRACKING_SETTINGS) {
                 TrackingSettingsScreen(
+                    onBack = { navController.popBackStack() },
                     pendingOAuthToken = pendingAniListToken,
                     onPendingOAuthTokenConsumed = onPendingAniListTokenConsumed,
                 )
@@ -228,12 +266,13 @@ fun AppNavHost(
                 // the manifest URL itself (unlike the path-segment args elsewhere in this file).
                 val installUrl = entry.arguments?.getString("installUrl").orEmpty().ifEmpty { null }
                 ManageStremioSourcesScreen(
+                    onBack = { navController.popBackStack() },
                     prefillInstallUrl = installUrl,
                     onBrowseAddonsClick = { navController.navigate(ROUTE_BROWSE_STREMIO) },
                 )
             }
             composable(ROUTE_BROWSE_STREMIO) {
-                BrowseStremioAddonsScreen()
+                BrowseStremioAddonsScreen(onBack = { navController.popBackStack() })
             }
             composable(ROUTE_STREMIO_ACCOUNT) {
                 StremioAccountScreen(onBack = { navController.popBackStack() })
@@ -264,6 +303,7 @@ fun AppNavHost(
                     mediaTitle = args?.getString("title").orEmpty(),
                     onPlayVideo = { videoUrl -> navController.navigate("player?videoUrl=${Uri.encode(videoUrl)}") },
                     onOpenTracking = { navController.navigate(ROUTE_TRACKING_SETTINGS) },
+                    onBack = { navController.popBackStack() },
                 )
             }
             composable(
@@ -343,10 +383,15 @@ private fun SettingsScreen(
     onStremioAccountClick: () -> Unit,
 ) {
     Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        Text(
+            text = "Settings",
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.padding(start = 16.dp, top = 16.dp),
+        )
         SectionHeader("Content")
         ListItem(
             headlineContent = { Text("Sources") },
-            supportingContent = { Text("Add and manage add-ons, extensions, and custom sources") },
+            supportingContent = { Text("Find and manage your sources") },
             modifier = Modifier.clickable(onClick = onSourcesClick),
         )
 

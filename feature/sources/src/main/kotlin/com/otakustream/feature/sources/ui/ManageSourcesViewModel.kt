@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.otakustream.core.sources.api.UiMessages
 
 data class ManageSourcesUiState(
     val installed: List<ScriptedSourceRecord> = emptyList(),
@@ -58,6 +59,7 @@ class ManageSourcesViewModel @Inject constructor(
                 .onSuccess { source ->
                     sourceRepository.registerDynamic(source)
                     urlInput.value = ""
+                    UiMessages.show("Added ${source.name}")
                 }
                 .onFailure { failure ->
                     if (failure is CancellationException) throw failure

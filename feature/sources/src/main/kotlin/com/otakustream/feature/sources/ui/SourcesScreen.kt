@@ -59,8 +59,8 @@ fun SourcesScreen(
                 modifier = Modifier.clickable(onClick = onBrowseAddons),
             )
             ListItem(
-                headlineContent = { Text("Installable sources") },
-                supportingContent = { Text("One-tap install from a curated source catalog") },
+                headlineContent = { Text("Source directory") },
+                supportingContent = { Text("One-tap install from a curated directory") },
                 modifier = Modifier.clickable(onClick = onBrowseInstallableSources),
             )
 
@@ -71,13 +71,13 @@ fun SourcesScreen(
                 modifier = Modifier.clickable(onClick = onManageAddons),
             )
             ListItem(
-                headlineContent = { Text("AnymeX extensions") },
-                supportingContent = { Text("Install anime extensions from an AnymeX/Mangayomi repository") },
+                headlineContent = { Text("Extensions") },
+                supportingContent = { Text("Anime extensions from AnymeX/Mangayomi repositories") },
                 modifier = Modifier.clickable(onClick = onAnymexExtensions),
             )
             ListItem(
                 headlineContent = { Text("Custom sources") },
-                supportingContent = { Text("Advanced: add script-based video sources by URL") },
+                supportingContent = { Text("Advanced: add script-based sources by link") },
                 modifier = Modifier.clickable(onClick = onCustomSources),
             )
         }

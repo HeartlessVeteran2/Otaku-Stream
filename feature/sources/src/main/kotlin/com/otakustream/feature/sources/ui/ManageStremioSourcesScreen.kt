@@ -39,6 +39,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 fun ManageStremioSourcesScreen(
     prefillInstallUrl: String? = null,
     onBrowseAddonsClick: () -> Unit = {},
+    onBack: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: ManageStremioSourcesViewModel = hiltViewModel(),
 ) {
@@ -57,7 +58,10 @@ fun ManageStremioSourcesScreen(
 
     var showAdvanced by remember(serverBaseUrl) { mutableStateOf(serverBaseUrl != null) }
 
-    Scaffold(modifier = modifier.fillMaxSize()) { padding ->
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        topBar = { BackTopBar(title = "Add-ons", onBack = onBack) },
+    ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Text(text = "Add an add-on", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
@@ -145,7 +149,7 @@ fun ManageStremioSourcesScreen(
                         value = serverUrlInput,
                         onValueChange = { serverUrlInput = it },
                         label = { Text("Streaming server address") },
-                        supportingText = { Text("e.g. http://100.x.x.x:11470") },
+                        supportingText = { Text("Optional: your Stremio streaming server address.") },
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                     )
                     Row(modifier = Modifier.padding(top = 8.dp)) {

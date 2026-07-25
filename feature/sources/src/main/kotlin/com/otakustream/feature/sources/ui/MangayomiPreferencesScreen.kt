@@ -32,17 +32,16 @@ import androidx.hilt.navigation.compose.hiltViewModel
 @Composable
 fun MangayomiPreferencesScreen(
     modifier: Modifier = Modifier,
+    onBack: () -> Unit = {},
     viewModel: MangayomiPreferencesViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    Scaffold(modifier = modifier.fillMaxSize()) { padding ->
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        topBar = { BackTopBar(title = uiState.sourceName.ifEmpty { "Extension preferences" }, onBack = onBack) },
+    ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-            Text(
-                text = uiState.sourceName.ifEmpty { "Extension preferences" },
-                style = MaterialTheme.typography.titleMedium,
-            )
-
             if (uiState.isLoading) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
