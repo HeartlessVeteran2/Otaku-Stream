@@ -66,8 +66,16 @@ class SourceBootstrapper @Inject constructor(
             async { mangayomiBootstrapper.loadPersistedSources() },
         )
         loaders.forEach { loader ->
-            runCatching { loader.await().forEach(sourceRepository::registerDynamic) }
-                .onFailure { if (it is CancellationException) throw it }
+            // Exception, not Throwable: a loader that died of a VM/linkage Error or OOM is not
+            // "this source kind had bad data", and swallowing it here would hide it behind a
+            // half-populated registry. Let it take the bootstrap down where it's visible.
+            try {
+                loader.await().forEach(sourceRepository::registerDynamic)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // Already logged by the individual bootstrappers, which report per-record detail.
+            }
         }
     }
 }

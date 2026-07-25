@@ -109,6 +109,11 @@ class MainActivity : ComponentActivity() {
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        // Don't let a PiP check be the thing that builds the player. This runs during the leave
+        // transition, so constructing ExoPlayer here would add jank to every Home-button press in a
+        // session that never played anything — and the answer would be "not playing" regardless,
+        // since only the player screen brings the controller into existence.
+        if (!PlayerController.exists) return
 
         val state = playerControllerLazy.get().uiState.value
         if (!state.isPlaying || state.videoWidth <= 0 || state.videoHeight <= 0) return

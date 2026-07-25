@@ -28,16 +28,19 @@ class MangayomiBootstrapper @Inject constructor(
         repository.getAll()
             .map { record ->
                 async {
-                    runCatching {
+                    try {
                         factory.create(
                             record.scriptContent,
                             override = record.toMetadata(),
                             prefsJson = record.prefsJson,
                             forceBringup = false,
                         )
-                    }.getOrElse { error ->
-                        if (error is CancellationException) throw error
-                        // Log rather than silently drop, so a broken persisted extension is diagnosable.
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        // Log rather than silently drop, so a broken persisted extension is
+                        // diagnosable. Exception, not Throwable: an Error out of the native QuickJS
+                        // layer isn't a malformed extension and shouldn't be filed as one.
                         Log.e("MangayomiBootstrapper", "Failed to load persisted extension: ${record.name}", error)
                         null
                     }
