@@ -9,6 +9,7 @@ import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
@@ -49,12 +50,32 @@ class SourceBootstrapper @Inject constructor(
         }
     }
 
-    private suspend fun bootstrap() {
-        runCatching { scriptedBootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic) }
-            .onFailure { if (it is CancellationException) throw it }
-        runCatching { stremioBootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic) }
-            .onFailure { if (it is CancellationException) throw it }
-        runCatching { mangayomiBootstrapper.loadPersistedSources().forEach(sourceRepository::registerDynamic) }
-            .onFailure { if (it is CancellationException) throw it }
+    // The three source kinds are independent (separate tables, separate engines), so they load
+    // concurrently rather than one after another — the first screen waits on the slowest, not the
+    // sum.
+    //
+    // supervisorScope, NOT coroutineScope: under coroutineScope a single failing loader cancels its
+    // siblings, and awaiting a cancelled sibling yields CancellationException, which the rethrow
+    // below propagates — so one broken source kind would take the whole bootstrap down and leave
+    // Home/Catalog with nothing registered. With a supervisor, each await fails (or succeeds) on its
+    // own and the runCatching per loader actually isolates it.
+    private suspend fun bootstrap() = supervisorScope {
+        val loaders = listOf(
+            async { scriptedBootstrapper.loadPersistedSources() },
+            async { stremioBootstrapper.loadPersistedSources() },
+            async { mangayomiBootstrapper.loadPersistedSources() },
+        )
+        loaders.forEach { loader ->
+            // Exception, not Throwable: a loader that died of a VM/linkage Error or OOM is not
+            // "this source kind had bad data", and swallowing it here would hide it behind a
+            // half-populated registry. Let it take the bootstrap down where it's visible.
+            try {
+                loader.await().forEach(sourceRepository::registerDynamic)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                // Already logged by the individual bootstrappers, which report per-record detail.
+            }
+        }
     }
 }

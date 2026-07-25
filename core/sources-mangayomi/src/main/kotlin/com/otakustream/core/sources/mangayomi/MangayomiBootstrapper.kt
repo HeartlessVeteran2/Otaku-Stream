@@ -5,6 +5,8 @@ import com.otakustream.core.database.mangayomi.MangayomiSourceRecord
 import com.otakustream.core.database.mangayomi.MangayomiSourceRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -17,16 +19,35 @@ class MangayomiBootstrapper @Inject constructor(
     private val factory: MangayomiSourceFactory,
     private val repository: MangayomiSourceRepository,
 ) {
+    // Built in parallel and without forcing engine bringup: a sequential map here meant cold start
+    // paid for one full native QuickJS context after another before the first screen could render,
+    // scaling linearly with the number of installed extensions. Each extension was already
+    // validated when it was installed, so the fail-fast bringup buys nothing on this path — the
+    // engine comes up on first real use instead.
     suspend fun loadPersistedSources(): List<MangayomiVideoSource> = withContext(Dispatchers.Default) {
-        repository.getAll().mapNotNull { record ->
-            runCatching { factory.create(record.scriptContent, override = record.toMetadata(), prefsJson = record.prefsJson) }
-                .getOrElse { error ->
-                    if (error is CancellationException) throw error
-                    // Log rather than silently drop, so a broken persisted extension is diagnosable.
-                    Log.e("MangayomiBootstrapper", "Failed to load persisted extension: ${record.name}", error)
-                    null
+        repository.getAll()
+            .map { record ->
+                async {
+                    try {
+                        factory.create(
+                            record.scriptContent,
+                            override = record.toMetadata(),
+                            prefsJson = record.prefsJson,
+                            forceBringup = false,
+                        )
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Exception) {
+                        // Log rather than silently drop, so a broken persisted extension is
+                        // diagnosable. Exception, not Throwable: an Error out of the native QuickJS
+                        // layer isn't a malformed extension and shouldn't be filed as one.
+                        Log.e("MangayomiBootstrapper", "Failed to load persisted extension: ${record.name}", error)
+                        null
+                    }
                 }
-        }
+            }
+            .awaitAll()
+            .filterNotNull()
     }
 }
 

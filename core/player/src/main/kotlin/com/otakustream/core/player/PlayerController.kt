@@ -143,6 +143,7 @@ class PlayerController @Inject constructor(
     private var loudnessEnhancer: LoudnessEnhancer? = null
 
     init {
+        instantiated = true
         // Read persisted toggles off the main thread — this @Singleton is built during activity
         // creation, so touching the prefs file here would be a StrictMode disk read on cold start.
         scope.launch(Dispatchers.IO) {
@@ -658,6 +659,19 @@ class PlayerController @Inject constructor(
                 eq.setBandLevel(band.toShort(), level)
             }
         }
+    }
+
+    companion object {
+        @Volatile
+        private var instantiated = false
+
+        // "Has a controller been built yet?", answerable without building one. Dagger's Lazy has no
+        // isInitialized(), and callers on a latency-sensitive path (MainActivity.onUserLeaveHint,
+        // which runs during the leave transition) must not pay for ExoPlayer construction —
+        // renderers, track selector and an audio-capability probe — just to read state that is
+        // definitionally "not playing" when no controller exists. Safe as a static: this is a
+        // @Singleton, so it goes true exactly once per process and never back.
+        val exists: Boolean get() = instantiated
     }
 }
 
