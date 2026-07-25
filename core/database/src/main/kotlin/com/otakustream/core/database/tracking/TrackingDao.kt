@@ -5,30 +5,25 @@ import androidx.room.Query
 import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
+// Prefer a link for the exact season, otherwise fall back to the whole-series link (season 0). That
+// fallback is what makes per-season linking additive — a single-season show, a source with no season
+// data, and every link made before seasons existed all resolve through season 0 exactly as they did
+// before. Shared by the one-shot and observing variants as a constant so the sync path and the UI
+// can't drift apart: the resolution rule has to be identical, or the row the screen shows isn't the
+// row progress is pushed to.
+private const val RESOLVE_LINK_QUERY = """
+    SELECT * FROM tracker_links
+    WHERE mediaUrl = :mediaUrl AND season IN (:season, $TRACKER_SEASON_WHOLE_SERIES)
+    ORDER BY CASE WHEN season = :season THEN 0 ELSE 1 END
+    LIMIT 1
+"""
+
 @Dao
 interface TrackingDao {
-    // Resolution rule for both of these: prefer a link for the exact season, otherwise fall back to
-    // the whole-series link (season 0). That fallback is what makes per-season linking additive —
-    // a single-season show, a source with no season data, and every link made before seasons
-    // existed all resolve through season 0 exactly as they did before.
-    @Query(
-        """
-        SELECT * FROM tracker_links
-        WHERE mediaUrl = :mediaUrl AND season IN (:season, $TRACKER_SEASON_WHOLE_SERIES)
-        ORDER BY CASE WHEN season = :season THEN 0 ELSE 1 END
-        LIMIT 1
-        """,
-    )
+    @Query(RESOLVE_LINK_QUERY)
     suspend fun getLink(mediaUrl: String, season: Int): TrackerLink?
 
-    @Query(
-        """
-        SELECT * FROM tracker_links
-        WHERE mediaUrl = :mediaUrl AND season IN (:season, $TRACKER_SEASON_WHOLE_SERIES)
-        ORDER BY CASE WHEN season = :season THEN 0 ELSE 1 END
-        LIMIT 1
-        """,
-    )
+    @Query(RESOLVE_LINK_QUERY)
     fun observeLink(mediaUrl: String, season: Int): Flow<TrackerLink?>
 
     // Reverse lookup: which local title an AniList media id was linked from, used to reopen it in

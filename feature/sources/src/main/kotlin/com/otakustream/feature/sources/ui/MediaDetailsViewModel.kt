@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -104,7 +105,9 @@ class MediaDetailsViewModel @Inject constructor(
 
     // Which season the user is looking at. Hoisted out of the screen because it now decides more
     // than which episodes are listed: AniList models each season as its own media entry, so it also
-    // decides which entry the link row targets and which one progress is pushed to (issue #9).
+    // decides which entry the link row and the list editor target (issue #9). It deliberately does
+    // *not* decide where watch progress goes — that follows the played episode's own season, since
+    // auto-play can carry playback out of the season the user was looking at (registerAniListSync).
     // null until episodes load, and stays null for sources with no season data.
     private val _selectedSeason = MutableStateFlow<Int?>(null)
     val selectedSeason: StateFlow<Int?> = _selectedSeason.asStateFlow()
@@ -119,7 +122,14 @@ class MediaDetailsViewModel @Inject constructor(
     val trackerLink: StateFlow<TrackerLink?> = combine(currentMediaUrl, _selectedSeason) { url, season ->
         url to season
     }.flatMapLatest { (url, season) ->
-        if (url == null) flowOf(null) else trackingRepository.observeLink(url, season.toTrackerSeason())
+        if (url == null) {
+            flowOf(null)
+        } else {
+            // Clear first: a StateFlow keeps its last value while the new Room query runs, so
+            // without this the row would still show — and Unlink would still target — the previous
+            // season's link for the moment after switching seasons.
+            trackingRepository.observeLink(url, season.toTrackerSeason()).onStart { emit(null) }
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     // Whether the user is signed in to AniList at all — the "Link to AniList" affordance only
@@ -398,9 +408,16 @@ class MediaDetailsViewModel @Inject constructor(
 
     fun setAniListProgress(progress: Int) = applyAniListEdit(progress = progress.coerceAtLeast(0))
 
+    // True while `mediaId` is still the AniList entry the screen is pointing at. Every write to
+    // _aniListEntry from an in-flight request is gated on this: switching season (or title) retargets
+    // the editor at a different AniList media, and a request that started before the switch must not
+    // land its result on the new season's editor.
+    private fun stillEditing(mediaId: Long) = trackerLink.value?.trackerMediaId == mediaId
+
     private suspend fun loadAniListEntry(mediaId: Long, token: String) {
         runCatching { aniListClient.fetchViewerListEntry(token, mediaId) }
             .onSuccess { entry ->
+                if (!stillEditing(mediaId)) return
                 _aniListEntry.value = _aniListEntry.value.copy(
                     onList = entry != null,
                     status = entry?.status,
@@ -436,11 +453,15 @@ class MediaDetailsViewModel @Inject constructor(
         viewModelScope.launch {
             runCatching { aniListClient.saveMediaListEntry(token, mediaId, status, score, progress) }
                 .onSuccess {
+                    // The save itself still went through for the right AniList entry — only the
+                    // on-screen editor state is skipped, because it now belongs to another entry.
+                    if (!stillEditing(mediaId)) return@launch
                     _aniListEntry.value = _aniListEntry.value.copy(isSaving = false, saveError = null)
                     loadAniListEntry(mediaId, token)
                 }
                 .onFailure {
                     if (it is CancellationException) throw it
+                    if (!stillEditing(mediaId)) return@launch
                     _aniListEntry.value = _aniListEntry.value.copy(
                         isSaving = false,
                         saveError = it.message ?: "Couldn't update your list",

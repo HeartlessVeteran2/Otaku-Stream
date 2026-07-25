@@ -30,6 +30,11 @@ class TrackingManager @Inject constructor(
         episodeNumber: Float,
         season: Int? = null,
     ) {
+        // Stremio numbers specials as season 0, and they carry ordinary positive episode numbers
+        // ("special 3"). Those don't count against any season's progress, so watching one must not
+        // advance an AniList entry — without this, season 0 would resolve to the whole-series link
+        // and push 3 at it. A source with no season data reports null, not 0, and is unaffected.
+        if (season == 0) return
         val token = trackingRepository.getToken() ?: return
         val link = trackingRepository.getLink(mediaUrl, season.toTrackerSeason()) ?: return
         val episode = episodeNumber.toWholeEpisodeOrNull() ?: return
