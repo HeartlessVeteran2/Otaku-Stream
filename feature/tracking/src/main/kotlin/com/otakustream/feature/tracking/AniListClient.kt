@@ -10,6 +10,7 @@ import org.json.JSONObject
 import java.security.MessageDigest
 import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -136,12 +137,9 @@ class AniListClient @Inject constructor(
     // digest of the token rather than the token.
     suspend fun fetchViewer(token: String): AniListViewer {
         val key = tokenFingerprint(token)
-        viewerCache[key]?.let { return it }
-        return fetchViewerUncached(token).also {
-            // Single-slot: replacing rather than adding means an account switch can't leave the
-            // previous account's fingerprint and viewer behind.
-            viewerCache.clear()
-            viewerCache[key] = it
+        viewerCache.get()?.takeIf { it.first == key }?.let { return it.second }
+        return fetchViewerUncached(token).also { viewer ->
+            viewerCache.set(key to viewer)
         }
     }
 
@@ -248,7 +246,7 @@ class AniListClient @Inject constructor(
     // plaintext copy of it in memory after the user signs out and the encrypted store has already
     // dropped it — and would accumulate one entry per account switch. A digest can't be replayed as
     // a credential, and one slot means a new token simply displaces the old viewer.
-    private val viewerCache = ConcurrentHashMap<String, AniListViewer>(1)
+    private val viewerCache = AtomicReference<Pair<String, AniListViewer>?>(null)
 
     // Serves a fresh cached page when one exists, otherwise fetches and stores. A failed fetch
     // throws without poisoning the cache, so the next attempt retries.
