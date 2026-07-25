@@ -91,8 +91,10 @@ class BrowseStremioAddonsViewModel @Inject constructor(
 
     // Saving re-fetches, so the list the user just added (or removed) is reflected immediately.
     fun saveCustomListUrl(url: String) {
-        directorySettings.set(url)
-        load()
+        viewModelScope.launch {
+            directorySettings.set(url)
+            load()
+        }
     }
 
     fun install(listing: OfficialAddonListing) {

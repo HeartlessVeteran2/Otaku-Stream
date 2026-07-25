@@ -45,15 +45,16 @@ class StremioDirectorySettings @Inject constructor(
             ?.takeIf { it.isNotEmpty() }
     }
 
-    // Blank clears it, so the UI's text field doubles as the remove control.
-    fun set(url: String?) {
+    // Blank clears it, so the UI's text field doubles as the remove control. The suspend contract
+    // ensures callers can reload only after the persisted value is visible to get().
+    suspend fun set(url: String?) {
         val cleaned = url?.trim()?.takeIf { it.isNotEmpty() }
         _customListUrl.value = cleaned
-        ioScope.launch {
+        withContext(Dispatchers.IO) {
             runCatching {
                 prefs.edit().apply {
                     if (cleaned == null) remove(KEY_CUSTOM_LIST_URL) else putString(KEY_CUSTOM_LIST_URL, cleaned)
-                }.apply()
+                }.commit()
             }
         }
     }
