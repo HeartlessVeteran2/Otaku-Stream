@@ -104,9 +104,12 @@ fun GestureOverlay(
 
                         when (axis) {
                             DragAxis.HORIZONTAL -> {
-                                val deltaMs = (change.positionChange().x * SEEK_MS_PER_PX).toLong()
-                                onSeekBy(deltaMs)
-                                seekAccumMs += deltaMs
+                                // Accumulate only: seeking on every pointer-move issues dozens of
+                                // seekTo calls a second, and each one flushes and refills the
+                                // decoder pipeline — audible glitching and visible stutter mid-drag.
+                                // The HUD shows the running offset, and the seek is committed once
+                                // on finger-lift (same draft-then-commit shape as the scrubber).
+                                seekAccumMs += (change.positionChange().x * SEEK_MS_PER_PX).toLong()
                                 hud = GestureHud.Seek(seekAccumMs)
                                 change.consume()
                             }
@@ -126,6 +129,9 @@ fun GestureOverlay(
                     }
 
                     hud = null
+                    if (axis == DragAxis.HORIZONTAL && seekAccumMs != 0L) {
+                        onSeekBy(seekAccumMs)
+                    }
                     if (axis == null) {
                         onTap()
                     }

@@ -22,6 +22,10 @@ class PlayerViewModel @Inject constructor(
 
     val uiState: StateFlow<PlayerUiState> = controller.uiState
 
+    // Separate from uiState so a 2Hz position tick only invalidates the scrubber and the
+    // time labels, not the whole player screen.
+    val progress: StateFlow<PlaybackProgress> = controller.progress
+
     private val _subtitleStyle = MutableStateFlow(subtitleStylePrefs.load())
     val subtitleStyle: StateFlow<SubtitleStyle> = _subtitleStyle.asStateFlow()
     private var saveStyleJob: Job? = null

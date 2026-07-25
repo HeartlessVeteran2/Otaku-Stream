@@ -95,6 +95,9 @@ fun PlayerScreen(
         viewModel.loadSubtitleFile(uri.toString(), displayName)
     }
     var controlsVisible by remember { mutableStateOf(true) }
+    // Last values pushed into the PlayerView, so AndroidView's update lambda can skip no-op work.
+    var lastAppliedResizeMode by remember { mutableStateOf<Int?>(null) }
+    var lastAppliedSubtitleStyle by remember { mutableStateOf<SubtitleStyle?>(null) }
     var showTrackSheet by remember { mutableStateOf(false) }
     var showEqualizerSheet by remember { mutableStateOf(false) }
     var showSubtitleStyleSheet by remember { mutableStateOf(false) }
@@ -161,9 +164,19 @@ fun PlayerScreen(
                     player = viewModel.controller.player
                 }
             },
+            // Only touch the native view when the values it renders actually changed: this lambda
+            // runs on every recomposition, and rebuilding a CaptionStyleCompat + re-issuing the
+            // native setters each time is pure waste when neither input moved.
             update = { view ->
-                view.resizeMode = uiState.resizeMode.toAndroidXResizeMode()
-                view.applySubtitleStyle(subtitleStyle)
+                val resize = uiState.resizeMode.toAndroidXResizeMode()
+                if (lastAppliedResizeMode != resize) {
+                    lastAppliedResizeMode = resize
+                    view.resizeMode = resize
+                }
+                if (lastAppliedSubtitleStyle != subtitleStyle) {
+                    lastAppliedSubtitleStyle = subtitleStyle
+                    view.applySubtitleStyle(subtitleStyle)
+                }
             },
         )
 
@@ -319,6 +332,7 @@ fun PlayerScreen(
             if (controlsVisible) {
                 PlayerControlsOverlay(
                     uiState = uiState,
+                    progressFlow = viewModel.progress,
                     onPlayPauseClick = viewModel::togglePlayPause,
                     onSeekTo = viewModel::seekTo,
                     onTracksClick = { showTrackSheet = true },

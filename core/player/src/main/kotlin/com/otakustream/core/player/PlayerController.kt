@@ -60,11 +60,18 @@ enum class ResizeMode { FIT, ZOOM, STRETCH }
 
 enum class EqualizerPreset { FLAT, BASS_BOOST, TREBLE_BOOST }
 
+// Position/duration tick ~2x a second for the whole length of a video. They live in their own
+// state holder so only the scrubber and the time labels re-read them — folding them into
+// PlayerUiState made every tick invalidate the entire player screen (controls, the skip-segment
+// canvas, and the AndroidView update block) for the duration of playback.
+data class PlaybackProgress(
+    val positionMs: Long = 0L,
+    val durationMs: Long = 0L,
+)
+
 data class PlayerUiState(
     val isPlaying: Boolean = false,
     val isBuffering: Boolean = false,
-    val positionMs: Long = 0L,
-    val durationMs: Long = 0L,
     val playbackSpeed: Float = 1f,
     val volume: Float = 1f,
     val error: String? = null,
@@ -106,6 +113,9 @@ class PlayerController @Inject constructor(
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
 
+    private val _progress = MutableStateFlow(PlaybackProgress())
+    val progress: StateFlow<PlaybackProgress> = _progress.asStateFlow()
+
     // ExoPlayer must only be touched from the thread it was created on (the main thread here) —
     // pin the scope to Main.immediate so every launch{} below stays off Dispatchers.Default.
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -116,6 +126,9 @@ class PlayerController @Inject constructor(
     private var currentMediaItem: MediaItem? = null
     private var currentDataSourceFactory: DataSource.Factory? = null
     private var lastPersistAtMs = 0L
+    // Whether PlaybackService has been started for the current playback session (see
+    // onIsPlayingChanged). Reset when new media is loaded.
+    private var foregroundServiceStarted = false
     private var segmentsJob: Job? = null
     // Manual (database) and AniSkip-fetched segments are tracked separately, then merged into
     // currentSegments with AniSkip winning on overlap.
@@ -140,16 +153,20 @@ class PlayerController @Inject constructor(
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 _uiState.value = _uiState.value.copy(isPlaying = isPlaying)
-                if (isPlaying) {
+                // Only start the service once per playback session: onIsPlayingChanged(true) fires
+                // on every play/pause toggle and after post-seek buffering, and each call is a
+                // binder round-trip that Android then dedupes anyway.
+                if (isPlaying && !foregroundServiceStarted) {
+                    foregroundServiceStarted = true
                     ContextCompat.startForegroundService(appContext, Intent(appContext, PlaybackService::class.java))
                 }
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
-                _uiState.value = _uiState.value.copy(
-                    isBuffering = playbackState == Player.STATE_BUFFERING,
-                    durationMs = player.duration.coerceAtLeast(0L),
-                )
+                _uiState.value = _uiState.value.copy(isBuffering = playbackState == Player.STATE_BUFFERING)
+                // Duration becomes known during buffering/ready — publish it through the progress
+                // flow so the scrubber's range updates without touching the rest of the UI state.
+                publishProgress(_progress.value.positionMs)
                 if (playbackState == Player.STATE_READY) {
                     maybeFetchAniSkip()
                 }
@@ -190,6 +207,9 @@ class PlayerController @Inject constructor(
             }
 
             override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
+                // Frames drop precisely when the device is already struggling, so only pay for the
+                // state write when the nerd-stats overlay is on screen to read it.
+                if (!_uiState.value.statsOverlayVisible) return
                 _uiState.value = _uiState.value.copy(droppedFrameCount = _uiState.value.droppedFrameCount + droppedFrames)
             }
 
@@ -242,14 +262,10 @@ class PlayerController @Inject constructor(
         scope.launch {
             while (isActive) {
                 if (!player.isPlaying) {
-                    // Idle (paused / ended / nothing loaded): keep the scrubber position roughly
-                    // current so a paused seek still shows, but back off the cadence and skip the
-                    // auto-skip scan + progress persist — this loop lives for the whole app process,
-                    // so it should do almost nothing while playback isn't advancing.
-                    _uiState.value = _uiState.value.copy(
-                        positionMs = player.currentPosition.coerceAtLeast(0L),
-                        durationMs = player.duration.coerceAtLeast(0L),
-                    )
+                    // Idle (paused / ended / nothing loaded): publish the position once so a paused
+                    // seek still shows, then go quiet. Re-emitting an unchanged value every second
+                    // would wake the scrubber for nothing — this loop lives for the whole process.
+                    publishProgress(player.currentPosition.coerceAtLeast(0L))
                     delay(1_000)
                     continue
                 }
@@ -258,21 +274,34 @@ class PlayerController @Inject constructor(
                 if (active != null && _uiState.value.autoSkipEnabled) {
                     // Auto-skip jumps past the segment instead of surfacing the manual button.
                     seekTo(active.endMs)
-                    _uiState.value = _uiState.value.copy(
-                        positionMs = active.endMs,
-                        durationMs = player.duration.coerceAtLeast(0L),
-                        activeSkipSegment = null,
-                    )
+                    publishProgress(active.endMs)
+                    setActiveSkipSegment(null)
                 } else {
-                    _uiState.value = _uiState.value.copy(
-                        positionMs = position,
-                        durationMs = player.duration.coerceAtLeast(0L),
-                        activeSkipSegment = active,
-                    )
+                    publishProgress(position)
+                    setActiveSkipSegment(active)
                 }
                 maybePersistProgress(position, force = false)
                 delay(500)
             }
+        }
+    }
+
+    // Writes the progress flow only when a value actually changed, so an unchanged tick costs
+    // nothing downstream (StateFlow dedupes equal values, and this keeps the copy allocation away
+    // from the common case too).
+    private fun publishProgress(positionMs: Long) {
+        val durationMs = player.duration.coerceAtLeast(0L)
+        val current = _progress.value
+        if (current.positionMs != positionMs || current.durationMs != durationMs) {
+            _progress.value = PlaybackProgress(positionMs = positionMs, durationMs = durationMs)
+        }
+    }
+
+    // The active segment drives the manual "Skip" button, so it belongs in the main UI state — but
+    // it changes only when playback crosses a boundary, not on every tick.
+    private fun setActiveSkipSegment(segment: PlayerSkipSegment?) {
+        if (_uiState.value.activeSkipSegment != segment) {
+            _uiState.value = _uiState.value.copy(activeSkipSegment = segment)
         }
     }
 
@@ -303,6 +332,10 @@ class PlayerController @Inject constructor(
     fun play(url: String, startPositionMs: Long? = null) {
         currentMediaUrl = url
         pendingSegmentStartMs = null
+        // New media, new playback session: the foreground service must be (re)started when this
+        // one begins playing, and the scrubber must not briefly show the previous video's position.
+        foregroundServiceStarted = false
+        _progress.value = PlaybackProgress()
         // Clear per-video state carried over from the previous playback: a stale "Playback failed"
         // overlay must not sit over the next (working) episode, and the stats overlay must not show
         // the previous video's dropped-frame count / codec / bitrate until a new format arrives.
