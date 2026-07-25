@@ -89,11 +89,11 @@ class SourceCatalogClient @Inject constructor(
         // Ships as a working demo with zero setup: the in-repo public-domain scripted example.
         val DEFAULT_ENTRIES = listOf(
             SourceCatalogEntry(
-                name = "Scripted Example",
+                name = "Sample: Scripted Example",
                 type = SourceCatalogEntry.TYPE_SCRIPTED,
                 url = "https://raw.githubusercontent.com/HeartlessVeteran2/Otaku-Stream/main/sources/scripted-example/example-source.js",
                 lang = "en",
-                description = "Public-domain sample source (Blender films) that validates the scripted-source pipeline.",
+                description = "Sample source with public-domain Blender films — for trying the app out, not real content.",
             ),
         )
     }

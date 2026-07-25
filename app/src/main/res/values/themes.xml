@@ -3,6 +3,18 @@
     <!-- MainActivity calls enableEdgeToEdge(), which overrides android:statusBarColor at
          runtime regardless of what's set here — the root Surface color (set to
          MaterialTheme.colorScheme.background) is what actually determines the tone seen
-         behind the transparent status bar. -->
-    <style name="Theme.OtakuStream" parent="android:Theme.Material.NoActionBar" />
+         behind the transparent status bar. windowBackground matches it so the frames between
+         the splash dismissing and Compose's first draw are brand-navy, not platform grey. -->
+    <style name="Theme.OtakuStream" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/ic_launcher_background</item>
+    </style>
+
+    <!-- Cold-start splash: brand navy with the logo mark, handing off to the app theme.
+         Uses the same padded icon asset as the launcher so the mark sits inside the
+         splash icon's circular reveal. -->
+    <style name="Theme.OtakuStream.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/ic_launcher_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_fg</item>
+        <item name="postSplashScreenTheme">@style/Theme.OtakuStream</item>
+    </style>
 </resources>

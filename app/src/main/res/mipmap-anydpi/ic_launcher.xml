@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Pre-adaptive fallback (API 24–25): same background + inset foreground as a plain layer-list.
-     API 26+ resolves the adaptive icon in mipmap-anydpi-v26 instead. -->
+<!-- Pre-adaptive fallback (API 24-25): brand background + the padded logo mark as a plain
+     layer-list. API 26+ resolves the adaptive icon in mipmap-anydpi-v26 instead. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="rectangle">
@@ -8,10 +8,5 @@
             <corners android:radius="8dp" />
         </shape>
     </item>
-    <item
-        android:drawable="@drawable/ic_launcher_foreground"
-        android:top="-18dp"
-        android:bottom="-18dp"
-        android:left="-18dp"
-        android:right="-18dp" />
+    <item android:drawable="@drawable/ic_launcher_fg" />
 </layer-list>

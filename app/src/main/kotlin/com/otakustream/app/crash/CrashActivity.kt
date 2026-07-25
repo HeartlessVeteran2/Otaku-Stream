@@ -71,7 +71,7 @@ class CrashActivity : ComponentActivity() {
 @Composable
 private fun CrashContent(report: String, onCopy: () -> Unit, onRestart: () -> Unit) {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text(text = "Otaku-Stream crashed", style = MaterialTheme.typography.titleLarge)
+        Text(text = "Otaku Stream crashed", style = MaterialTheme.typography.titleLarge)
         Text(
             text = "Something went wrong. Copy the details below and send them over so it can be fixed.",
             style = MaterialTheme.typography.bodyMedium,

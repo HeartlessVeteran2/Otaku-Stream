@@ -18,6 +18,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.VideoFile
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -122,17 +124,10 @@ private fun WatchlistTab(
 
         if (uiState.watchlist.isEmpty()) {
             item {
-                Text(
-                    text = "Watchlist",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(16.dp),
-                )
-            }
-            item {
-                Text(
-                    text = "Nothing saved yet — tap the bookmark on a title, or on a catalog poster.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(horizontal = 16.dp),
+                EmptyState(
+                    icon = Icons.Outlined.BookmarkBorder,
+                    title = "Nothing saved yet",
+                    message = "Tap the bookmark on any title — or on a poster in Browse — and it lands here.",
                 )
             }
         }
@@ -224,10 +219,10 @@ private fun HistoryTab(
             }
         } else {
             item {
-                Text(
-                    text = "No watch history yet.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(16.dp),
+                EmptyState(
+                    icon = Icons.Outlined.History,
+                    title = "No watch history yet",
+                    message = "Anything you play — a file, a link, or an episode — shows up here so you can pick it back up.",
                 )
             }
         }
