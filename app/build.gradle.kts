@@ -14,8 +14,11 @@ android {
         applicationId = "com.otakustream.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.1.0"
+        // Version scheme: versionName is semver; versionCode is MAJOR*10000 + MINOR*100 + PATCH,
+        // so 1.0.0 -> 10000 and it always increases monotonically across releases. Tag a release
+        // as v<versionName> (e.g. v1.0.0) to publish it — see .github/workflows/release.yml.
+        versionCode = 10000
+        versionName = "1.0.0"
     }
 
     signingConfigs {
