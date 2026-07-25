@@ -1,49 +1,112 @@
 package com.otakustream.core.sources.stremio
 
+import com.otakustream.core.sources.stremio.model.AddonListOrigin
 import com.otakustream.core.sources.stremio.model.OfficialAddonListing
-import com.otakustream.core.sources.stremio.model.parseOfficialAddonCollection
+import com.otakustream.core.sources.stremio.model.parseAddonCollection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import javax.inject.Inject
+// The result of loading the directory. `listings` is whatever loaded; `customListError` reports a
+// user-supplied list that failed, separately, so a bad custom URL is visible without pretending the
+// whole directory is broken.
+data class AddonDirectory(
+    val listings: List<OfficialAddonListing>,
+    val customListError: String? = null,
+)
 
-// Lets users browse add-ons and one-tap install them, like the real Stremio app. Fetches two public
-// collections and merges them: Stremio's small official curated list plus Stremio's own community
-// collection (the exact list the official app shows as "Community Add-ons"). Both are plain GETs of
-// the same `[{ manifest, transportUrl, ... }]` shape, so parseOfficialAddonCollection consumes both.
+// Lets users browse add-ons and one-tap install them, like the real Stremio app. Fetches Stremio's
+// small official curated list plus Stremio's own community collection (the exact list the official
+// app shows as "Community Add-ons"), and optionally a list the user supplied themselves (issue #10).
+// All three are plain GETs of the same `[{ manifest, transportUrl, ... }]` shape, so
+// parseAddonCollection consumes all of them, taking the origin so results carry where they came from.
 class StremioAddonDirectoryClient @Inject constructor(
     private val httpClient: OkHttpClient,
+    private val directorySettings: StremioDirectorySettings,
 ) {
-    suspend fun fetchAddonCatalog(): List<OfficialAddonListing> = coroutineScope {
-        val official = async { fetchListing(OFFICIAL_ADDON_COLLECTION_URL) }
-        val community = async { fetchListing(COMMUNITY_ADDON_COLLECTION_URL) }
-        val results = awaitAll(official, community)
-        // Both endpoints down → surface the failure; otherwise show whatever loaded.
-        if (results.all { it == null }) error("Failed to load the add-on catalog")
-        // Official first (curated base add-ons like Cinemeta lead the list), then community, deduped
-        // by normalized manifest URL so an add-on in both collections appears once.
-        results.filterNotNull().flatten().distinctBy { normalizeStremioManifestUrl(it.transportUrl) }
+    suspend fun fetchAddonCatalog(): AddonDirectory = coroutineScope {
+        val customUrl = directorySettings.get()
+        val official = async { fetchListing(OFFICIAL_ADDON_COLLECTION_URL, AddonListOrigin.OFFICIAL) }
+        val community = async { fetchListing(COMMUNITY_ADDON_COLLECTION_URL, AddonListOrigin.COMMUNITY) }
+        // Fetched as a Result rather than null-on-failure: unlike the two built-in collections, a
+        // custom URL was typed by a person who needs to be told when it's wrong. Cancellation is
+        // rethrown rather than reported — a cancelled load is not a broken list.
+        val custom = customUrl?.let { url ->
+            async {
+                try {
+                    Result.success(fetchListingOrThrow(url, AddonListOrigin.CUSTOM))
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Result.failure(e)
+                }
+            }
+        }
+
+        val builtIn = awaitAll(official, community)
+        val customResult = custom?.await()
+        // Both built-in endpoints down → surface the failure; otherwise show whatever loaded.
+        if (builtIn.all { it == null } && customResult?.getOrNull() == null) {
+            error("Failed to load the add-on catalog")
+        }
+
+        // Official first (curated base add-ons like Cinemeta lead the list), then community, then the
+        // user's own — deduped by normalized manifest URL, so an add-on appearing in more than one
+        // list shows once, keeping the most-vetted origin it was found under.
+        val merged = (builtIn.filterNotNull().flatten() + customResult?.getOrNull().orEmpty())
+            .distinctBy { normalizeStremioManifestUrl(it.transportUrl) }
+
+        AddonDirectory(
+            listings = merged,
+            customListError = customResult?.exceptionOrNull()?.let { failure ->
+                "Couldn't load your custom list: ${failure.message ?: "unknown error"}"
+            },
+        )
     }
 
     // Returns null on failure so one unreachable endpoint doesn't blank the whole catalog.
-    private suspend fun fetchListing(url: String): List<OfficialAddonListing>? = withContext(Dispatchers.IO) {
+    private suspend fun fetchListing(url: String, origin: AddonListOrigin): List<OfficialAddonListing>? =
         try {
-            val request = Request.Builder().url(url).build()
-            val content = httpClient.newCall(request).execute().use { response ->
+            fetchListingOrThrow(url, origin)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+
+    private suspend fun fetchListingOrThrow(
+        url: String,
+        origin: AddonListOrigin,
+    ): List<OfficialAddonListing> = withContext(Dispatchers.IO) {
+        val request = Request.Builder().url(url).build()
+        val call = httpClient.newCall(request)
+        // Cancel the blocking OkHttp call when the coroutine is cancelled (navigating away, or a
+        // newer load superseding this one) instead of leaving it to occupy a thread until it
+        // finishes on its own. Same pattern as SourceCatalogClient.
+        val cancellation = currentCoroutineContext()[Job]?.invokeOnCompletion { call.cancel() }
+        val content = try {
+            call.execute().use { response ->
                 require(response.isSuccessful) { "HTTP ${response.code}" }
                 response.body?.string() ?: error("Empty response body")
             }
-            parseOfficialAddonCollection(content)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            null
+        } finally {
+            cancellation?.dispose()
         }
+        val parsed = parseAddonCollection(content, origin)
+        // A URL that returns 200 but isn't an add-on list (an HTML page, say) parses to nothing.
+        // Treat that as an error for a custom list rather than silently showing zero add-ons, since
+        // "nothing appeared" is the least useful thing to tell someone who just typed a URL.
+        if (parsed.isEmpty() && origin == AddonListOrigin.CUSTOM) {
+            error("no add-ons found — is it a Stremio add-on collection?")
+        }
+        parsed
     }
 
     private companion object {
