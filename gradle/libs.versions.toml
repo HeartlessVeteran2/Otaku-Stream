@@ -80,6 +80,9 @@ json = { group = "org.json", name = "json", version.ref = "json" }
 # module-wide, which would let every other test pass on calls that return null on a real device.
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 androidx-test-core = { group = "androidx.test", name = "core", version.ref = "androidxTest" }
+# Room migrations and DAO queries run against a real SQLite database under Robolectric.
+room-testing = { group = "androidx.room", name = "room-testing", version.ref = "room" }
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

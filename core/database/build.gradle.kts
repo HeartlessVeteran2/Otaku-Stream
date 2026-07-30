@@ -21,6 +21,22 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    testOptions {
+        unitTests {
+            // Robolectric needs the merged manifest and resources to build its simulated app.
+            isIncludeAndroidResources = true
+        }
+    }
+
+    // Room's MigrationTestHelper reads the exported schema JSONs from the test APK's assets, so the
+    // committed schemas have to be on the unit-test asset path. Pointing at the same directory kapt
+    // exports to means there is one copy, and a schema can never be stale relative to the migration
+    // being tested — the alternative, copying them into a second location, is exactly how a migration
+    // test ends up validating last release's schema.
+    sourceSets.getByName("test") {
+        assets.srcDir("$projectDir/schemas")
+    }
 }
 
 kapt {
@@ -44,4 +60,12 @@ dependencies {
     testImplementation(libs.junit)
     // Real org.json for JVM unit tests (the android.jar stub throws "not mocked").
     testImplementation(libs.json)
+
+    // The executable half of the migration story. MigrationSchemaGuardTest diffs the exported schema
+    // JSONs, which proves the *shape* a migration produces; these run the migration against a real
+    // SQLite database on the JVM, which is the only way to prove the rows survive it.
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.room.testing)
+    testImplementation(libs.kotlinx.coroutines.test)
 }
