@@ -114,6 +114,15 @@ fun PlayerScreen(
             resizeModeOsd = null
         }
     }
+    // Notices are longer than the resize label and worth reading, so they linger — but they still
+    // clear themselves: a message about casting must not sit over the video for the rest of the film.
+    LaunchedEffect(uiState.notice) {
+        if (uiState.notice != null) {
+            delay(4_000)
+            viewModel.clearNotice()
+        }
+    }
+
     var showGestureCoach by remember { mutableStateOf(!viewModel.hasSeenGestureCoach) }
 
     // Android 13+ needs a runtime grant before the media-playback notification can show. Ask once
@@ -200,7 +209,10 @@ fun PlayerScreen(
             )
 
             // Brief on-screen label when the scaling mode is cycled (AnymeX shows a toast).
-            resizeModeOsd?.let { label ->
+            // Also carries transient notices from the controller — deliberately not the error
+            // overlay, which stops playback dead behind a "Playback failed" panel: a notice is
+            // something the user should know while the video keeps playing.
+            (resizeModeOsd ?: uiState.notice)?.let { label ->
                 Surface(
                     color = Color.Black.copy(alpha = 0.7f),
                     shape = MaterialTheme.shapes.medium,

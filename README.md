@@ -36,8 +36,26 @@ player, one library, one watch history.
 - **Picture-in-Picture** sized to the video's real aspect ratio, and **background audio** via
   `MediaSessionService` with notification controls.
 - **Auto-play next episode**, toggleable.
-- Broad format support: HLS, DASH, RTSP, progressive — plus `stremio://` deep links and
-  Android's "Open with" for local files.
+- Broad format support: HLS, DASH, RTSP, progressive — plus `stremio://` deep links, `magnet:`
+  links, and Android's "Open with" for local files.
+
+### 🌐 Torrent streaming, on the device
+Torrent-backed streams play with **no streaming server to host**, via an embedded libtorrent engine.
+Pick a torrent stream and it plays; seek and the download re-aims at where you actually are.
+
+- **Nothing is seeded.** Upload is capped to what the protocol needs to stay a participating peer,
+  and the torrent leaves the session the moment playback ends.
+- **Unmetered-only by default**, because a torrent moves far more data than a normal stream.
+- **A storage limit you set**, with least-recently-used eviction that never deletes what's playing,
+  and a "clear now" button. The cache lives under `cacheDir`, so Android can reclaim it too.
+- **A notification while downloading**, showing rate and peers, with a Stop that really stops.
+- Subtitle files inside the torrent are offered as tracks. Trackers are remembered per torrent so a
+  replay from history isn't stuck on DHT alone.
+- **Your IP address is visible to everyone else in the swarm.** That's how BitTorrent works, it's
+  stated plainly in the settings screen, and the feature ships switched on — turn it off there if
+  that isn't what you want.
+- 64-bit devices only (only the arm64 native library is bundled, to keep the download size down).
+  On a 32-bit device the feature reads as unavailable and explains why, rather than failing oddly.
 
 ### 🧩 Sources
 Everything installable lives under one roof: **Settings → Sources**.
@@ -154,6 +172,7 @@ Play services libraries. Delete the Cast integration and you can drop the except
 | Hilt / Dagger, OkHttp, Coil, Kotlin stdlib + coroutines | Apache-2.0 |
 | [QuickJS wrapper](https://github.com/HarlonWang/quickjs-wrapper) (`wang.harlon.quickjs`) | Apache-2.0 |
 | [jsoup](https://jsoup.org/) | MIT |
+| [libtorrent4j](https://github.com/aldenml/libtorrent4j) | MIT — wraps [libtorrent-rasterbar](https://libtorrent.org/) (BSD-3-Clause) |
 | [Mozilla Rhino](https://github.com/mozilla/rhino) | MPL-2.0 |
 | `play-services-cast-framework` | Proprietary — covered by the exception above |
 

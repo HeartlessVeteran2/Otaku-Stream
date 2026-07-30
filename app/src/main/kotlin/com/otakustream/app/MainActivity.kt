@@ -20,6 +20,9 @@ import androidx.compose.ui.Modifier
 import com.otakustream.app.navigation.AppNavHost
 import com.otakustream.app.ui.theme.OtakuStreamTheme
 import com.otakustream.core.player.PlayerController
+import com.otakustream.core.sources.api.PendingPlayback
+import com.otakustream.core.sources.api.Video
+import com.otakustream.core.torrent.MagnetLinks
 import dagger.Lazy
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -86,12 +89,35 @@ class MainActivity : ComponentActivity() {
     private fun Intent.stremioInstallUrl(): String? = data?.takeIf { it.scheme == "stremio" }?.toString()
 
     // A video opened via "Open with" / a browser video link arrives as ACTION_VIEW with an
-    // http(s)/content/file data URI — hand it straight to the player.
-    private fun Intent.playableVideoUri(): String? =
-        takeIf { it.action == Intent.ACTION_VIEW }
-            ?.data
-            ?.takeIf { it.scheme in setOf("http", "https", "content", "file") }
-            ?.toString()
+    // http(s)/content/file data URI — hand it straight to the player. A magnet link arrives the same
+    // way and is translated to the app's own torrent:// identity first.
+    private fun Intent.playableVideoUri(): String? {
+        val uri = takeIf { it.action == Intent.ACTION_VIEW }?.data ?: return null
+        if (uri.scheme.equals("magnet", ignoreCase = true)) return magnetPlaybackUrl(uri.toString())
+        return uri.takeIf { it.scheme in setOf("http", "https", "content", "file") }?.toString()
+    }
+
+    // Magnet → torrent:// plus a tracker stash.
+    //
+    // The trackers can't ride in the url: it is the identity resume position and watch history are
+    // keyed on, and it has to stay the same for a given torrent however the link that introduced it
+    // was written. So they go through the same out-of-band channel the catalog flow uses.
+    //
+    // historyHandled = false because nothing upstream recorded this play — unlike the catalog flow,
+    // there is no view model behind an "Open with"; the player records it itself.
+    private fun magnetPlaybackUrl(magnet: String): String? {
+        val link = MagnetLinks.parse(magnet) ?: return null
+        val url = MagnetLinks.toTorrentUrl(link) ?: return null
+        PendingPlayback.stash(
+            video = Video(
+                url = url,
+                quality = link.displayName ?: "torrent",
+                trackers = link.trackers,
+            ),
+            historyHandled = false,
+        )
+        return url
+    }
 
     // AniList's implicit-grant redirect puts the token in the URL fragment:
     // otakustream://anilist-auth#access_token=...&token_type=Bearer&expires_in=...

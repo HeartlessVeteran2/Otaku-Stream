@@ -58,6 +58,8 @@ class PlayerViewModel @Inject constructor(
 
     fun warmUpCast() = controller.warmUpCast()
 
+    fun clearNotice() = controller.clearNotice()
+
     fun togglePlayPause() = controller.togglePlayPause()
 
     fun seekBy(deltaMs: Long) = controller.seekBy(deltaMs)
