@@ -179,8 +179,10 @@ class TorrentEngine @Inject constructor(
     // without libtorrent on its compile classpath.
     @Throws(java.io.IOException::class)
     fun openFile(ref: TorrentRef, trackers: List<String>, saveDir: java.io.File): TorrentFileReader {
-        val session = ensureStarted()
-            ?: throw java.io.IOException("The torrent engine is unavailable on this device")
+        // Session acquisition and reader registration must be atomic with teardown. Otherwise a
+        // scheduled teardown can stop the session after ensureStarted() returns but before this
+        // reader is counted.
+        val session: SessionManager
         // Reading the generation and taking the count must be one step. Split apart, stopAll() landing
         // between them tags this reader with a generation that is already retired while its increment
         // counts against the new one — so its close is later dismissed as stale and the count stays one
@@ -188,13 +190,16 @@ class TorrentEngine @Inject constructor(
         val openedAt: Long
         val isFirstReader: Boolean
         synchronized(lock) {
-            openedAt = generation.get()
-            isFirstReader = openReaders.getAndIncrement() == 0
             // A reader arriving inside the grace window means the previous close was a seek or a
-            // retry, not the end of playback — cancel the teardown so the session and the torrent
-            // survive it.
+            // retry, not the end of playback — cancel the teardown before starting/acquiring the session.
             pendingTeardown?.cancel(false)
             pendingTeardown = null
+            openedAt = generation.get()
+            isFirstReader = openReaders.getAndIncrement() == 0
+            session = ensureStarted() ?: run {
+                openReaders.decrementAndGet()
+                throw java.io.IOException("The torrent engine is unavailable on this device")
+            }
             // Unless this is a *different* torrent, in which case the held handle belongs to
             // something nobody is watching any more and has to go now. Auto-play reaches here about a
             // second after the previous episode's reader closed, so without this the finished
