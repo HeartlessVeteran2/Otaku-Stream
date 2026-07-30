@@ -12,7 +12,6 @@ import okhttp3.Response
 import java.net.CookieManager
 import java.net.HttpCookie
 import java.net.URI
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -21,6 +20,8 @@ private const val CHALLENGE_TIMEOUT_SECONDS = 15L
 private const val CLEARANCE_COOKIE = "cf_clearance"
 // Cap the body peek used for challenge detection so a huge page can't be fully buffered.
 private const val BODY_PEEK_BYTES = 64L * 1024L
+// Upper bound on distinct hosts holding a challenge lock. See hostLocks.
+private const val MAX_TRACKED_HOSTS = 64
 
 // Transparently clears Cloudflare's "Just a moment…" JS challenge for third-party stream hosts.
 // A real request to a gated host comes back 403/503 with a challenge; a headless WebView loads the
@@ -39,7 +40,21 @@ class CloudflareInterceptor(
     private val settings: CloudflareSettings,
 ) : Interceptor {
 
-    private val hostLocks = ConcurrentHashMap<String, Any>()
+    // One solve in flight per host. Bounded, because the key is a host string taken from URLs that
+    // third-party sources supply: an extension that walks a wildcard domain would otherwise add an
+    // entry per hostname and never remove one, growing for the life of the process. The cap is far
+    // above any real number of gated hosts in a session, so eviction is a backstop, not a mechanism
+    // — and evicting a lock is harmless anyway. The worst case is two concurrent solves for the
+    // same host, which is what the code did before the lock existed.
+    private val hostLocks = object : LinkedHashMap<String, Any>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Any>?): Boolean =
+            size > MAX_TRACKED_HOSTS
+    }
+
+    // Guards hostLocks itself. A plain LinkedHashMap in access order is not thread-safe, and
+    // intercept() runs on every OkHttp dispatcher thread at once. Held only for the map lookup —
+    // never across the solve, which would serialise every host behind one challenge.
+    private val hostLocksGuard = Any()
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
@@ -51,7 +66,7 @@ class CloudflareInterceptor(
         // Close the challenge response before retrying so its body/connection is released.
         response.close()
 
-        val lock = hostLocks.getOrPut(url.host) { Any() }
+        val lock = synchronized(hostLocksGuard) { hostLocks.getOrPut(url.host) { Any() } }
         synchronized(lock) {
             // A concurrent request to the same host may have already solved it while we waited.
             if (!hasClearanceCookie(url)) {
@@ -96,6 +111,26 @@ class CloudflareInterceptor(
                 webView.settings.javaScriptEnabled = true
                 webView.settings.domStorageEnabled = true
                 webView.settings.userAgentString = userAgent
+                // Everything below is off by default on a modern WebView — but "off by default"
+                // has changed with API level before, and this WebView exists to run JavaScript
+                // written by a hostile third party (that is the entire point: it is solving their
+                // challenge). Stating them makes the boundary independent of what the platform
+                // happens to default to on the device the app is installed on.
+                //
+                // The file ones matter most: with them on, the challenge page could read
+                // app-private files off disk and post them anywhere — the app's databases and the
+                // encrypted-prefs file included.
+                webView.settings.allowFileAccess = false
+                webView.settings.allowContentAccess = false
+                @Suppress("DEPRECATION")
+                webView.settings.allowFileAccessFromFileURLs = false
+                @Suppress("DEPRECATION")
+                webView.settings.allowUniversalAccessFromFileURLs = false
+                // The challenge is always fetched over the scheme the request used; a page that
+                // pulls http subresources into an https challenge is not something to help along.
+                webView.settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+                // No reason for a challenge page to ask for a location fix.
+                webView.settings.setGeolocationEnabled(false)
                 val cookies = android.webkit.CookieManager.getInstance()
                 cookies.setAcceptCookie(true)
                 cookies.setAcceptThirdPartyCookies(webView, true)
@@ -140,14 +175,28 @@ class CloudflareInterceptor(
             android.webkit.CookieManager.getInstance().getCookie(url.toString())
         }.getOrNull() ?: return
         val uri = URI(url.toString())
-        // getCookie() exposes no domain/path attributes, so register each cookie both host-only
-        // (matches the immediate retry to this exact host) and domain-wide with a leading dot
-        // (so sibling subdomains that share the cf_clearance also match on later requests).
+        // getCookie() exposes no domain/path attributes, so every cookie is registered host-only —
+        // the narrowest scope that still satisfies the immediate retry to this exact host.
+        //
+        // Exactly one cookie is also registered domain-wide, and only because it has to be:
+        // cf_clearance is issued for the registrable domain and later requests to sibling
+        // subdomains need it, which is the whole reason for solving the challenge once.
+        //
+        // Every cookie used to get that treatment. That silently widened the scope of cookies the
+        // origin had deliberately kept host-only — a session cookie set for `www.example.com` was
+        // re-registered against `.example.com` and then sent to every other subdomain, including
+        // whatever `user-content.example.com` happens to host. Promoting a session cookie to a
+        // wildcard is the app handing a credential to hosts the origin never meant to see it.
         val registrableDomain = ".${url.topPrivateDomain() ?: uri.host}"
         parseCookiePairs(cookieString).forEach { (name, value) ->
             runCatching {
                 cookieManager.cookieStore.add(uri, HttpCookie(name, value).apply { domain = uri.host; path = "/"; version = 0 })
-                cookieManager.cookieStore.add(uri, HttpCookie(name, value).apply { domain = registrableDomain; path = "/"; version = 0 })
+                if (name == CLEARANCE_COOKIE) {
+                    cookieManager.cookieStore.add(
+                        uri,
+                        HttpCookie(name, value).apply { domain = registrableDomain; path = "/"; version = 0 },
+                    )
+                }
             }
         }
     }
