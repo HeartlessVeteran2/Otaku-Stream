@@ -15,6 +15,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
@@ -63,6 +65,13 @@ class TorrentSettingsViewModel @Inject constructor(
     // jumped back up on its own.
     private var cacheJob: Job? = null
 
+    // Cancelling the job above is not sufficient on its own. TorrentCacheSweeper is ordinary blocking
+    // filesystem code with no suspension points, so a cancelled coroutine that is already inside it
+    // keeps walking and deleting to completion. The mutex is what actually makes the operations
+    // serial: a newer request waits rather than deleting and scanning concurrently with the old one,
+    // so the usage figure it finally publishes describes a directory nobody else is still changing.
+    private val cacheMutex = Mutex()
+
     init {
         readSettings()
         refreshUsage()
@@ -109,8 +118,14 @@ class TorrentSettingsViewModel @Inject constructor(
         cacheJob?.cancel()
         cacheJob = viewModelScope.launch {
             try {
-                withContext(Dispatchers.IO) { runCatching(block) }
-                val usage = withContext(Dispatchers.IO) { readUsage() }
+                // Sweep and re-read under one lock hold, so the figure published below can't be
+                // measured against a directory a queued operation is about to change again.
+                val usage = cacheMutex.withLock {
+                    withContext(Dispatchers.IO) {
+                        runCatching(block)
+                        readUsage()
+                    }
+                }
                 _uiState.value = _uiState.value.copy(usageBytes = usage)
             } finally {
                 // In a finally block so a cancelled clear can't leave the button stuck on "Clearing…".

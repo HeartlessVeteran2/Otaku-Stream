@@ -73,7 +73,12 @@ class TorrentService : Service() {
                 // land — a permanent "Starting…" notification over no download at all is the single
                 // worst way this feature could fail, because the user can't tell what it's doing and
                 // Stop is the only thing that looks like it might help.
-                if (stats == null) {
+                //
+                // Keyed on the reader count, not on stats being null. stats() is null for the whole of
+                // a cold start — the handle doesn't exist until metadata arrives from a peer, which on
+                // an unpopular torrent can take longer than any timeout worth setting — so giving up on
+                // that alone would kill exactly the slow starts this service exists to protect.
+                if (!engine.hasOpenReaders) {
                     if (++pollsWithNothingToReport > MAX_IDLE_POLLS) {
                         Log.i(TAG, "No torrent to report on; stopping the service")
                         stopSelf()
@@ -156,9 +161,9 @@ class TorrentService : Service() {
         // Once a second. Fast enough that the rate looks live, slow enough to be irrelevant to battery.
         private const val POLL_INTERVAL_MS = 1_000L
 
-        // ~30 s of finding nothing to report. Long enough to cover a cold start, where the torrent is
-        // still resolving metadata and there is genuinely no handle to ask yet.
-        private const val MAX_IDLE_POLLS = 30
+        // ~10 s with no reader open at all. Short is fine now that this tracks readers rather than
+        // stats: no reader means nothing is even trying, so there is nothing to wait for.
+        private const val MAX_IDLE_POLLS = 10
 
         // Failures are logged and swallowed rather than propagated. The download itself works without
         // this service while the app is in the foreground, so failing the playback over it would trade
