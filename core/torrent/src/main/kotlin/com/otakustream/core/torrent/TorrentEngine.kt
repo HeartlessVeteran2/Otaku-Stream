@@ -23,6 +23,15 @@ class TorrentEngine @Inject constructor() {
     @Volatile
     private var session: SessionManager? = null
 
+    // How many readers currently hold a file open. The session lives exactly as long as this is
+    // above zero: once the last reader closes, the torrent is removed and the session shut down.
+    //
+    // Reference counting rather than "stop when the player stops" on purpose. The engine has no
+    // visibility into player lifecycle, auto-play can hand one playback straight to the next, and
+    // Media3 may open more than one DataSource for a single item. Counting readers is the only signal
+    // that is actually true.
+    private val openReaders = java.util.concurrent.atomic.AtomicInteger(0)
+
     // Whether the native library is usable on this device at all.
     //
     // Only arm64 is bundled (see the module's abiFilters), so on a 32-bit device the class fails to
@@ -106,7 +115,37 @@ class TorrentEngine @Inject constructor() {
     fun openFile(ref: TorrentRef, trackers: List<String>, saveDir: java.io.File): TorrentFileReader {
         val session = ensureStarted()
             ?: throw java.io.IOException("The torrent engine is unavailable on this device")
-        return TorrentFileReader.open(session, ref, trackers, saveDir)
+        openReaders.incrementAndGet()
+        return try {
+            TorrentFileReader.open(session, ref, trackers, saveDir, onClosed = ::releaseReader)
+        } catch (e: Throwable) {
+            // The count was taken before open() could fail; give it back, or a failed open would
+            // pin the session open for the rest of the process.
+            releaseReader(null)
+            throw e
+        }
+    }
+
+    // Called when a reader closes, and when an open fails after the count was taken.
+    //
+    // Removing the torrent is what actually stops peer traffic: pausing or clearing priorities still
+    // leaves the session talking to the swarm. Files are left on disk deliberately — they are the
+    // cache a resumed playback reads from, and the storage quota is what reclaims them.
+    private fun releaseReader(handle: org.libtorrent4j.TorrentHandle?) {
+        val remaining = openReaders.decrementAndGet()
+        if (handle != null) {
+            synchronized(lock) {
+                // The flagless overload keeps the downloaded data on disk, which is what we want:
+                // the files are the cache a resumed playback reads from.
+                runCatching { session?.remove(handle) }
+                    .onFailure { Log.w(TAG, "Could not remove torrent from the session", it) }
+            }
+        }
+        if (remaining <= 0) {
+            // No reader left, so nothing needs the swarm. This is the difference between a torrent
+            // that stops when you stop watching and one that keeps uploading in the background.
+            stop()
+        }
     }
 
     // Stops the session and releases its sockets. Playback teardown calls this once nothing is being
