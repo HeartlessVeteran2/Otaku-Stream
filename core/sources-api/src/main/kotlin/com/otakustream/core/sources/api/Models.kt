@@ -36,6 +36,12 @@ data class Video(
     val headers: Map<String, String> = emptyMap(),
     val subtitleTracks: List<SubtitleTrack> = emptyList(),
     val isM3U8: Boolean = false,
+    // Tracker announce URLs, for a `torrent://` url. Carried alongside the url rather than inside it
+    // on purpose: the tracker list varies between responses for the same torrent, so folding it into
+    // the url would make the url unstable — and the url is what resume position, skip markers, and
+    // watch history are all keyed on. Like `headers`, this reaches the player through
+    // PendingPlayback as per-video data the url itself doesn't carry.
+    val trackers: List<String> = emptyList(),
 )
 
 data class SubtitleTrack(

@@ -1,0 +1,146 @@
+package com.otakustream.core.torrent
+
+import android.util.Log
+import org.libtorrent4j.SessionManager
+import org.libtorrent4j.SettingsPack
+import org.libtorrent4j.swig.settings_pack
+import javax.inject.Inject
+import javax.inject.Singleton
+
+private const val TAG = "TorrentEngine"
+
+// Owns the single libtorrent session for the process.
+//
+// Nothing here runs until something actually asks for a torrent: the session is created on first
+// start() and the native library is only touched when isAvailable is first read. Starting a DHT
+// session at app startup would undo the cold-start work, and most sessions never play a torrent at
+// all.
+@Singleton
+class TorrentEngine @Inject constructor() {
+
+    private val lock = Any()
+
+    @Volatile
+    private var session: SessionManager? = null
+
+    // Whether the native library is usable on this device at all.
+    //
+    // Only arm64 is bundled (see the module's abiFilters), so on a 32-bit device the class fails to
+    // initialize. That surfaces as UnsatisfiedLinkError the first time, and then as
+    // NoClassDefFoundError on every later access because the class is left in an erroneous state —
+    // which is exactly why this is computed once and cached. Callers use it to disable the feature
+    // with an explanation instead of letting the app die.
+    val isAvailable: Boolean by lazy {
+        try {
+            // Touching a native static is the cheapest way to force the library load and find out.
+            org.libtorrent4j.LibTorrent.version()
+            true
+        } catch (e: UnsatisfiedLinkError) {
+            Log.w(TAG, "Torrent engine unavailable: native library missing for this ABI", e)
+            false
+        } catch (e: NoClassDefFoundError) {
+            Log.w(TAG, "Torrent engine unavailable: libtorrent4j failed to initialize", e)
+            false
+        } catch (e: ExceptionInInitializerError) {
+            Log.w(TAG, "Torrent engine unavailable: libtorrent4j failed to initialize", e)
+            false
+        } catch (e: Exception) {
+            // The three cases above are expected — that's what a missing ABI looks like, and they
+            // stay at warning level. Anything else reaching here is a bug or a broken environment,
+            // not a device without the library, so it is logged as an error to stand out. Still
+            // caught rather than rethrown: whatever went wrong, the right outcome for the user is a
+            // disabled feature, not a dead app.
+            Log.e(TAG, "Torrent engine unavailable: unexpected error probing libtorrent4j", e)
+            false
+        }
+    }
+
+    val isRunning: Boolean
+        get() = session?.isRunning == true
+
+    // Idempotent: returns the running session, starting one if needed, or null when the engine
+    // isn't available on this device. Synchronized because playback resolution and the (later)
+    // service lifecycle can both reach this concurrently, and two sessions binding the same ports
+    // would be a mess to diagnose.
+    fun ensureStarted(): SessionManager? {
+        if (!isAvailable) return null
+        // Everything below is under the same lock stop() takes, deliberately including the
+        // already-running check: an unsynchronized fast path could read a live session, have stop()
+        // discard it, and then hand the caller a stopped manager. This is called once per playback,
+        // not per read, so the lock costs nothing worth optimizing away.
+        synchronized(lock) {
+            session?.let { existing ->
+                if (existing.isRunning) return existing
+                // A stored session that isn't running is one whose stop() previously failed. Try
+                // once more and discard it either way, so a new session doesn't get created on top
+                // of native state still holding the old ports.
+                runCatching { existing.stop() }
+                    .onFailure { Log.w(TAG, "Discarding a session that would not stop", it) }
+                session = null
+            }
+            var starting: SessionManager? = null
+            return try {
+                starting = SessionManager()
+                starting.start()
+                applySettings(starting)
+                session = starting
+                Log.i(TAG, "Torrent session started")
+                starting
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to start torrent session", e)
+                // start() can fail after the native session has already claimed sockets. It was
+                // never stored in `session`, so stop() can't reach it — release it here or every
+                // retry strands another set of native resources.
+                starting?.let { runCatching { it.stop() } }
+                null
+            }
+        }
+    }
+
+    // Stops the session and releases its sockets. Playback teardown calls this once nothing is being
+    // read, so an idle app isn't holding a DHT node open on the user's connection.
+    fun stop() {
+        synchronized(lock) {
+            val current = session ?: return
+            try {
+                current.stop()
+                // Cleared only once the stop actually succeeded. Clearing first would mean a failed
+                // stop leaves the engine believing it is stopped with no handle left to retry, while
+                // the native session keeps running. Held onto here instead, and ensureStarted()
+                // discards it if it is still around next time.
+                session = null
+                Log.i(TAG, "Torrent session stopped")
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to stop torrent session cleanly; keeping the handle to retry", e)
+            }
+        }
+    }
+
+    // Streaming-shaped defaults, not download-shaped ones. Deliberately conservative on upload
+    // because this app never seeds: uploading is bandwidth the user didn't ask to spend, and on a
+    // phone it also costs battery. See the project's stated policy in the settings screen.
+    private fun applySettings(manager: SessionManager) {
+        val settings = SettingsPack()
+            // Announce as a mainstream client; some trackers reject or throttle unknown peer ids.
+            .setString(settings_pack.string_types.user_agent.swigValue(), USER_AGENT)
+            // No seeding: cap upload to what the protocol needs for tit-for-tat to work at all.
+            .setInteger(settings_pack.int_types.upload_rate_limit.swigValue(), UPLOAD_LIMIT_BYTES_PER_SEC)
+            .setInteger(settings_pack.int_types.active_seeds.swigValue(), 0)
+            // Unmetered download; the storage quota is what bounds it, not a rate limit.
+            .setInteger(settings_pack.int_types.download_rate_limit.swigValue(), 0)
+            .setInteger(settings_pack.int_types.connections_limit.swigValue(), CONNECTION_LIMIT)
+        runCatching { manager.applySettings(settings) }
+            .onFailure { Log.w(TAG, "Failed to apply torrent session settings", it) }
+    }
+
+    private companion object {
+        const val USER_AGENT = "libtorrent/2.1.0"
+
+        // 64 KiB/s. Enough to stay a participating peer rather than being choked outright, low
+        // enough that it can't compete with the download this is meant to be serving.
+        const val UPLOAD_LIMIT_BYTES_PER_SEC = 64 * 1024
+
+        // Plenty of peers for one streaming file, without opening hundreds of sockets on a phone.
+        const val CONNECTION_LIMIT = 100
+    }
+}

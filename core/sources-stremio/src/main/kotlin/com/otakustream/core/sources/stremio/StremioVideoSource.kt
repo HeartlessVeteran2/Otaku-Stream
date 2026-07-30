@@ -206,6 +206,10 @@ class StremioVideoSource(
             url = "${serverBaseUrl.trimEnd('/')}/$infoHash/${fileIdx ?: 0}",
             quality = name ?: "torrent",
             subtitleTracks = subtitleTracks,
+            // Carried even on the streaming-server path: harmless there (the server does its own
+            // peer discovery), and it keeps the field populated from one place rather than only on
+            // the on-device path added later.
+            trackers = trackers,
         )
         else -> null
     }
