@@ -101,7 +101,7 @@ class TorrentEngine @Inject constructor(
     // changes between choosing a stream and playing it, and a metered connection at play time is the
     // moment that matters.
     val isUsable: Boolean
-        get() = isAvailable && settings.enabled && (!settings.wifiOnly || isUnmetered())
+        get() = isAvailable && settings.enabled && (!settings.unmeteredOnly || isUnmetered())
 
     private fun isUnmetered(): Boolean {
         val manager = appContext.getSystemService(android.content.Context.CONNECTIVITY_SERVICE)

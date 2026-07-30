@@ -10,6 +10,7 @@ import android.content.Context
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,7 +23,7 @@ data class QuotaChoice(val label: String, val bytes: Long)
 data class TorrentSettingsUiState(
     val deviceSupported: Boolean = false,
     val enabled: Boolean = false,
-    val wifiOnly: Boolean = true,
+    val unmeteredOnly: Boolean = true,
     val quotaBytes: Long = 0,
     val usageBytes: Long = 0,
     val isClearing: Boolean = false,
@@ -53,53 +54,74 @@ class TorrentSettingsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(TorrentSettingsUiState())
     val uiState: StateFlow<TorrentSettingsUiState> = _uiState.asStateFlow()
 
+    // One job for every disk operation this screen triggers, cancelled and replaced rather than run
+    // alongside its predecessor.
+    //
+    // Necessary, not tidy. Tapping 512 MB then 8 GB used to queue two sweeps: the first captured
+    // 512 MB and, if it finished second, evicted files the user had just chosen to keep. The same race
+    // let a usage scan started before a sweep report its pre-sweep total afterwards, so the figure
+    // jumped back up on its own.
+    private var cacheJob: Job? = null
+
     init {
-        refresh()
+        readSettings()
+        refreshUsage()
     }
 
     fun setEnabled(value: Boolean) {
         settings.enabled = value
-        refresh()
+        readSettings()
     }
 
-    fun setWifiOnly(value: Boolean) {
-        settings.wifiOnly = value
-        refresh()
+    fun setUnmeteredOnly(value: Boolean) {
+        settings.unmeteredOnly = value
+        readSettings()
     }
 
     fun setQuota(bytes: Long) {
         settings.quotaBytes = bytes
-        refresh()
+        readSettings()
         // Apply it immediately rather than waiting for the next playback to end: lowering the limit
         // and seeing the usage figure stay put looks like the setting was ignored.
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                runCatching {
-                    TorrentCacheSweeper.sweep(
-                        torrentCacheDir(context),
-                        quotaBytes = bytes,
-                        protectedPaths = engine.protectedCachePaths(),
-                    )
-                }
-            }
-            refresh()
+        runCacheOperation {
+            TorrentCacheSweeper.sweep(
+                torrentCacheDir(context),
+                // Read back from settings, not from the captured argument: the setter clamps to a
+                // minimum, and by the time this runs a later tap may have raised the limit.
+                quotaBytes = settings.quotaBytes,
+                protectedPaths = engine.protectedCachePaths(),
+            )
         }
     }
 
     fun clearCache() {
         _uiState.value = _uiState.value.copy(isClearing = true)
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                runCatching {
-                    TorrentCacheSweeper.clear(torrentCacheDir(context), engine.protectedCachePaths())
-                }
-            }
-            _uiState.value = _uiState.value.copy(isClearing = false)
-            refresh()
+        runCacheOperation(
+            onFinished = { _uiState.value = _uiState.value.copy(isClearing = false) },
+        ) {
+            TorrentCacheSweeper.clear(torrentCacheDir(context), engine.protectedCachePaths())
         }
     }
 
-    private fun refresh() {
+    // Runs one disk operation, then re-reads usage — replacing any operation still in flight so the
+    // most recent request is the one whose result the user sees.
+    private fun runCacheOperation(onFinished: () -> Unit = {}, block: () -> Unit) {
+        cacheJob?.cancel()
+        cacheJob = viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { runCatching(block) }
+                val usage = withContext(Dispatchers.IO) { readUsage() }
+                _uiState.value = _uiState.value.copy(usageBytes = usage)
+            } finally {
+                // In a finally block so a cancelled clear can't leave the button stuck on "Clearing…".
+                onFinished()
+            }
+        }
+    }
+
+    private fun refreshUsage() = runCacheOperation {}
+
+    private fun readSettings() {
         // isAvailable, not isUsable: this screen is where the user turns the feature on, so it must
         // reflect what the device can do rather than what the current settings allow — otherwise
         // switching it off would hide the switch that turns it back on.
@@ -107,14 +129,11 @@ class TorrentSettingsViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(
             deviceSupported = supported,
             enabled = supported && settings.enabled,
-            wifiOnly = settings.wifiOnly,
+            unmeteredOnly = settings.unmeteredOnly,
             quotaBytes = settings.quotaBytes,
         )
-        viewModelScope.launch {
-            val usage = withContext(Dispatchers.IO) {
-                runCatching { TorrentCacheSweeper.usageBytes(torrentCacheDir(context)) }.getOrDefault(0L)
-            }
-            _uiState.value = _uiState.value.copy(usageBytes = usage)
-        }
     }
+
+    private fun readUsage(): Long =
+        runCatching { TorrentCacheSweeper.usageBytes(torrentCacheDir(context)) }.getOrDefault(0L)
 }

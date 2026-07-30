@@ -25,7 +25,12 @@ data class TorrentStats(
 
     fun formattedPeers(): String = when {
         peers == 0 -> "no peers"
-        seeds > 0 -> "$peers peers · $seeds seeds"
-        else -> "$peers peers"
+        seeds > 0 -> "${count(peers, "peer")} · ${count(seeds, "seed")}"
+        else -> count(peers, "peer")
     }
+
+    // "1 peer", not "1 peers". A single peer is a common state on a cold or unpopular torrent —
+    // exactly when the user is reading this line to work out why nothing is happening.
+    private fun count(value: Int, noun: String): String =
+        if (value == 1) "$value $noun" else "$value ${noun}s"
 }

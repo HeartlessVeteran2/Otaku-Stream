@@ -42,15 +42,22 @@ class TorrentSettings @Inject constructor(
     // Defaults to on. Torrent streaming moves far more data than a direct stream — it fetches ahead
     // of the read head and, unlike a single HTTP response, talks to many peers — so defaulting to
     // metered-connection use would be spending the user's data allowance without asking.
-    var wifiOnly: Boolean
-        get() = prefs.getBoolean(KEY_WIFI_ONLY, true)
-        set(value) = prefs.edit { putBoolean(KEY_WIFI_ONLY, value) }
+    //
+    // Named for metered-ness rather than Wi-Fi because that is what the platform can actually tell us,
+    // and the two differ in both directions: a phone hotspot is Wi-Fi but metered, while Ethernet on a
+    // TV box is unmetered and isn't Wi-Fi. A field called wifiOnly would eventually be *implemented*
+    // as a transport check by someone trusting its name, silently changing behaviour for both.
+    var unmeteredOnly: Boolean
+        get() = prefs.getBoolean(KEY_UNMETERED_ONLY, true)
+        set(value) = prefs.edit { putBoolean(KEY_UNMETERED_ONLY, value) }
 
     private companion object {
         const val PREFS_NAME = "torrent_prefs"
         const val KEY_ENABLED = "enabled"
         const val KEY_QUOTA = "quota_bytes"
-        const val KEY_WIFI_ONLY = "wifi_only"
+        // Stored key kept as it shipped: renaming it would silently reset the preference for anyone
+        // who had already turned it off.
+        const val KEY_UNMETERED_ONLY = "wifi_only"
 
         // Below this the cache can't hold enough read-ahead to play anything smoothly, so allowing it
         // would just look like the feature is broken.

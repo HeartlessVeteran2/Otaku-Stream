@@ -62,12 +62,21 @@ fun ManageStremioSourcesScreen(
         modifier = modifier.fillMaxSize(),
         topBar = { BackTopBar(title = "Add-ons", onBack = onBack) },
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Text(text = "Add an add-on", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                TextButton(onClick = onBrowseAddonsClick) { Text("Browse add-ons") }
+        // One scrolling list for the whole screen, not a Column with a weighted list inside it.
+        //
+        // Everything below the add-on list — torrent settings, the streaming-server field — used to sit
+        // in the outer Column, where the list's weight(1f) takes the leftover height and the rest is
+        // simply clipped. On a short screen, or with a large font scale, those settings were on screen
+        // in the layout and unreachable by the user.
+        LazyColumn(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Text(text = "Add an add-on", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    TextButton(onClick = onBrowseAddonsClick) { Text("Browse add-ons") }
+                }
             }
 
+            item {
             Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
                 OutlinedTextField(
                     value = uiState.urlInput,
@@ -80,12 +89,14 @@ fun ManageStremioSourcesScreen(
                     Text("Add")
                 }
             }
+            }
 
             if (uiState.isInstalling) {
-                CircularProgressIndicator(modifier = Modifier.padding(top = 8.dp))
+                item { CircularProgressIndicator(modifier = Modifier.padding(top = 8.dp)) }
             }
 
             uiState.error?.let { error ->
+                item {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
                     Text(
                         text = error,
@@ -95,36 +106,40 @@ fun ManageStremioSourcesScreen(
                     )
                     TextButton(onClick = viewModel::install, enabled = !uiState.isInstalling) { Text("Retry") }
                 }
+                }
             }
 
-            Text(text = "Installed add-ons", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 24.dp))
+            item {
+                Text(text = "Installed add-ons", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 24.dp))
+            }
 
             if (uiState.addons.isEmpty()) {
+                item {
                 Text(
                     text = "No add-ons installed yet. Browse the directory or paste an add-on link above.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp),
                 )
-            }
-
-            LazyColumn(modifier = Modifier.weight(1f)) {
-                itemsIndexed(uiState.addons, key = { _, item -> item.record.manifestUrl }) { index, item ->
-                    AddonRow(
-                        item = item,
-                        canMoveUp = index > 0,
-                        canMoveDown = index < uiState.addons.lastIndex,
-                        onToggleEnabled = { viewModel.toggleAddonEnabled(item) },
-                        onMoveUp = { viewModel.moveAddon(item, -1) },
-                        onMoveDown = { viewModel.moveAddon(item, 1) },
-                        onToggleCatalog = { catalog -> viewModel.toggleCatalogEnabled(item, catalog) },
-                        onRemove = { viewModel.remove(item.record) },
-                    )
                 }
             }
 
-            TorrentSettingsSection()
+            itemsIndexed(uiState.addons, key = { _, item -> item.record.manifestUrl }) { index, item ->
+                AddonRow(
+                    item = item,
+                    canMoveUp = index > 0,
+                    canMoveDown = index < uiState.addons.lastIndex,
+                    onToggleEnabled = { viewModel.toggleAddonEnabled(item) },
+                    onMoveUp = { viewModel.moveAddon(item, -1) },
+                    onMoveDown = { viewModel.moveAddon(item, 1) },
+                    onToggleCatalog = { catalog -> viewModel.toggleCatalogEnabled(item, catalog) },
+                    onRemove = { viewModel.remove(item.record) },
+                )
+            }
 
+            item { TorrentSettingsSection() }
+
+            item {
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
             // Streaming server is a power-user setting most people never touch — tuck it behind an
@@ -162,6 +177,7 @@ fun ManageStremioSourcesScreen(
                         Spacer(modifier = Modifier.width(8.dp))
                     }
                 }
+            }
             }
         }
     }

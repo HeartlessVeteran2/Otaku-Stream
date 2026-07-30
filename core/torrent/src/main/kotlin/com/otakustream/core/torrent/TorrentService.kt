@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import dagger.hilt.android.AndroidEntryPoint
@@ -64,8 +65,23 @@ class TorrentService : Service() {
         if (pollJob?.isActive == true) return
         val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default).also { scope = it }
         pollJob = serviceScope.launch {
+            var pollsWithNothingToReport = 0
             while (isActive) {
                 val stats = engine.stats()
+                // The engine stops this service when its last reader closes, so normally the loop is
+                // cancelled from outside. This is the backstop for the case where that call doesn't
+                // land — a permanent "Starting…" notification over no download at all is the single
+                // worst way this feature could fail, because the user can't tell what it's doing and
+                // Stop is the only thing that looks like it might help.
+                if (stats == null) {
+                    if (++pollsWithNothingToReport > MAX_IDLE_POLLS) {
+                        Log.i(TAG, "No torrent to report on; stopping the service")
+                        stopSelf()
+                        return@launch
+                    }
+                } else {
+                    pollsWithNothingToReport = 0
+                }
                 notificationManager()?.notify(NOTIFICATION_ID, buildNotification(stats))
                 delay(POLL_INTERVAL_MS)
             }
@@ -132,6 +148,7 @@ class TorrentService : Service() {
     }
 
     companion object {
+        private const val TAG = "TorrentService"
         private const val CHANNEL_ID = "torrent_streaming"
         private const val NOTIFICATION_ID = 4201
         private const val ACTION_STOP = "com.otakustream.core.torrent.action.STOP"
@@ -139,13 +156,23 @@ class TorrentService : Service() {
         // Once a second. Fast enough that the rate looks live, slow enough to be irrelevant to battery.
         private const val POLL_INTERVAL_MS = 1_000L
 
+        // ~30 s of finding nothing to report. Long enough to cover a cold start, where the torrent is
+        // still resolving metadata and there is genuinely no handle to ask yet.
+        private const val MAX_IDLE_POLLS = 30
+
+        // Failures are logged and swallowed rather than propagated. The download itself works without
+        // this service while the app is in the foreground, so failing the playback over it would trade
+        // a degraded feature for a broken one — but a silent failure would leave a background download
+        // being killed by the platform with nothing to explain why.
         fun start(context: Context) {
             val intent = Intent(context, TorrentService::class.java)
             runCatching { androidx.core.content.ContextCompat.startForegroundService(context, intent) }
+                .onFailure { Log.w(TAG, "Could not start the torrent foreground service", it) }
         }
 
         fun stop(context: Context) {
             runCatching { context.stopService(Intent(context, TorrentService::class.java)) }
+                .onFailure { Log.w(TAG, "Could not stop the torrent foreground service", it) }
         }
     }
 }

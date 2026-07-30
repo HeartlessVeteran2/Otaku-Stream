@@ -48,8 +48,10 @@ class TorrentFileReader private constructor(
     // the module and be used after the torrent is removed.
     internal val torrentHandle: TorrentHandle get() = handle
 
-    // Absolute path of the file being read, so the cache sweep can protect it from eviction.
-    val filePath: String get() = file.absolutePath
+    // Absolute path of the file being read, so the cache sweep can protect it from eviction. Internal
+    // for the same reason as the handle above: nothing outside this module has any business knowing
+    // where on disk a torrent lands.
+    internal val filePath: String get() = file.absolutePath
 
     // Reads at most up to the end of the piece containing `position`. Deliberately not more: the
     // next piece may not have arrived, and returning a short read is exactly what a DataSource is

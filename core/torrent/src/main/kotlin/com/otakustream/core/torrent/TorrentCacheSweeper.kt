@@ -27,6 +27,7 @@ object TorrentCacheSweeper {
         if (victims.isEmpty()) return 0
 
         var freed = 0L
+        var evicted = 0
         for (victim in victims) {
             val file = File(victim.path)
             // Count only what actually went away. A delete can fail — the file may have been opened
@@ -34,12 +35,15 @@ object TorrentCacheSweeper {
             // next sweep think it's already under quota.
             if (runCatching { file.delete() }.getOrDefault(false)) {
                 freed += victim.sizeBytes
+                evicted++
             } else {
                 Log.w(TAG, "Could not evict ${file.name}")
             }
         }
         removeEmptyDirectories(cacheDir)
-        Log.i(TAG, "Evicted ${victims.size} file(s), freed $freed bytes")
+        // Deletions, not attempts. This line is what you read when the cache won't come down to
+        // quota, and an attempted count would say the sweep worked while the disk says otherwise.
+        Log.i(TAG, "Evicted $evicted of ${victims.size} selected file(s), freed $freed bytes")
         return freed
     }
 
@@ -52,7 +56,13 @@ object TorrentCacheSweeper {
         if (!cacheDir.isDirectory) return 0
         var freed = 0L
         scan(cacheDir).filter { it.path !in protectedPaths }.forEach { entry ->
-            if (runCatching { File(entry.path).delete() }.getOrDefault(false)) freed += entry.sizeBytes
+            if (runCatching { File(entry.path).delete() }.getOrDefault(false)) {
+                freed += entry.sizeBytes
+            } else {
+                // The user pressed "Clear now" and the usage figure didn't go to zero. Without this
+                // there is nothing anywhere to say which file refused to go.
+                Log.w(TAG, "Could not delete ${File(entry.path).name} while clearing the cache")
+            }
         }
         removeEmptyDirectories(cacheDir)
         return freed

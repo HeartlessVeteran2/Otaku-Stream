@@ -1,9 +1,11 @@
 package com.otakustream.feature.sources.ui
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -68,15 +70,19 @@ fun TorrentSettingsSection(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(text = "Wi-Fi only")
+                    // Named for what the engine actually checks — whether the connection is metered —
+                    // rather than for Wi-Fi. Those differ in both directions: a Wi-Fi hotspot can be
+                    // marked metered, and Ethernet on a TV box is unmetered but isn't Wi-Fi. Calling
+                    // it "Wi-Fi only" would promise something this doesn't enforce.
+                    Text(text = "Only on unmetered networks")
                     Text(
                         text = "Torrents fetch ahead and talk to many peers, so they use much more " +
-                            "data than a normal stream.",
+                            "data than a normal stream. Usually this means Wi-Fi.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Switch(checked = state.wifiOnly, onCheckedChange = viewModel::setWifiOnly)
+                Switch(checked = state.unmeteredOnly, onCheckedChange = viewModel::setUnmeteredOnly)
             }
 
             Text(
@@ -84,7 +90,9 @@ fun TorrentSettingsSection(
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(top = 12.dp),
             )
-            Row(modifier = Modifier.padding(top = 4.dp)) {
+            // Scrollable: at the largest accessibility font sizes three chips no longer fit across a
+            // narrow screen, and a clipped chip is a choice the user can't make.
+            Row(modifier = Modifier.horizontalScroll(rememberScrollState()).padding(top = 4.dp)) {
                 state.quotaChoices.forEach { choice ->
                     FilterChip(
                         selected = choice.bytes == state.quotaBytes,
@@ -94,22 +102,25 @@ fun TorrentSettingsSection(
                     )
                 }
             }
+        }
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            ) {
-                Text(
-                    text = "Using ${state.usageLabel}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(
-                    onClick = viewModel::clearCache,
-                    enabled = state.usageBytes > 0 && !state.isClearing,
-                ) { Text(if (state.isClearing) "Clearing…" else "Clear now") }
-            }
+        // Outside the `enabled` block on purpose. Turning the feature off doesn't delete what it
+        // already downloaded, so hiding these would strand gigabytes with no way to reclaim them from
+        // the one screen that mentions them.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        ) {
+            Text(
+                text = "Using ${state.usageLabel}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(
+                onClick = viewModel::clearCache,
+                enabled = state.usageBytes > 0 && !state.isClearing,
+            ) { Text(if (state.isClearing) "Clearing…" else "Clear now") }
         }
     }
 }
