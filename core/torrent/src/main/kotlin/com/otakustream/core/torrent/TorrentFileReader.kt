@@ -31,10 +31,11 @@ class TorrentFileReader private constructor(
     private val handle: TorrentHandle,
     private val file: File,
     private val layout: TorrentFileLayout,
+    private val generation: Long,
     // Invoked exactly once when this reader closes, so whoever owns the session can decide whether
     // anything still needs the torrent. The reader itself must not stop the session: several readers
     // can share one, and it has no way to know about the others.
-    private val onClosed: (TorrentHandle, String) -> Unit,
+    private val onClosed: (TorrentHandle, String, Long) -> Unit,
 ) : Closeable {
 
     private val raf: RandomAccessFile = RandomAccessFile(file, "r")
@@ -120,7 +121,7 @@ class TorrentFileReader private constructor(
         // Deadlines are per-torrent state; leaving them set would keep skewing the scheduler after
         // this reader is gone.
         runCatching { handle.clearPieceDeadlines() }
-        runCatching { onClosed(handle, file.absolutePath) }
+        runCatching { onClosed(handle, file.absolutePath, generation) }
     }
 
     companion object {
@@ -145,7 +146,8 @@ class TorrentFileReader private constructor(
             ref: TorrentRef,
             trackers: List<String>,
             saveDir: File,
-            onClosed: (TorrentHandle, String) -> Unit,
+            onClosed: (TorrentHandle, String, Long) -> Unit,
+            generation: Long,
         ): TorrentFileReader {
             if (!saveDir.exists() && !saveDir.mkdirs()) {
                 throw IOException("Could not create torrent save directory: $saveDir")
@@ -187,7 +189,7 @@ class TorrentFileReader private constructor(
             // libtorrent creates the file when it allocates storage; give it a moment rather than
             // failing the open on a race with the first write.
             awaitFile(file)
-            return TorrentFileReader(handle, file, layout, onClosed)
+            return TorrentFileReader(handle, file, layout, generation, onClosed)
         }
 
         private fun addAndAwaitHandle(

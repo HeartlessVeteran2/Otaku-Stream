@@ -35,6 +35,9 @@ class TorrentEngine @Inject constructor(
     // that is actually true.
     private val openReaders = java.util.concurrent.atomic.AtomicInteger(0)
 
+    // Readers from an older stopAll() must not affect a later playback session.
+    private val generation = java.util.concurrent.atomic.AtomicLong(0)
+
     // The torrent currently being read, kept only so the notification can report its rate and peer
     // count. Cleared on release so a stale handle is never queried after removal — calling into a
     // removed handle is undefined at the native layer.
@@ -149,13 +152,21 @@ class TorrentEngine @Inject constructor(
     fun openFile(ref: TorrentRef, trackers: List<String>, saveDir: java.io.File): TorrentFileReader {
         val session = ensureStarted()
             ?: throw java.io.IOException("The torrent engine is unavailable on this device")
-        if (openReaders.getAndIncrement() == 0) {
-            // First reader: bring up the foreground service so the download isn't stopped the moment
-            // the app is backgrounded.
-            TorrentService.start(appContext)
+        val readerGeneration: Long
+        synchronized(lock) {
+            readerGeneration = generation.get()
+            if (openReaders.getAndIncrement() == 0) {
+                // First reader: bring up the foreground service so the download isn't stopped the moment
+                // the app is backgrounded.
+                TorrentService.start(appContext)
+            }
         }
         return try {
-            TorrentFileReader.open(session, ref, trackers, saveDir, onClosed = ::releaseReader)
+            TorrentFileReader.open(
+                session, ref, trackers, saveDir,
+                onClosed = ::releaseReader,
+                generation = readerGeneration,
+            )
                 .also {
                     activeHandle.set(it.torrentHandle)
                     openPaths.add(it.filePath)
@@ -163,7 +174,7 @@ class TorrentEngine @Inject constructor(
         } catch (e: Throwable) {
             // The count was taken before open() could fail; give it back, or a failed open would
             // pin the session open for the rest of the process.
-            releaseReader(null)
+            releaseReader(null, readerGeneration = readerGeneration)
             throw e
         }
     }
@@ -192,12 +203,10 @@ class TorrentEngine @Inject constructor(
         activeHandle.getAndSet(null)?.let { handle ->
             synchronized(lock) { runCatching { session?.remove(handle) } }
         }
-        openReaders.set(0)
-        // Cleared with the count, not left to the readers. Their close() will still run and still
-        // call releaseReader, but a reader that never closes cleanly would otherwise leave its path
-        // protected for the rest of the process — permanently exempting the largest file in the cache
-        // from eviction, so the quota could never be met again.
-        openPaths.clear()
+        synchronized(lock) {
+            generation.incrementAndGet()
+            openReaders.set(0)
+        }
         stop()
         TorrentService.stop(appContext)
     }
@@ -207,13 +216,14 @@ class TorrentEngine @Inject constructor(
     // Removing the torrent is what actually stops peer traffic: pausing or clearing priorities still
     // leaves the session talking to the swarm. Files are left on disk deliberately — they are the
     // cache a resumed playback reads from, and the storage quota is what reclaims them.
-    private fun releaseReader(handle: org.libtorrent4j.TorrentHandle?, path: String? = null) {
+    private fun releaseReader(
+        handle: org.libtorrent4j.TorrentHandle?,
+        path: String? = null,
+        readerGeneration: Long,
+) {
+        if (readerGeneration != generation.get()) return
         path?.let { openPaths.remove(it) }
-        // Floored at zero rather than a plain decrement. stopAll() resets the count to zero while
-        // readers are still open, and each of those still closes afterwards — a bare decrement would
-        // take the count negative, and then the next openFile()'s `getAndIncrement() == 0` check
-        // would be false, so the foreground service would never start for the following playback.
-        val remaining = openReaders.updateAndGet { (it - 1).coerceAtLeast(0) }
+        val remaining = openReaders.decrementAndGet()
         if (handle != null) {
             synchronized(lock) {
                 // The flagless overload keeps the downloaded data on disk, which is what we want:
