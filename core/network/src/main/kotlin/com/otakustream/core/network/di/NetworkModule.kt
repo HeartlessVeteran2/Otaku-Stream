@@ -23,11 +23,14 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object NetworkModule {
 
-    // The app-wide shared OkHttp client (SingletonComponent) reused by every network client —
-    // AniList, AniSkip, Stremio, scripted sources, source catalog. Timeouts bound any slow or
-    // hung endpoint so it can't occupy a thread indefinitely. A default desktop User-Agent and a
-    // cookie jar make it behave like a real browser: many anime hosts return 403/Cloudflare pages
-    // to the stock OkHttp UA, and streams often gate on cookies set during the same session.
+    // The client for untrusted traffic: scripted sources, Mangayomi extensions, Stremio add-ons,
+    // the source directory, AniSkip. Unqualified on purpose — see AccountHttpClient for why the
+    // restricted client is the default one.
+    //
+    // Timeouts bound any slow or hung endpoint so it can't occupy a thread indefinitely. A default
+    // desktop User-Agent and a cookie jar make it behave like a real browser: many anime hosts
+    // return 403/Cloudflare pages to the stock OkHttp UA, and streams often gate on cookies set
+    // during the same session.
     @Provides
     @Singleton
     fun provideOkHttpClient(
@@ -58,6 +61,33 @@ object NetworkModule {
             .build()
     }
 
+    // The client for the user's own accounts, with its own cookie jar and its own cache.
+    //
+    // What it deliberately does not have is the Cloudflare interceptor. That interceptor answers a
+    // challenge by loading the URL in a WebView and copying whatever cookies come back — a
+    // reasonable trade for a streaming mirror, and the wrong shape entirely for a host the app
+    // sends a bearer token to. AniList and Stremio serve their APIs directly; if one ever returned
+    // a challenge, failing the call is the correct outcome.
+    //
+    // Derived with newBuilder() so the connection pool and dispatcher are shared — two independent
+    // clients would mean two thread pools for no benefit — with the interceptor list cleared, since
+    // newBuilder() copies it.
+    @Provides
+    @Singleton
+    @AccountHttpClient
+    fun provideAccountOkHttpClient(
+        @ApplicationContext context: Context,
+        sourceClient: OkHttpClient,
+    ): OkHttpClient {
+        val cookieManager = CookieManager().apply { setCookiePolicy(CookiePolicy.ACCEPT_ALL) }
+        return sourceClient.newBuilder()
+            .apply { interceptors().clear() }
+            .cache(Cache(File(context.cacheDir, "http-account"), ACCOUNT_CACHE_BYTES))
+            .cookieJar(JavaNetCookieJar(cookieManager))
+            .addInterceptor(UserAgentInterceptor(DESKTOP_USER_AGENT))
+            .build()
+    }
+
     // Adds a desktop-Chrome User-Agent only when the caller hasn't already set one, so a
     // scripted source / Stremio add-on that specifies its own UA still wins.
     private class UserAgentInterceptor(private val userAgent: String) : Interceptor {
@@ -69,6 +99,10 @@ object NetworkModule {
     }
 
     private const val HTTP_CACHE_BYTES = 20L * 1024 * 1024
+
+    // Smaller than the source cache: this one only ever holds AniList and Stremio API responses,
+    // and AniList is POST and therefore uncacheable anyway.
+    private const val ACCOUNT_CACHE_BYTES = 4L * 1024 * 1024
 
     private const val DESKTOP_USER_AGENT =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
