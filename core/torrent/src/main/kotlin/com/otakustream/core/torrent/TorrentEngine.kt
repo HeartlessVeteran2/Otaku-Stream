@@ -193,6 +193,11 @@ class TorrentEngine @Inject constructor(
             synchronized(lock) { runCatching { session?.remove(handle) } }
         }
         openReaders.set(0)
+        // Cleared with the count, not left to the readers. Their close() will still run and still
+        // call releaseReader, but a reader that never closes cleanly would otherwise leave its path
+        // protected for the rest of the process — permanently exempting the largest file in the cache
+        // from eviction, so the quota could never be met again.
+        openPaths.clear()
         stop()
         TorrentService.stop(appContext)
     }
@@ -204,7 +209,11 @@ class TorrentEngine @Inject constructor(
     // cache a resumed playback reads from, and the storage quota is what reclaims them.
     private fun releaseReader(handle: org.libtorrent4j.TorrentHandle?, path: String? = null) {
         path?.let { openPaths.remove(it) }
-        val remaining = openReaders.decrementAndGet()
+        // Floored at zero rather than a plain decrement. stopAll() resets the count to zero while
+        // readers are still open, and each of those still closes afterwards — a bare decrement would
+        // take the count negative, and then the next openFile()'s `getAndIncrement() == 0` check
+        // would be false, so the foreground service would never start for the following playback.
+        val remaining = openReaders.updateAndGet { (it - 1).coerceAtLeast(0) }
         if (handle != null) {
             synchronized(lock) {
                 // The flagless overload keeps the downloaded data on disk, which is what we want:
