@@ -113,9 +113,18 @@ class TorrentEngine @Inject constructor() {
     // without libtorrent on its compile classpath.
     @Throws(java.io.IOException::class)
     fun openFile(ref: TorrentRef, trackers: List<String>, saveDir: java.io.File): TorrentFileReader {
-        val session = ensureStarted()
-            ?: throw java.io.IOException("The torrent engine is unavailable on this device")
+        // Take the reader reference before acquiring the session. Otherwise the last existing reader
+        // can stop the session while this open is between ensureStarted() and this increment.
         openReaders.incrementAndGet()
+        val session = try {
+            ensureStarted()
+                ?: throw java.io.IOException("The torrent engine is unavailable on this device")
+        } catch (e: Throwable) {
+            // The count was taken before session acquisition could fail; give it back, or a failed
+            // open would pin the session open for the rest of the process.
+            releaseReader(null)
+            throw e
+        }
         return try {
             TorrentFileReader.open(session, ref, trackers, saveDir, onClosed = ::releaseReader)
         } catch (e: Throwable) {
@@ -133,18 +142,21 @@ class TorrentEngine @Inject constructor() {
     // cache a resumed playback reads from, and the storage quota is what reclaims them.
     private fun releaseReader(handle: org.libtorrent4j.TorrentHandle?) {
         val remaining = openReaders.decrementAndGet()
-        if (handle != null) {
-            synchronized(lock) {
-                // The flagless overload keeps the downloaded data on disk, which is what we want:
-                // the files are the cache a resumed playback reads from.
-                runCatching { session?.remove(handle) }
-                    .onFailure { Log.w(TAG, "Could not remove torrent from the session", it) }
-            }
-        }
         if (remaining <= 0) {
-            // No reader left, so nothing needs the swarm. This is the difference between a torrent
-            // that stops when you stop watching and one that keeps uploading in the background.
-            stop()
+            synchronized(lock) {
+                // A new open may have acquired its reference after our decrement. Recheck while
+                // holding the same lock as ensureStarted()/stop() before tearing anything down.
+                if (openReaders.get() > 0) return
+                if (handle != null) {
+                    // The flagless overload keeps the downloaded data on disk, which is what we want:
+                    // the files are the cache a resumed playback reads from.
+                    runCatching { session?.remove(handle) }
+                        .onFailure { Log.w(TAG, "Could not remove torrent from the session", it) }
+                }
+                // No reader left, so nothing needs the swarm. This is the difference between a torrent
+                // that stops when you stop watching and one that keeps uploading in the background.
+                stop()
+            }
         }
     }
 
