@@ -25,6 +25,7 @@ class StremioAddonInstaller @Inject constructor(
     private val httpClient: OkHttpClient,
     private val stremioRepository: StremioRepository,
     private val streamProviderRegistry: StremioStreamProviderRegistry,
+    private val torrentEngine: com.otakustream.core.torrent.TorrentEngine,
 ) {
     suspend fun installFromUrl(manifestUrl: String, priority: Int = 0): List<StremioVideoSource> = withContext(Dispatchers.IO) {
         val normalizedUrl = normalizeStremioManifestUrl(manifestUrl)
@@ -87,6 +88,7 @@ class StremioAddonInstaller @Inject constructor(
                 httpClient = httpClient,
                 stremioRepository = stremioRepository,
                 streamProviderRegistry = streamProviderRegistry,
+                onDeviceTorrentsAvailable = { torrentEngine.isAvailable },
                 manifestUrl = manifestUrl,
                 catalog = catalog,
                 resources = resources,

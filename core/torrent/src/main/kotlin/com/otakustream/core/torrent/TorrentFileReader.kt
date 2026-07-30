@@ -1,0 +1,248 @@
+package com.otakustream.core.torrent
+
+import android.util.Log
+import org.libtorrent4j.AlertListener
+import org.libtorrent4j.Priority
+import org.libtorrent4j.SessionManager
+import org.libtorrent4j.TorrentHandle
+import org.libtorrent4j.alerts.Alert
+import org.libtorrent4j.alerts.AlertType
+import org.libtorrent4j.alerts.AddTorrentAlert
+import java.io.Closeable
+import java.io.File
+import java.io.IOException
+import java.io.RandomAccessFile
+import java.net.URLEncoder
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+
+private const val TAG = "TorrentFileReader"
+
+// Random access to one file inside a torrent, as the player needs it: give me the bytes at this
+// offset, block until they exist, fail loudly if they never arrive.
+//
+// Bytes are read from the partially-downloaded file on disk rather than through libtorrent's
+// readPiece (which answers asynchronously via an alert). libtorrent writes and verifies each piece
+// to the save path as it completes, so once havePiece(i) is true the bytes for piece i are on disk
+// and correct. That turns "read from a torrent" into an ordinary file read guarded by a wait, which
+// is far easier to reason about than an alert round-trip per read.
+class TorrentFileReader private constructor(
+    private val handle: TorrentHandle,
+    private val file: File,
+    private val layout: TorrentFileLayout,
+) : Closeable {
+
+    private val raf: RandomAccessFile = RandomAccessFile(file, "r")
+
+    @Volatile
+    private var closed = false
+
+    val length: Long get() = layout.fileLength
+
+    // Reads at most up to the end of the piece containing `position`. Deliberately not more: the
+    // next piece may not have arrived, and returning a short read is exactly what a DataSource is
+    // allowed to do. Returns -1 at end of file.
+    fun read(position: Long, buffer: ByteArray, offset: Int, length: Int): Int {
+        if (closed) throw IOException("Reader closed")
+        if (position >= layout.fileLength) return -1
+        if (length == 0) return 0
+
+        val piece = PieceStrategy.pieceAt(layout, position)
+        // Re-aim the download at wherever the player is actually reading. This is what makes a seek
+        // work: without it the swarm keeps feeding the pieces after the old read head.
+        applyPlan(position)
+        awaitPiece(piece)
+
+        // Don't read past the end of the verified piece, or past the end of the file.
+        val pieceEnd = pieceEndInFile(piece)
+        val available = (minOf(pieceEnd, layout.fileLength) - position).coerceAtMost(length.toLong())
+        if (available <= 0) return -1
+
+        return synchronized(raf) {
+            if (closed) throw IOException("Reader closed")
+            raf.seek(position)
+            raf.read(buffer, offset, available.toInt())
+        }
+    }
+
+    // Exclusive end offset, in file coordinates, of `piece`.
+    private fun pieceEndInFile(piece: Int): Long =
+        (piece + 1).toLong() * layout.pieceLength - layout.fileOffset
+
+    private fun applyPlan(position: Long) {
+        val plan = PieceStrategy.plan(layout, position)
+        plan.priorities.forEach { runCatching { handle.piecePriority(it, Priority.SIX) } }
+        // Increasing deadlines express ordering: the piece under the read head is wanted first.
+        plan.deadlines.forEachIndexed { index, piece ->
+            runCatching { handle.setPieceDeadline(piece, index * DEADLINE_STEP_MS) }
+        }
+    }
+
+    // Blocks until the piece lands. Polls rather than waiting on an alert because the piece may
+    // already be present, and because close() has to be able to break the wait promptly.
+    private fun awaitPiece(piece: Int) {
+        if (handle.havePiece(piece)) return
+        val deadline = System.currentTimeMillis() + PIECE_TIMEOUT_MS
+        while (!handle.havePiece(piece)) {
+            if (closed) throw IOException("Reader closed while waiting for piece $piece")
+            if (System.currentTimeMillis() > deadline) {
+                // A real error, not an endless spinner: no peers, a dead torrent, or a stalled
+                // swarm all end up here, and the player should say so.
+                throw IOException("Timed out waiting for piece $piece of ${file.name}")
+            }
+            try {
+                Thread.sleep(POLL_INTERVAL_MS)
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                throw IOException("Interrupted waiting for piece $piece", e)
+            }
+        }
+    }
+
+    override fun close() {
+        closed = true
+        synchronized(raf) { runCatching { raf.close() } }
+        // Deadlines are per-torrent state; leaving them set would keep skewing the scheduler after
+        // this reader is gone.
+        runCatching { handle.clearPieceDeadlines() }
+    }
+
+    companion object {
+        // Spread across the deadline window so the piece at the read head is due first.
+        private const val DEADLINE_STEP_MS = 1_000
+
+        // How long a single piece may take before playback gives up. Generous: a cold torrent has to
+        // find peers through DHT and trackers first, which is the slow part.
+        private const val PIECE_TIMEOUT_MS = 60_000L
+        private const val POLL_INTERVAL_MS = 100L
+
+        private const val METADATA_TIMEOUT_SECONDS = 60L
+
+        // Adds the torrent (if it isn't already in the session), waits for its metadata, narrows the
+        // download to the one file being played, and returns a reader positioned over it.
+        //
+        // Blocking by design: it is called from DataSource.open(), which Media3 already calls off the
+        // main thread.
+        @Throws(IOException::class)
+        fun open(
+            session: SessionManager,
+            ref: TorrentRef,
+            trackers: List<String>,
+            saveDir: File,
+        ): TorrentFileReader {
+            if (!saveDir.exists() && !saveDir.mkdirs()) {
+                throw IOException("Could not create torrent save directory: $saveDir")
+            }
+            val handle = addAndAwaitHandle(session, ref, trackers, saveDir)
+            val info = awaitMetadata(handle)
+            val files = info.files()
+            if (ref.fileIdx >= files.numFiles()) {
+                throw IOException("Torrent ${ref.infoHash} has no file at index ${ref.fileIdx}")
+            }
+
+            val layout = TorrentFileLayout(
+                fileOffset = files.fileOffset(ref.fileIdx),
+                fileLength = files.fileSize(ref.fileIdx),
+                pieceLength = info.pieceLength(),
+            )
+
+            // Everything except the file being played is set to IGNORE. Without this, a season pack
+            // would download every episode to play one — the user's data, spent on files they didn't
+            // ask for.
+            val priorities = Array(files.numFiles()) { index ->
+                if (index == ref.fileIdx) Priority.DEFAULT else Priority.IGNORE
+            }
+            runCatching { handle.prioritizeFiles(priorities) }
+                .onFailure { Log.w(TAG, "Could not narrow the download to file ${ref.fileIdx}", it) }
+
+            // The container's header and trailer, so duration and seeking work before the middle of
+            // the file has arrived.
+            PieceStrategy.bootstrapPieces(layout).forEach { piece ->
+                runCatching {
+                    handle.piecePriority(piece, Priority.TOP_PRIORITY)
+                    handle.setPieceDeadline(piece, 0)
+                }
+            }
+
+            handle.resume()
+
+            val file = File(saveDir, files.filePath(ref.fileIdx))
+            // libtorrent creates the file when it allocates storage; give it a moment rather than
+            // failing the open on a race with the first write.
+            awaitFile(file)
+            return TorrentFileReader(handle, file, layout)
+        }
+
+        private fun addAndAwaitHandle(
+            session: SessionManager,
+            ref: TorrentRef,
+            trackers: List<String>,
+            saveDir: File,
+        ): TorrentHandle {
+            val latch = CountDownLatch(1)
+            // AtomicReference, not a plain local: the alert arrives on libtorrent's own thread and
+            // is read back on this one.
+            val found = AtomicReference<TorrentHandle?>(null)
+
+            // There is no hex-string lookup for a torrent in this API, so the handle is captured from
+            // the add alert and matched on its own info-hash.
+            val listener = object : AlertListener {
+                override fun types(): IntArray = intArrayOf(AlertType.ADD_TORRENT.swig())
+
+                override fun alert(alert: Alert<*>) {
+                    val added = alert as? AddTorrentAlert ?: return
+                    val handle = added.handle() ?: return
+                    if (!handle.isValid) return
+                    if (!handle.infoHash().toHex().equals(ref.infoHash, ignoreCase = true)) return
+                    found.set(handle)
+                    latch.countDown()
+                }
+            }
+
+            session.addListener(listener)
+            try {
+                // Must be the same directory the reader later opens the file from, or the
+                // torrent downloads to one place and is read from another.
+                session.download(magnetFor(ref.infoHash, trackers), saveDir, null)
+                if (!latch.await(METADATA_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                    throw IOException("Timed out adding torrent ${ref.infoHash}")
+                }
+                return found.get() ?: throw IOException("Torrent ${ref.infoHash} was added without a handle")
+            } finally {
+                session.removeListener(listener)
+            }
+        }
+
+        private fun awaitMetadata(handle: TorrentHandle): org.libtorrent4j.TorrentInfo {
+            val deadline = System.currentTimeMillis() + METADATA_TIMEOUT_SECONDS * 1_000
+            while (System.currentTimeMillis() < deadline) {
+                val info = handle.torrentFile()
+                // A magnet carries no file list, so nothing about the torrent's shape is known until
+                // metadata arrives from a peer.
+                if (info != null && info.isValid) return info
+                Thread.sleep(POLL_INTERVAL_MS)
+            }
+            throw IOException("Timed out waiting for torrent metadata")
+        }
+
+        private fun awaitFile(file: File) {
+            val deadline = System.currentTimeMillis() + FILE_CREATE_TIMEOUT_MS
+            while (!file.exists() && System.currentTimeMillis() < deadline) {
+                Thread.sleep(POLL_INTERVAL_MS)
+            }
+            if (!file.exists()) throw IOException("Torrent storage was never created at $file")
+        }
+
+        private const val FILE_CREATE_TIMEOUT_MS = 15_000L
+
+        // Trackers go in the magnet as `tr` parameters. This is the only place the tracker list is
+        // used, which is why it travels beside the torrent:// url rather than inside it.
+        internal fun magnetFor(infoHash: String, trackers: List<String>): String = buildString {
+            append("magnet:?xt=urn:btih:").append(infoHash)
+            trackers.forEach { tracker ->
+                append("&tr=").append(URLEncoder.encode(tracker, "UTF-8"))
+            }
+        }
+    }
+}

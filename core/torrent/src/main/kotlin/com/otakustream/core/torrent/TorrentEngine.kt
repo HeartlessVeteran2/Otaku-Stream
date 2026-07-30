@@ -97,6 +97,18 @@ class TorrentEngine @Inject constructor() {
         }
     }
 
+    // Opens one file inside a torrent for reading.
+    //
+    // The only entry point consumers use, and deliberately the only one: it keeps SessionManager and
+    // every other libtorrent type inside this module, so :core:player can adapt a torrent to Media3
+    // without libtorrent on its compile classpath.
+    @Throws(java.io.IOException::class)
+    fun openFile(ref: TorrentRef, trackers: List<String>, saveDir: java.io.File): TorrentFileReader {
+        val session = ensureStarted()
+            ?: throw java.io.IOException("The torrent engine is unavailable on this device")
+        return TorrentFileReader.open(session, ref, trackers, saveDir)
+    }
+
     // Stops the session and releases its sockets. Playback teardown calls this once nothing is being
     // read, so an idle app isn't holding a DHT node open on the user's connection.
     fun stop() {
