@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
@@ -27,6 +28,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -101,7 +103,11 @@ fun AppNavHost(
     pendingPlayUrl: String? = null,
     onPendingPlayUrlConsumed: () -> Unit = {},
     pendingAniListToken: String? = null,
+    pendingAniListState: String? = null,
     onPendingAniListTokenConsumed: () -> Unit = {},
+    pendingMagnetName: String? = null,
+    onMagnetConfirmed: () -> Unit = {},
+    onMagnetDismissed: () -> Unit = {},
 ) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -132,6 +138,28 @@ fun AppNavHost(
         if (pendingAniListToken != null) {
             navController.navigate(ROUTE_TRACKING_SETTINGS) { launchSingleTop = true }
         }
+    }
+
+    // A magnet handed to the app from outside is asked about before anything starts.
+    //
+    // Every other deep link this app accepts either navigates somewhere the user can back out of or
+    // fetches over HTTP to one host. Starting a torrent is different in kind: it announces the
+    // device to a swarm of strangers and begins uploading, and it is not undone by pressing back. A
+    // page the user is merely browsing can hand this app a magnet: link, so the app asks first.
+    if (pendingMagnetName != null) {
+        AlertDialog(
+            onDismissRequest = onMagnetDismissed,
+            title = { Text("Download this torrent?") },
+            text = {
+                Text(
+                    "Another app asked Otaku Stream to play:\n\n$pendingMagnetName\n\n" +
+                        "Downloading connects you to other people sharing this file. They will be " +
+                        "able to see your IP address, and you will upload to them while it plays.",
+                )
+            },
+            confirmButton = { TextButton(onClick = onMagnetConfirmed) { Text("Download and play") } },
+            dismissButton = { TextButton(onClick = onMagnetDismissed) { Text("Cancel") } },
+        )
     }
 
     // One snackbar host for the whole app: feature ViewModels announce confirmations through
@@ -250,6 +278,7 @@ fun AppNavHost(
                 TrackingSettingsScreen(
                     onBack = { navController.popBackStack() },
                     pendingOAuthToken = pendingAniListToken,
+                    pendingOAuthState = pendingAniListState,
                     onPendingOAuthTokenConsumed = onPendingAniListTokenConsumed,
                 )
             }

@@ -5,6 +5,14 @@
   CDN edge nodes without TLS). targetSdk 28+ blocks cleartext by default, which made
   those sources and streams silently fail. Permit cleartext so real sources work; TLS is
   still used wherever the source provides it.
+
+  The permissive base is for hosts nobody can enumerate in advance — whatever mirror a
+  source happens to use. It is not for the two hosts the app sends credentials to, and
+  before the domain-configs below it silently covered those as well. SECURITY.md has
+  always said credentials do not travel in cleartext; that was true only because no code
+  happened to build an http URL for them, which is a code-review guarantee rather than a
+  real one. These entries make the platform enforce it: a request to either host over
+  http now fails at the socket, whatever the calling code asked for.
 -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true">
@@ -12,4 +20,14 @@
             <certificates src="system" />
         </trust-anchors>
     </base-config>
+
+    <!-- Carries the AniList bearer token: the OAuth redirect and every GraphQL call using it. -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">anilist.co</domain>
+    </domain-config>
+
+    <!-- Carries the Stremio account email and password, and the auth key they return. -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">strem.io</domain>
+    </domain-config>
 </network-security-config>

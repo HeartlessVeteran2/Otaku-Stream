@@ -26,6 +26,9 @@ interface TrackingRepository {
 class TrackingRepositoryImpl @Inject constructor(
     private val dao: TrackingDao,
     private val tokenStore: EncryptedTokenStore,
+    // Only ever used to VACUUM after the legacy-token migration. Provider rather than the database
+    // itself so this repository does not force the database open earlier than it otherwise would.
+    private val database: javax.inject.Provider<com.otakustream.core.database.AppDatabase>,
 ) : TrackingRepository {
     override suspend fun getLink(mediaUrl: String, season: Int): TrackerLink? = dao.getLink(mediaUrl, season)
     override fun observeLink(mediaUrl: String, season: Int): Flow<TrackerLink?> = dao.observeLink(mediaUrl, season)
@@ -69,11 +72,22 @@ class TrackingRepositoryImpl @Inject constructor(
         if (migrated) return
         migrationMutex.withLock {
             if (migrated) return
-            if (tokenStore.current() == null) {
-                val legacy = runCatching { dao.getToken()?.accessToken }.getOrNull()
-                if (!legacy.isNullOrEmpty()) tokenStore.save(legacy)
-            }
+            val legacy = runCatching { dao.getToken()?.accessToken }.getOrNull()
+            if (tokenStore.current() == null && !legacy.isNullOrEmpty()) tokenStore.save(legacy)
             runCatching { dao.clearToken() }
+            // DELETE marks the page free; it does not erase it. Until something else happens to
+            // reuse that page, the plaintext bearer token is still sitting in the database file —
+            // readable by anything that gets hold of the file, which is exactly the exposure moving
+            // the token to the encrypted store was meant to end. VACUUM rewrites the file from the
+            // live pages only, so the free page and its contents are gone.
+            //
+            // Conditional on a token having actually been there. VACUUM rewrites the entire
+            // database, and on a fresh install — the overwhelmingly common case, where there was
+            // never a legacy row — that would be a pointless full-file rewrite on the first read of
+            // the token.
+            if (!legacy.isNullOrEmpty()) {
+                runCatching { database.get().openHelper.writableDatabase.execSQL("VACUUM") }
+            }
             migrated = true
         }
     }

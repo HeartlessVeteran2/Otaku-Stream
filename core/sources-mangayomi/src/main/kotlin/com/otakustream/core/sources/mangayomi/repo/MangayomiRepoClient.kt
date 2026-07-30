@@ -1,6 +1,7 @@
 package com.otakustream.core.sources.mangayomi.repo
 
 import android.content.Context
+import com.otakustream.core.sources.api.RemoteCodeUrl
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -35,6 +36,10 @@ class MangayomiRepoClient @Inject constructor(
     suspend fun fetch(): List<MangayomiExtensionListing> = withContext(Dispatchers.IO) {
         val repoUrl = prefs.repoUrl.trim()
         if (repoUrl.isEmpty()) return@withContext DEFAULT_LISTINGS
+        // Held to the same bar as the extensions themselves, and for a sharper reason: this index
+        // supplies the sourceCodeUrl for every extension in it, so rewriting one cleartext response
+        // redirects every install made from it — including of extensions the user picked by name.
+        RemoteCodeUrl.require(repoUrl, "An extension repository")
         val request = Request.Builder().url(repoUrl).build()
         val call = httpClient.newCall(request)
         // Cancel the blocking OkHttp call if the coroutine is cancelled (navigate away / reload).

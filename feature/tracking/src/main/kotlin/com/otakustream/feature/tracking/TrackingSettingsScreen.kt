@@ -44,6 +44,8 @@ import javax.inject.Inject
 @HiltViewModel
 class TrackingSettingsViewModel @Inject constructor(
     private val trackingRepository: TrackingRepository,
+    private val authState: AniListAuthState,
+    private val aniListClient: AniListClient,
 ) : ViewModel() {
 
     val hasToken: StateFlow<Boolean> = trackingRepository.observeToken()
@@ -54,13 +56,43 @@ class TrackingSettingsViewModel @Inject constructor(
     private val _justSignedIn = MutableStateFlow(false)
     val justSignedIn: StateFlow<Boolean> = _justSignedIn.asStateFlow()
 
-    fun onOAuthToken(token: String) {
+    // Set when a redirect is rejected, so the screen can say so instead of silently doing nothing.
+    private val _signInRejected = MutableStateFlow(false)
+    val signInRejected: StateFlow<Boolean> = _signInRejected.asStateFlow()
+
+    // Called for the URL the app was opened with. Two things have to hold before a token is stored,
+    // and neither did before.
+    fun onOAuthToken(token: String, state: String?) {
         if (token.isBlank()) return
+        // 1. It has to be the answer to a sign-in this app started. Any app or web page can fire
+        //    otakustream://anilist-auth#access_token=... at this app; without the nonce the app
+        //    would store an attacker's token and start writing the user's watch history into the
+        //    attacker's AniList account, where they can read it. consume() is single-use, so a
+        //    replayed redirect fails too.
+        if (!authState.consume(state)) {
+            _signInRejected.value = true
+            return
+        }
         viewModelScope.launch {
+            // 2. It has to be a token AniList actually honours. The nonce proves the redirect
+            //    belongs to our sign-in; it says nothing about whether the token in it works. Asking
+            //    who the token belongs to before storing it turns "signed in" into a statement the
+            //    app has checked, rather than one it is repeating back from a URL.
+            val valid = runCatching { aniListClient.fetchViewer(token.trim()) }.isSuccess
+            if (!valid) {
+                _signInRejected.value = true
+                return@launch
+            }
             trackingRepository.saveToken(token.trim())
+            _signInRejected.value = false
             _justSignedIn.value = true
         }
     }
+
+    // A fresh nonce per attempt, minted at the moment the user taps sign in.
+    fun authorizeUrl(): String = AniListAuth.authorizeUrl(authState.begin())
+
+    fun onRejectionShown() { _signInRejected.value = false }
 
     fun clearToken() {
         _justSignedIn.value = false
@@ -74,17 +106,19 @@ fun TrackingSettingsScreen(
     modifier: Modifier = Modifier,
     onBack: () -> Unit = {},
     pendingOAuthToken: String? = null,
+    pendingOAuthState: String? = null,
     onPendingOAuthTokenConsumed: () -> Unit = {},
     viewModel: TrackingSettingsViewModel = hiltViewModel(),
 ) {
     val hasToken by viewModel.hasToken.collectAsState()
+    val signInRejected by viewModel.signInRejected.collectAsState()
     val context = LocalContext.current
     var browserMissing by remember { mutableStateOf(false) }
 
     // A completed sign-in redirect lands here with the token still pending — persist it once.
     LaunchedEffect(pendingOAuthToken) {
         pendingOAuthToken?.let { token ->
-            viewModel.onOAuthToken(token)
+            viewModel.onOAuthToken(token, pendingOAuthState)
             onPendingOAuthTokenConsumed()
         }
     }
@@ -108,6 +142,20 @@ fun TrackingSettingsScreen(
             style = MaterialTheme.typography.bodyMedium,
         )
 
+        // A redirect that failed either check. Worth saying out loud rather than leaving the user
+        // looking at an unchanged screen: the honest cases (they took too long, or tapped an old
+        // link) and the hostile one (someone else's redirect) look identical from here, and both
+        // are fixed by starting sign-in again from this screen.
+        if (signInRejected) {
+            Text(
+                text = "That sign-in couldn't be verified, so it wasn't used. " +
+                    "Tap Sign in with AniList to start again.",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(top = 16.dp),
+            )
+        }
+
         if (hasToken) {
             Text(
                 text = "✓ Signed in — tracking is active.",
@@ -120,7 +168,7 @@ fun TrackingSettingsScreen(
                 onClick = {
                     // Some devices (TV boxes, stripped emulators) have no browser at all.
                     try {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(AniListAuth.authorizeUrl())))
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(viewModel.authorizeUrl())))
                     } catch (_: ActivityNotFoundException) {
                         browserMissing = true
                     }

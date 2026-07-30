@@ -47,13 +47,19 @@ fun ManageStremioSourcesScreen(
     val serverBaseUrl by viewModel.serverBaseUrl.collectAsState()
     var serverUrlInput by remember { mutableStateOf("") }
 
-    // stremio:// deep links land here with the addon's manifest URL pre-resolved — install it
-    // right away rather than making the user paste it again.
+    // stremio:// deep links land here with the add-on's manifest URL pre-resolved. It is put in the
+    // field and left there — the user still taps Add.
+    //
+    // It used to install on arrival, which meant any web page could register an arbitrary add-on in
+    // this app with a single tap on a link, and the first the user knew of it was a new source
+    // feeding their home rails. An add-on supplies catalogs and stream URLs, so that is not a small
+    // thing to grant silently. The manifest's own comment always said "pre-fill"; this makes the
+    // code agree with it.
+    //
+    // The URL is still shown in full rather than summarised, because the host is the only thing that
+    // tells the user whether this is the add-on they meant.
     LaunchedEffect(prefillInstallUrl) {
-        prefillInstallUrl?.let { url ->
-            viewModel.onUrlInputChange(url)
-            viewModel.install()
-        }
+        prefillInstallUrl?.let(viewModel::onUrlInputChange)
     }
 
     var showAdvanced by remember(serverBaseUrl) { mutableStateOf(serverBaseUrl != null) }

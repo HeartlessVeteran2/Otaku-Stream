@@ -2,6 +2,7 @@ package com.otakustream.core.sources.mangayomi
 
 import com.otakustream.core.database.mangayomi.MangayomiSourceRecord
 import com.otakustream.core.database.mangayomi.MangayomiSourceRepository
+import com.otakustream.core.sources.api.RemoteCodeUrl
 import com.otakustream.core.sources.mangayomi.repo.MangayomiExtensionListing
 import com.otakustream.core.sources.mangayomi.repo.MangayomiRepoPrefs
 import kotlinx.coroutines.Dispatchers
@@ -40,6 +41,9 @@ class MangayomiExtensionInstaller @Inject constructor(
     suspend fun uninstall(id: Long) = repository.delete(id)
 
     private suspend fun download(url: String): String {
+        // An extension is JavaScript this app executes, so it may not arrive over a channel that
+        // can be rewritten in flight.
+        RemoteCodeUrl.require(url, "An extension")
         val call = httpClient.newCall(Request.Builder().url(url).build())
         val cancellation = currentCoroutineContext()[Job]?.invokeOnCompletion { call.cancel() }
         return try {
