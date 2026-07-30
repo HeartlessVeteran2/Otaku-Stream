@@ -31,6 +31,10 @@ class TorrentFileReader private constructor(
     private val handle: TorrentHandle,
     private val file: File,
     private val layout: TorrentFileLayout,
+    private val saveDir: File,
+    // Subtitle files inside this torrent, with torrent-relative paths. Chosen at open time because
+    // that is when the file list is known and when their priorities have to be raised.
+    private val subtitleCandidates: List<TorrentSubtitleFile>,
     // Invoked exactly once when this reader closes, so whoever owns the session can decide whether
     // anything still needs the torrent. The reader itself must not stop the session: several readers
     // can share one, and it has no way to know about the others.
@@ -52,6 +56,26 @@ class TorrentFileReader private constructor(
     // for the same reason as the handle above: nothing outside this module has any business knowing
     // where on disk a torrent lands.
     internal val filePath: String get() = file.absolutePath
+
+    // How many subtitle files this torrent carries that are worth offering, so a caller can tell
+    // "none in this torrent" from "not downloaded yet" and stop waiting for something that will
+    // never arrive.
+    val subtitleCount: Int get() = subtitleCandidates.size
+
+    // The subtitle files that have fully arrived, with absolute paths, ready to hand to the player.
+    //
+    // Only complete files, and that matters more than it sounds: a subtitle renderer given a
+    // half-written .srt shows the first few lines and then silently stops, which reads as the
+    // subtitles being broken rather than still downloading.
+    fun readySubtitles(): List<TorrentSubtitleFile> {
+        if (closed || subtitleCandidates.isEmpty()) return emptyList()
+        val progress = runCatching { handle.fileProgress() }.getOrNull() ?: return emptyList()
+        val sizes = runCatching { handle.torrentFile()?.files() }.getOrNull() ?: return emptyList()
+        return subtitleCandidates.filter { candidate ->
+            val index = candidate.fileIndex
+            index in progress.indices && progress[index] >= sizes.fileSize(index)
+        }.map { it.copy(path = File(saveDir, it.path).absolutePath) }
+    }
 
     // Reads at most up to the end of the piece containing `position`. Deliberately not more: the
     // next piece may not have arrived, and returning a short read is exactly what a DataSource is
@@ -165,11 +189,20 @@ class TorrentFileReader private constructor(
                 pieceLength = info.pieceLength(),
             )
 
-            // Everything except the file being played is set to IGNORE. Without this, a season pack
-            // would download every episode to play one — the user's data, spent on files they didn't
-            // ask for.
+            // Subtitle files travel with the video rather than being ignored with everything else.
+            // Release groups very often ship them alongside instead of muxing them in, and they are
+            // kilobytes against the video's gigabytes — so fetching them costs nothing measurable,
+            // while not fetching them means a torrent that has subtitles plays without any.
+            val entries = (0 until files.numFiles()).map { index ->
+                TorrentFileEntry(index = index, path = files.filePath(index), sizeBytes = files.fileSize(index))
+            }
+            val subtitles = TorrentSubtitles.pick(entries, ref.fileIdx)
+
+            // Everything else is set to IGNORE. Without this, a season pack would download every
+            // episode to play one — the user's data, spent on files they didn't ask for.
+            val subtitleIndices = subtitles.mapTo(mutableSetOf()) { it.fileIndex }
             val priorities = Array(files.numFiles()) { index ->
-                if (index == ref.fileIdx) Priority.DEFAULT else Priority.IGNORE
+                if (index == ref.fileIdx || index in subtitleIndices) Priority.DEFAULT else Priority.IGNORE
             }
             runCatching { handle.prioritizeFiles(priorities) }
                 .onFailure { Log.w(TAG, "Could not narrow the download to file ${ref.fileIdx}", it) }
@@ -189,7 +222,7 @@ class TorrentFileReader private constructor(
             // libtorrent creates the file when it allocates storage; give it a moment rather than
             // failing the open on a race with the first write.
             awaitFile(file)
-            return TorrentFileReader(handle, file, layout, onClosed)
+            return TorrentFileReader(handle, file, layout, saveDir, subtitles, onClosed)
         }
 
         private fun addAndAwaitHandle(

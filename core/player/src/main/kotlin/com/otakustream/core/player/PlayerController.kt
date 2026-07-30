@@ -58,6 +58,12 @@ private const val PROGRESS_PERSIST_INTERVAL_MS = 5_000L
 private const val FINISHED_THRESHOLD_FRACTION = 0.95
 private const val SPEED_BOOST_MULTIPLIER = 2f
 
+// How often to check whether the torrent's own subtitle files have arrived, and how long to keep
+// looking. Generous on the timeout: the torrent has to find peers and fetch metadata before the file
+// list even exists. Cheap on the interval — it's an in-memory read of the reader's file progress.
+private const val TORRENT_SUBTITLE_POLL_MS = 2_000L
+private const val TORRENT_SUBTITLE_TIMEOUT_MS = 120_000L
+
 enum class ResizeMode { FIT, ZOOM, STRETCH }
 
 enum class EqualizerPreset { FLAT, BASS_BOOST, TREBLE_BOOST }
@@ -98,6 +104,9 @@ data class PlayerUiState(
     val seekDurationMs: Long = 10_000L,
     // True while a Cast session is playing this media instead of the local player.
     val isCasting: Boolean = false,
+    // A brief message for the user about something that just happened but isn't a playback failure —
+    // shown as an on-screen label, not the error overlay. Cleared once shown.
+    val notice: String? = null,
 )
 
 @OptIn(UnstableApi::class)
@@ -133,6 +142,8 @@ class PlayerController @Inject constructor(
     // onIsPlayingChanged). Reset when new media is loaded.
     private var foregroundServiceStarted = false
     private var segmentsJob: Job? = null
+    // Waits for subtitle files inside a torrent to download; cancelled when new media is loaded.
+    private var torrentSubtitleJob: Job? = null
     // Manual (database) and AniSkip-fetched segments are tracked separately, then merged into
     // currentSegments with AniSkip winning on overlap.
     private var manualSegments: List<PlayerSkipSegment> = emptyList()
@@ -242,6 +253,24 @@ class PlayerController @Inject constructor(
                         player.pause()
                         castManager.castItem(item, position)
                         _uiState.value = _uiState.value.copy(isCasting = true)
+                    } else if (url != null && !isCastableUrl(url)) {
+                        // Gated on the url actually being uncastable, not just on the branch being
+                        // taken: a castable url with no media item yet — a Cast session connecting
+                        // while playback is still starting — would otherwise be told the TV can't
+                        // reach a stream it can reach perfectly well.
+                        //
+                        // Say why. Connecting to a Cast device and having playback simply stay on the
+                        // phone looks like the Cast button is broken — and a torrent is the case where
+                        // a user is most likely to try, since the stream came from the internet and
+                        // looks castable from the outside. It isn't: the receiver fetches the URL
+                        // itself, and only this device can resolve a torrent:// one.
+                        _uiState.value = _uiState.value.copy(
+                            notice = if (TorrentUri.isTorrentUrl(url)) {
+                                "Can't cast a torrent — the TV can't reach it. Playing here instead."
+                            } else {
+                                "Can't cast this video — the TV can't reach it. Playing here instead."
+                            },
+                        )
                     }
                 } else if (_uiState.value.isCasting) {
                     val resumeMs = castManager.currentPositionMs().coerceAtLeast(0L)
@@ -256,6 +285,11 @@ class PlayerController @Inject constructor(
 
     // Bring the Cast session listener online so the Cast button reflects device availability.
     fun warmUpCast() = castManager.warmUp()
+
+    // Dismisses a notice once the UI has shown it, so it doesn't reappear on the next recomposition.
+    fun clearNotice() {
+        if (_uiState.value.notice != null) _uiState.value = _uiState.value.copy(notice = null)
+    }
 
     // A Cast receiver can only fetch remote http(s) URLs — local file/content URIs on the phone
     // aren't reachable from the TV.
@@ -349,6 +383,7 @@ class PlayerController @Inject constructor(
             droppedFrameCount = 0,
             codecName = null,
             videoBitrateBps = 0,
+            notice = null,
         )
 
         // Reset skip state for the new media before either source repopulates it.
@@ -426,20 +461,74 @@ class PlayerController @Inject constructor(
             player.setPlaybackSpeed(defaultSpeed)
             _uiState.value = _uiState.value.copy(playbackSpeed = defaultSpeed)
         }
+
+        torrentSubtitleJob?.cancel()
+        if (TorrentUri.isTorrentUrl(url)) {
+            torrentSubtitleJob = scope.launch { offerTorrentSubtitles(url) }
+        }
     }
 
-    // Adds a user-picked subtitle file to the current playback: rebuild the media item with the
-    // extra track (same data source factory, headers intact) and re-prepare at the current
-    // position. A brief rebuffer at the same spot is the accepted cost.
-    fun addExternalSubtitle(uri: String, label: String, mimeType: String) {
+    // Offers subtitle files carried inside the torrent as selectable tracks, once they arrive.
+    //
+    // They can't be added at play() time: the torrent's file list isn't known until metadata comes
+    // back from a peer, and the subtitle files themselves then have to download. So this waits, and
+    // adds them in one batch — each add costs a rebuffer, and four separate ones would stutter
+    // playback four times at the same spot.
+    private suspend fun offerTorrentSubtitles(url: String) {
+        val deadline = SystemClock.elapsedRealtime() + TORRENT_SUBTITLE_TIMEOUT_MS
+        while (true) {
+            delay(TORRENT_SUBTITLE_POLL_MS)
+            // Another video started. Adding tracks now would put them on the wrong playback.
+            if (currentMediaUrl != url) return
+            val progress = torrentEngine.subtitleProgress()
+            val expired = SystemClock.elapsedRealtime() > deadline
+            when {
+                // No reader yet — still resolving metadata. Nothing to conclude either way.
+                progress == null -> if (expired) return
+                // The torrent carries none, so there is nothing to wait for.
+                progress.total == 0 -> return
+                progress.isComplete || expired -> {
+                    addExternalSubtitles(
+                        progress.ready.map { subtitle ->
+                            SubtitleTrack(
+                                url = Uri.fromFile(java.io.File(subtitle.path)).toString(),
+                                label = subtitle.label,
+                                mimeType = subtitleMimeTypeForName(subtitle.path),
+                            )
+                        },
+                    )
+                    return
+                }
+            }
+        }
+    }
+
+    // Adds a user-picked subtitle file to the current playback.
+    fun addExternalSubtitle(uri: String, label: String, mimeType: String) =
+        addExternalSubtitles(listOf(SubtitleTrack(url = uri, label = label, mimeType = mimeType)))
+
+    // Rebuilds the media item with extra tracks (same data source factory, headers intact) and
+    // re-prepares at the current position. A brief rebuffer at the same spot is the accepted cost.
+    //
+    // Takes a list rather than one track because each call costs a rebuffer: adding four subtitle
+    // files from a torrent one at a time would stutter playback four times at the same spot.
+    fun addExternalSubtitles(tracks: List<SubtitleTrack>) {
+        if (tracks.isEmpty()) return
         val item = currentMediaItem ?: return
         val factory = currentDataSourceFactory ?: return
         val existing = item.localConfiguration?.subtitleConfigurations.orEmpty()
-        val added = MediaItem.SubtitleConfiguration.Builder(Uri.parse(uri))
-            .setMimeType(mimeType)
-            .setLabel(label)
-            .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
-            .build()
+        val existingUris = existing.mapTo(mutableSetOf()) { it.uri.toString() }
+        val added = tracks
+            .filter { it.url !in existingUris }
+            .map { track ->
+                MediaItem.SubtitleConfiguration.Builder(Uri.parse(track.url))
+                    .setMimeType(track.mimeType)
+                    .setLabel(track.label)
+                    .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+                    .build()
+            }
+        // Nothing new: return before re-preparing, or a repeated call would rebuffer for no reason.
+        if (added.isEmpty()) return
         val rebuilt = item.buildUpon().setSubtitleConfigurations(existing + added).build()
         currentMediaItem = rebuilt
 

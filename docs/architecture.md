@@ -35,6 +35,10 @@ Room for persistence, Media3/ExoPlayer for playback.
 :core:sources-mangayomi   QuickJS runtime for AnymeX/Mangayomi extensions: the MProvider host API,
                           crypto/deobfuscation helpers, video extractors, per-source preferences,
                           repo client, installer, bootstrapper
+:core:torrent             libtorrent4j session, the torrent:// scheme, piece strategy, the
+                          foreground download service, the cache quota, and magnet parsing. All
+                          libtorrent types stay inside this module — :core:player adapts a torrent
+                          to Media3 through TorrentEngine.openFile() alone
 
 :sources:example          built-in reference source (public-domain sample videos), debug builds only
 
@@ -68,6 +72,48 @@ live in their own `PlaybackProgress` `StateFlow`, separate from `PlayerUiState`,
 only by the controls overlay. The overlay is gated behind `controlsVisible`, so the 500 ms ticker
 recomposes nothing at all while the controls are hidden. Everything else, including
 `activeSkipSegment`, stays in `PlayerUiState`, which only changes on real events.
+
+### Torrent playback
+
+A torrent-backed stream plays one of two ways, in this order of preference: through a Stremio
+streaming server if the user has configured one, or on-device via `:core:torrent`. Before either
+existed, a stream carrying only an `infoHash` was silently dropped — the list looked populated and
+played nothing.
+
+**The URL is `torrent://<infoHash>/<fileIdx>`, and that choice is load-bearing.** The obvious
+alternative is a localhost HTTP server, which is how most apps bridge a torrent into a player. It is
+wrong here because the whole playback stack keys on the media URL string: resume position, skip
+segments, the `PendingPlayback` stash, the AniList completion handler and watch history are all
+looked up by url. A localhost url carries a port, and a port that changes between sessions — or after
+a collision retry — silently breaks every one of those, as bugs that look nothing like torrent bugs.
+A url derived purely from the torrent's own identity is stable forever, and there is no listening
+socket for other apps on the device to reach.
+
+The cost is that a tracker list can't live in the url — it varies between add-on responses, and
+embedding it would make the identity unstable. Trackers travel out-of-band on `Video.trackers`
+through `PendingPlayback`, the same channel headers already use, and `TorrentTrackerStore` remembers
+the last set per infoHash so a replay from watch history isn't left with DHT alone.
+
+Reads come from the partially-downloaded file on disk rather than through libtorrent's async
+`readPiece`: libtorrent writes and verifies each piece to the save path as it completes, so once
+`havePiece(i)` is true the bytes are on disk and correct. That makes a torrent read an ordinary file
+read guarded by a wait. `PieceStrategy` — pure, unit-tested — decides what to ask for: sequential
+with a priority window ahead of the read head, deadlines on the next few pieces, and the container's
+first and last pieces up front, because MP4's `moov` atom is often trailing and nothing can report a
+duration or seek without it.
+
+Lifecycle is **reference-counted on open readers**, not driven off player events: the engine can't see
+player lifecycle, auto-play chains one playback into the next, and Media3 may open several
+`DataSource`s for one item. The count reaching one starts a `dataSync` foreground service; reaching
+zero removes the torrent, stops the session and sweeps the cache back under quota. Readers also carry
+a generation, so a reader retired by the notification's Stop action can't decrement a later
+playback's count. **Nothing seeds** — upload is capped to what tit-for-tat needs, and the torrent
+leaves the session when playback ends.
+
+Only the arm64 native library is bundled, so the feature degrades to "unavailable, here's why" on a
+32-bit device rather than crashing. Subtitle files carried inside the torrent are fetched alongside
+the video and offered as tracks once complete. Casting a `torrent://` url is refused with an
+explanation: the receiver fetches the url itself, and only this device can resolve one.
 
 ### Unified watch history
 

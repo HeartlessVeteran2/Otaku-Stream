@@ -53,6 +53,16 @@
                 <data android:scheme="file" />
                 <data android:mimeType="video/*" />
             </intent-filter>
+            <!-- Magnet links, so tapping one in a browser or torrent index plays it here. No
+                 mimeType filter: a magnet is a URI, not a document, and nothing sets a type on it.
+                 On a device without the 64-bit torrent library this still resolves — the player
+                 reports that it can't be played rather than the link silently going nowhere. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="magnet" />
+            </intent-filter>
             <!-- AniList OAuth redirect: the authorize page sends the user back here with the
                  access token in the URL fragment (implicit grant). -->
             <intent-filter>

@@ -19,6 +19,7 @@ private const val TAG = "TorrentEngine"
 class TorrentEngine @Inject constructor(
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     private val settings: TorrentSettings,
+    private val trackerStore: TorrentTrackerStore,
 ) {
 
     private val lock = Any()
@@ -35,11 +36,10 @@ class TorrentEngine @Inject constructor(
     // that is actually true.
     private val openReaders = java.util.concurrent.atomic.AtomicInteger(0)
 
-    // The torrent currently being read, kept only so the notification can report its rate and peer
-    // count. Cleared on release so a stale handle is never queried after removal — calling into a
-    // removed handle is undefined at the native layer.
-    private val activeHandle =
-        java.util.concurrent.atomic.AtomicReference<org.libtorrent4j.TorrentHandle?>(null)
+    // The reader currently streaming, kept so the notification can report its rate and peer count and
+    // so its in-torrent subtitles can be offered. Cleared on release so a stale handle is never
+    // queried after removal — calling into a removed handle is undefined at the native layer.
+    private val activeReader = java.util.concurrent.atomic.AtomicReference<TorrentFileReader?>(null)
 
     // Bumped every time the session is torn down wholesale. Readers carry the generation they were
     // opened under, and one from an earlier generation must not touch the reference count.
@@ -173,21 +173,30 @@ class TorrentEngine @Inject constructor(
             openedAt = generation.get()
             isFirstReader = openReaders.getAndIncrement() == 0
         }
+        // A replay from watch history carries no trackers — the url is deliberately just the torrent's
+        // identity — so without this it would fall back to DHT alone, which is slow to bootstrap and
+        // often finds no peers at all. Reuse whatever worked last time.
+        val effectiveTrackers = trackers.ifEmpty { trackerStore.trackersFor(ref.infoHash) }
         if (isFirstReader) {
-            // Outside the lock: this is a binder call into the system, and nothing it reaches needs
-            // engine state. First reader, so bring up the foreground service and the download isn't
-            // stopped the moment the app is backgrounded.
+            // Both of these are once per playback, not once per reader. openFile() runs from
+            // DataSource.open(), and Media3 opens more than one DataSource for a single item — so
+            // without the guard this would repeat a SharedPreferences write on a playback thread, and
+            // start a service that is already running.
+            trackerStore.remember(ref.infoHash, trackers)
+            // Bring up the foreground service so the download isn't stopped the moment the app is
+            // backgrounded. Outside the lock: it's a binder call, and nothing it reaches needs engine
+            // state.
             TorrentService.start(appContext)
         }
         return try {
             TorrentFileReader.open(
                 session,
                 ref,
-                trackers,
+                effectiveTrackers,
                 saveDir,
                 onClosed = { handle, path -> releaseReader(openedAt, handle, path) },
             ).also {
-                activeHandle.set(it.torrentHandle)
+                activeReader.set(it)
                 openPaths.add(it.filePath)
             }
         } catch (e: Throwable) {
@@ -201,7 +210,7 @@ class TorrentEngine @Inject constructor(
     // A snapshot for the notification, or null when nothing is being read. Returns a plain data
     // class rather than the handle so no libtorrent type escapes this module.
     fun stats(): TorrentStats? {
-        val handle = activeHandle.get() ?: return null
+        val handle = activeReader.get()?.torrentHandle ?: return null
         return runCatching {
             if (!handle.isValid) return null
             val status = handle.status()
@@ -215,6 +224,22 @@ class TorrentEngine @Inject constructor(
         }.getOrNull()
     }
 
+    // Subtitle files inside the torrent being streamed: how many are worth offering, and which have
+    // fully arrived so far.
+    //
+    // Polled rather than pushed. The alternative is a flow fed from libtorrent's alert thread, which
+    // would mean either a scope this @Singleton doesn't have or a listener outliving the torrent it
+    // describes — and the caller is a player that is already ticking once a second.
+    // Null while no reader is open — which a caller must not confuse with a torrent that has no
+    // subtitles, because the file list isn't known until the reader has resolved metadata.
+    fun subtitleProgress(): TorrentSubtitleProgress? {
+        val reader = activeReader.get() ?: return null
+        return TorrentSubtitleProgress(
+            total = reader.subtitleCount,
+            ready = runCatching { reader.readySubtitles() }.getOrDefault(emptyList()),
+        )
+    }
+
     // Tears everything down regardless of reader count — the notification's Stop action. Readers still
     // holding the torrent will fail their next read with an IOException, which surfaces as a player
     // error. That is the intended outcome: the user asked it to stop.
@@ -224,7 +249,9 @@ class TorrentEngine @Inject constructor(
         // the same lock and synchronized is reentrant, so it belongs in here too: releasing before
         // stopping would let a new playback start a session this call then pulls out from under it.
         synchronized(lock) {
-            activeHandle.getAndSet(null)?.let { handle -> runCatching { session?.remove(handle) } }
+            activeReader.getAndSet(null)?.let { reader ->
+                runCatching { session?.remove(reader.torrentHandle) }
+            }
             // Retires every reader currently open before the count is reset, so their closes can't be
             // charged against whatever plays next.
             generation.incrementAndGet()
@@ -287,7 +314,7 @@ class TorrentEngine @Inject constructor(
                 // that stops when you stop watching and one that keeps uploading in the background.
                 // Inside the lock, with stop(), so a playback starting right now can't have the
                 // session it just obtained from ensureStarted() stopped out from under it.
-                activeHandle.set(null)
+                activeReader.set(null)
                 stop()
             }
         }
