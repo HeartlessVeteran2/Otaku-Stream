@@ -30,6 +30,9 @@ import javax.inject.Inject
 private val MIN_PIP_ASPECT_RATIO = 1 / 2.39
 private val MAX_PIP_ASPECT_RATIO = 2.39
 
+// Schemes an ACTION_VIEW intent can hand straight to the player. Compared lowercased.
+private val PLAYABLE_SCHEMES = setOf("http", "https", "content", "file")
+
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
@@ -93,8 +96,11 @@ class MainActivity : ComponentActivity() {
     // way and is translated to the app's own torrent:// identity first.
     private fun Intent.playableVideoUri(): String? {
         val uri = takeIf { it.action == Intent.ACTION_VIEW }?.data ?: return null
-        if (uri.scheme.equals("magnet", ignoreCase = true)) return magnetPlaybackUrl(uri.toString())
-        return uri.takeIf { it.scheme in setOf("http", "https", "content", "file") }?.toString()
+        // Schemes are case-insensitive per RFC 3986 and Uri doesn't normalise them, so a sender that
+        // writes "HTTP://" or "MAGNET:?" hands us a scheme that wouldn't match a lowercase literal.
+        val scheme = uri.scheme?.lowercase() ?: return null
+        if (scheme == "magnet") return magnetPlaybackUrl(uri.toString())
+        return uri.takeIf { scheme in PLAYABLE_SCHEMES }?.toString()
     }
 
     // Magnet → torrent:// plus a tracker stash.

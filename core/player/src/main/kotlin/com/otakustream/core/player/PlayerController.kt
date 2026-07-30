@@ -253,7 +253,12 @@ class PlayerController @Inject constructor(
                         player.pause()
                         castManager.castItem(item, position)
                         _uiState.value = _uiState.value.copy(isCasting = true)
-                    } else if (url != null) {
+                    } else if (url != null && !isCastableUrl(url)) {
+                        // Gated on the url actually being uncastable, not just on the branch being
+                        // taken: a castable url with no media item yet — a Cast session connecting
+                        // while playback is still starting — would otherwise be told the TV can't
+                        // reach a stream it can reach perfectly well.
+                        //
                         // Say why. Connecting to a Cast device and having playback simply stay on the
                         // phone looks like the Cast button is broken — and a torrent is the case where
                         // a user is most likely to try, since the stream came from the internet and

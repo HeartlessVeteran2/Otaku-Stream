@@ -101,6 +101,21 @@ class MagnetLinksTest {
     }
 
     @Test
+    fun `keeps a literal plus in a tracker url`() {
+        // URLDecoder implements form encoding, where '+' means space — but a magnet is an RFC 3986 URI,
+        // where it is a literal. Decoded naively, a passkey containing '+' gains a space and every
+        // announce to that tracker fails.
+        val link = MagnetLinks.parse("magnet:?xt=urn:btih:$hex&tr=https%3A%2F%2Ft.example%2Fa%2Bb%2Fannounce")
+        assertEquals(listOf("https://t.example/a+b/announce"), link?.trackers)
+    }
+
+    @Test
+    fun `decodes a percent-encoded space as a space`() {
+        // The other half of the same rule: %20 is still a space.
+        assertEquals("Some Show", MagnetLinks.parse("magnet:?xt=urn:btih:$hex&dn=Some%20Show")?.displayName)
+    }
+
+    @Test
     fun `survives a broken percent escape`() {
         // "%zz" makes URLDecoder throw; that parameter is dropped, the link still parses.
         val link = MagnetLinks.parse("magnet:?xt=urn:btih:$hex&tr=%zz&dn=Fine")

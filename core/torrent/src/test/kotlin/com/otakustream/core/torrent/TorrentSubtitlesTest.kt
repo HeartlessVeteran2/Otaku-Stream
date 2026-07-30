@@ -38,13 +38,49 @@ class TorrentSubtitlesTest {
     @Test
     fun `takes same-directory subtitles when nothing matches the name`() {
         val files = listOf(
-            entry(0, "Subs/English.srt"),
-            entry(1, "Movie.2160p.mkv", 8_000_000_000),
-            entry(2, "elsewhere/Stray.srt"),
+            entry(0, "Movie/Subs/English.srt"),
+            entry(1, "Movie/Movie.2160p.mkv", 8_000_000_000),
+            entry(2, "Movie/Other.srt"),
         )
         val picked = TorrentSubtitles.pick(files, videoIndex = 1)
-        // Neither shares the video's name; the one in the video's own directory outranks the other.
+        // Neither shares the video's name, but index 2 is in the video's own directory and index 0 is
+        // one level down, so the directory rank is what separates them.
         assertEquals(listOf(2, 0), picked.map { it.fileIndex })
+    }
+
+    @Test
+    fun `falls back to alphabetical when neither name nor directory matches`() {
+        // Everything here is rank 2, so only the tiebreak is under test. It exists so the offered
+        // order is the same on every replay of one torrent.
+        val files = listOf(
+            entry(0, "Subs/zulu.srt"),
+            entry(1, "Movie.2160p.mkv", 8_000_000_000),
+            entry(2, "elsewhere/alpha.srt"),
+        )
+        assertEquals(listOf(2, 0), TorrentSubtitles.pick(files, videoIndex = 1).map { it.fileIndex })
+    }
+
+    @Test
+    fun `does not treat a longer episode number as this episode`() {
+        // Shows numbered without zero-padding put "S01E1" and "S01E10" in one pack. A bare
+        // startsWith claims episode 10's subtitles while episode 1 is playing — worse than offering
+        // none, because it looks like the feature worked.
+        val files = listOf(
+            entry(0, "Show.S01E1.mkv", 2_000_000_000),
+            entry(1, "Show.S01E10.en.srt"),
+            entry(2, "Show.S01E1.en.srt"),
+        )
+        val picked = TorrentSubtitles.pick(files, videoIndex = 0)
+        assertEquals(2, picked.first().fileIndex)
+    }
+
+    @Test
+    fun `matches a subtitle named exactly like the video`() {
+        val files = listOf(
+            entry(0, "Show.S01E01.mkv", 2_000_000_000),
+            entry(1, "Show.S01E01.srt"),
+        )
+        assertEquals(listOf(1), TorrentSubtitles.pick(files, videoIndex = 0).map { it.fileIndex })
     }
 
     @Test
@@ -60,17 +96,26 @@ class TorrentSubtitlesTest {
     }
 
     @Test
-    fun `ignores oversized and empty subtitle files`() {
+    fun `ignores subtitle files too large to be subtitles`() {
+        // A multi-megabyte ".sub" is an IDX/SUB bitmap pair. The extension is one we accept, so size is
+        // the only thing rejecting it — kept as its own test so that stays true if the filters change.
         val files = listOf(
             entry(0, "Show.mkv", 2_000_000_000),
-            // An IDX/SUB bitmap pair, which Media3 can't render — fetching it would spend real
-            // bandwidth mid-playback for nothing.
             entry(1, "Show.sub", 30_000_000),
-            // A zero-byte placeholder renders as no subtitles at all.
-            entry(2, "Show.en.srt", 0),
-            entry(3, "Show.fr.srt", 30_000),
+            entry(2, "Show.fr.srt", 30_000),
         )
-        assertEquals(listOf(3), TorrentSubtitles.pick(files, videoIndex = 0).map { it.fileIndex })
+        assertEquals(listOf(2), TorrentSubtitles.pick(files, videoIndex = 0).map { it.fileIndex })
+    }
+
+    @Test
+    fun `ignores empty subtitle files`() {
+        // A zero-byte placeholder renders as no subtitles at all, so offering it is worse than nothing.
+        val files = listOf(
+            entry(0, "Show.mkv", 2_000_000_000),
+            entry(1, "Show.en.srt", 0),
+            entry(2, "Show.fr.srt", 30_000),
+        )
+        assertEquals(listOf(2), TorrentSubtitles.pick(files, videoIndex = 0).map { it.fileIndex })
     }
 
     @Test

@@ -45,7 +45,11 @@ object TorrentUri {
     // Lowercased so the same torrent always produces the same URL. Add-ons return info-hashes in
     // whichever case they please, and without this "ABC…" and "abc…" would be two different history
     // keys for one file — two resume positions, two sets of skip markers.
-    private fun normalizeInfoHash(value: String): String? {
+    //
+    // Internal rather than private so magnet parsing shares this exact rule. Two copies would be one
+    // change away from disagreeing about what a valid hash is, and the failure mode is a url that
+    // parses in one path and not the other.
+    internal fun normalizeInfoHash(value: String): String? {
         val trimmed = value.trim()
         if (trimmed.length != INFO_HASH_LENGTH) return null
         // Explicit ASCII ranges, not Char.isDigit(): that accepts any Unicode decimal digit, so an

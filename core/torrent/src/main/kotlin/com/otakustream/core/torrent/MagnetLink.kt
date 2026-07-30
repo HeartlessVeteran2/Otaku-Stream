@@ -74,22 +74,26 @@ object MagnetLinks {
     private fun decode(value: String): String? =
         // A stray '%' that isn't a valid escape makes URLDecoder throw. That's a malformed
         // parameter, not a crash worth propagating to whichever app sent us the link.
-        runCatching { URLDecoder.decode(value, "UTF-8") }.getOrNull()?.takeIf { it.isNotBlank() }
+        //
+        // '+' is escaped before decoding, not after. URLDecoder implements
+        // application/x-www-form-urlencoded, where '+' means space — but a magnet is an RFC 3986 URI,
+        // where it is a literal character. Without this, a tracker url with a '+' in its announce path
+        // or passkey silently gains a space and every announce to it fails.
+        runCatching { URLDecoder.decode(value.replace("+", "%2B"), "UTF-8") }
+            .getOrNull()
+            ?.takeIf { it.isNotBlank() }
 
     private fun normalizeHash(urn: String): String? {
         if (!urn.startsWith(BTIH_PREFIX, ignoreCase = true)) return null
         val raw = urn.substring(BTIH_PREFIX.length).trim()
         return when (raw.length) {
-            HEX_HASH_LENGTH -> raw.takeIf(::isHex)?.lowercase()
+            // Shared with the torrent:// scheme deliberately: one definition of a valid v1 hash, so
+            // the two entry points can't drift into disagreeing.
+            HEX_HASH_LENGTH -> TorrentUri.normalizeInfoHash(raw)
             BASE32_HASH_LENGTH -> base32ToHex(raw)
             else -> null
         }
     }
-
-    // Explicit ASCII ranges rather than Char.isDigit(), which accepts any Unicode decimal digit —
-    // an Arabic-Indic numeral would otherwise pass as "hex" and survive lowercase() unchanged.
-    private fun isHex(value: String): Boolean =
-        value.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
 
     private fun base32ToHex(value: String): String? {
         val upper = value.uppercase()

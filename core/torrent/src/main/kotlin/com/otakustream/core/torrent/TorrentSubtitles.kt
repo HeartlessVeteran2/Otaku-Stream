@@ -78,9 +78,26 @@ object TorrentSubtitles {
 
     // 0 = same name as the video, 1 = same directory, 2 = anywhere else.
     private fun rankOf(file: TorrentFileEntry, videoStem: String?, videoDir: String?): Int = when {
-        videoStem != null && stemOf(file.path).startsWith(videoStem, ignoreCase = true) -> 0
+        videoStem != null && matchesVideoName(stemOf(file.path), videoStem) -> 0
         videoDir != null && directoryOf(file.path).equals(videoDir, ignoreCase = true) -> 1
         else -> 2
+    }
+
+    // Characters that separate the fields of a release filename. A match has to land on one of these,
+    // or on the end of the name.
+    private val SEPARATORS = charArrayOf('.', '_', '-', ' ')
+
+    // A bare startsWith is not enough, and the failure is the worst kind: confidently wrong.
+    //
+    // Shows numbered without zero-padding produce "Show.S01E1" and "Show.S01E10" side by side in one
+    // pack. On "Show.S01E1", a prefix match claims "Show.S01E10.en.srt" as this episode's subtitles —
+    // so the viewer gets subtitles for a different episode, which is worse than getting none, because
+    // it looks like the feature worked.
+    private fun matchesVideoName(stem: String, videoStem: String): Boolean {
+        if (!stem.startsWith(videoStem, ignoreCase = true)) return false
+        // Exactly the video's name, or the video's name followed by a new field.
+        val remainder = stem.substring(videoStem.length)
+        return remainder.isEmpty() || remainder[0] in SEPARATORS
     }
 
     // What to call the track. When the filename is the video's name plus a suffix — the usual
@@ -88,7 +105,10 @@ object TorrentSubtitles {
     // filename would push it off the end of the row.
     internal fun labelFor(path: String, videoStem: String?): String {
         val stem = stemOf(path)
-        val suffix = if (videoStem != null && stem.startsWith(videoStem, ignoreCase = true)) {
+        // Same match rule as the ranking, so a file that wasn't treated as this episode's subtitles
+        // doesn't get labelled as though it were — stripping "Show.S01E1" off "Show.S01E10.en" would
+        // leave the nonsense "0.en".
+        val suffix = if (videoStem != null && matchesVideoName(stem, videoStem)) {
             stem.substring(videoStem.length).trim('.', '_', '-', ' ')
         } else {
             stem
