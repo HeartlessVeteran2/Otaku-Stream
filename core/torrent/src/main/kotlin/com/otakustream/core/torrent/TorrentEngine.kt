@@ -163,11 +163,6 @@ class TorrentEngine @Inject constructor(
     fun openFile(ref: TorrentRef, trackers: List<String>, saveDir: java.io.File): TorrentFileReader {
         val session = ensureStarted()
             ?: throw java.io.IOException("The torrent engine is unavailable on this device")
-        // A replay from watch history carries no trackers — the url is deliberately just the
-        // torrent's identity — so without this it would fall back to DHT alone, which is slow to
-        // bootstrap and often finds no peers at all. Reuse whatever worked last time.
-        val effectiveTrackers = trackers.ifEmpty { trackerStore.trackersFor(ref.infoHash) }
-        trackerStore.remember(ref.infoHash, trackers)
         // Reading the generation and taking the count must be one step. Split apart, stopAll() landing
         // between them tags this reader with a generation that is already retired while its increment
         // counts against the new one — so its close is later dismissed as stale and the count stays one
@@ -178,10 +173,19 @@ class TorrentEngine @Inject constructor(
             openedAt = generation.get()
             isFirstReader = openReaders.getAndIncrement() == 0
         }
+        // A replay from watch history carries no trackers — the url is deliberately just the torrent's
+        // identity — so without this it would fall back to DHT alone, which is slow to bootstrap and
+        // often finds no peers at all. Reuse whatever worked last time.
+        val effectiveTrackers = trackers.ifEmpty { trackerStore.trackersFor(ref.infoHash) }
         if (isFirstReader) {
-            // Outside the lock: this is a binder call into the system, and nothing it reaches needs
-            // engine state. First reader, so bring up the foreground service and the download isn't
-            // stopped the moment the app is backgrounded.
+            // Both of these are once per playback, not once per reader. openFile() runs from
+            // DataSource.open(), and Media3 opens more than one DataSource for a single item — so
+            // without the guard this would repeat a SharedPreferences write on a playback thread, and
+            // start a service that is already running.
+            trackerStore.remember(ref.infoHash, trackers)
+            // Bring up the foreground service so the download isn't stopped the moment the app is
+            // backgrounded. Outside the lock: it's a binder call, and nothing it reaches needs engine
+            // state.
             TorrentService.start(appContext)
         }
         return try {

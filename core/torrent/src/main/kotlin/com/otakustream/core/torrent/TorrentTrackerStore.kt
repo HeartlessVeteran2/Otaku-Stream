@@ -54,18 +54,24 @@ class TorrentTrackerStore @Inject constructor(
             .orEmpty()
     }
 
-    // No-op for an empty list: overwriting a remembered set with nothing would turn one DHT-only
-    // playback into every later one being DHT-only too.
+    // Records a tracker list, and promotes the entry in the retention order either way.
+    //
+    // Those are two separate things and conflating them was a bug. An empty list must not overwrite a
+    // remembered set — that would turn one DHT-only playback into every later one being DHT-only too —
+    // but it must still count as a use. A replay from watch history arrives with no trackers by
+    // design, so skipping the promotion meant the torrents being replayed most were the ones aging out
+    // of a bounded list first: precisely backwards.
     fun remember(infoHash: String, trackers: List<String>) {
-        if (trackers.isEmpty()) return
         val key = keyFor(infoHash) ?: return
+        // Nothing to write and nothing stored, so there is no entry to keep alive.
+        if (trackers.isEmpty() && !prefs.contains(key)) return
         val order = prefs.getString(KEY_ORDER, null)
             ?.split('\n')
             ?.filter { it.isNotBlank() }
             .orEmpty()
         val retention = TrackerRetentionPolicy.retain(order, key)
         prefs.edit {
-            putString(key, trackers.distinct().joinToString("\n"))
+            if (trackers.isNotEmpty()) putString(key, trackers.distinct().joinToString("\n"))
             putString(KEY_ORDER, retention.order.joinToString("\n"))
             retention.evicted.forEach { remove(it) }
         }
