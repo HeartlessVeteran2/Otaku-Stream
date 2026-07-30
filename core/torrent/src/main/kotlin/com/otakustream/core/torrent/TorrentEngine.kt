@@ -45,7 +45,12 @@ class TorrentEngine @Inject constructor() {
             Log.w(TAG, "Torrent engine unavailable: libtorrent4j failed to initialize", e)
             false
         } catch (e: Exception) {
-            Log.w(TAG, "Torrent engine unavailable", e)
+            // The three cases above are expected — that's what a missing ABI looks like, and they
+            // stay at warning level. Anything else reaching here is a bug or a broken environment,
+            // not a device without the library, so it is logged as an error to stand out. Still
+            // caught rather than rethrown: whatever went wrong, the right outcome for the user is a
+            // disabled feature, not a dead app.
+            Log.e(TAG, "Torrent engine unavailable: unexpected error probing libtorrent4j", e)
             false
         }
     }
