@@ -67,9 +67,9 @@ class TrackingSettingsViewModel @Inject constructor(
         // 1. It has to be the answer to a sign-in this app started. Any app or web page can fire
         //    otakustream://anilist-auth#access_token=... at this app; without the nonce the app
         //    would store an attacker's token and start writing the user's watch history into the
-        //    attacker's AniList account, where they can read it. consume() is single-use, so a
-        //    replayed redirect fails too.
-        if (!authState.consume(state)) {
+        //    attacker's AniList account, where they can read it. Check without consuming it so a
+        //    transient validation or persistence failure can be retried.
+        if (!authState.matches(state)) {
             _signInRejected.value = true
             return
         }
@@ -84,6 +84,8 @@ class TrackingSettingsViewModel @Inject constructor(
                 return@launch
             }
             trackingRepository.saveToken(token.trim())
+            // Retire the nonce only after validation and persistence have both succeeded.
+            authState.consume(state)
             _signInRejected.value = false
             _justSignedIn.value = true
         }

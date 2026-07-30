@@ -51,10 +51,13 @@ class AniListAuthState @Inject constructor(@ApplicationContext context: Context)
     // hands anyone who can open a link a way to block sign-in indefinitely. Leaving a failed
     // attempt's nonce in place costs nothing — it is 256 bits of randomness that only the real
     // redirect carries.
-    fun consume(state: String?): Boolean {
+    fun matches(state: String?): Boolean {
         val pending = prefs.getString(KEY_PENDING, null)
-        if (pending.isNullOrEmpty() || state.isNullOrEmpty()) return false
-        if (pending != state) return false
+        return !pending.isNullOrEmpty() && !state.isNullOrEmpty() && pending == state
+    }
+
+    fun consume(state: String?): Boolean {
+        if (!matches(state)) return false
         // Matched, so retire it: re-opening the same redirect URL must not sign in a second time.
         prefs.edit { remove(KEY_PENDING) }
         return true
