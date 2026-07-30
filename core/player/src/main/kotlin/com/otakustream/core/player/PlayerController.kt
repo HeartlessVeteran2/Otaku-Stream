@@ -405,7 +405,7 @@ class PlayerController @Inject constructor(
             val dataSourceFactory = if (TorrentUri.isTorrentUrl(url)) {
                 TorrentDataSource.Factory(
                     engine = torrentEngine,
-                    saveDir = torrentCacheDir(),
+                    saveDir = com.otakustream.core.torrent.torrentCacheDir(appContext),
                     trackers = pending?.trackers.orEmpty(),
                     delegate = baseDataSourceFactory,
                 )
@@ -449,12 +449,6 @@ class PlayerController @Inject constructor(
         player.prepare()
         player.playWhenReady = wasPlaying
     }
-
-    // Downloaded torrent pieces live here. Under cacheDir on purpose: the OS may reclaim it under
-    // storage pressure, which is the right behaviour for data that can always be re-fetched from the
-    // swarm. A dedicated subdirectory gives the storage quota and eviction (PR3) one place to manage.
-    private fun torrentCacheDir(): java.io.File =
-        java.io.File(appContext.cacheDir, "torrents").apply { mkdirs() }
 
     private suspend fun playNext() {
         val next = PlaybackQueue.resolveNext() ?: return

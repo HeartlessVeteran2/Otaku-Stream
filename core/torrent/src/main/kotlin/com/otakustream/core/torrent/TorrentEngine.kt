@@ -16,7 +16,10 @@ private const val TAG = "TorrentEngine"
 // session at app startup would undo the cold-start work, and most sessions never play a torrent at
 // all.
 @Singleton
-class TorrentEngine @Inject constructor() {
+class TorrentEngine @Inject constructor(
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
+    private val settings: TorrentSettings,
+) {
 
     private val lock = Any()
 
@@ -31,6 +34,35 @@ class TorrentEngine @Inject constructor() {
     // Media3 may open more than one DataSource for a single item. Counting readers is the only signal
     // that is actually true.
     private val openReaders = java.util.concurrent.atomic.AtomicInteger(0)
+
+    // The torrent currently being read, kept only so the notification can report its rate and peer
+    // count. Cleared on release so a stale handle is never queried after removal — calling into a
+    // removed handle is undefined at the native layer.
+    private val activeHandle =
+        java.util.concurrent.atomic.AtomicReference<org.libtorrent4j.TorrentHandle?>(null)
+
+    // Bumped every time the session is torn down wholesale. Readers carry the generation they were
+    // opened under, and one from an earlier generation must not touch the reference count.
+    //
+    // Without this: tap Stop, start something else straight away, and when the *old* reader finally
+    // closes its decrement lands on the new playback's count — taking the new session and its service
+    // down mid-episode. Clamping the count doesn't help, because the count is legitimately 1 at that
+    // point; the close simply belongs to a session that no longer exists.
+    private val generation = java.util.concurrent.atomic.AtomicLong(0)
+
+    // Absolute paths of files currently open for reading. The cache sweep is handed these as
+    // protected paths: a sweep triggered from the settings screen can fire while a playback is in
+    // progress, and deleting the file being streamed would kill it.
+    private val openPaths: MutableSet<String> =
+        java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
+
+    // Snapshot for callers that sweep the cache while playback may be running.
+    fun protectedCachePaths(): Set<String> = openPaths.toSet()
+
+    // Whether anything still holds a file open. True from the moment a playback starts resolving — not
+    // from when the torrent's metadata arrives — which is what makes it the right signal for "is there
+    // still work here?" as opposed to stats(), which is null for the whole of a slow start.
+    val hasOpenReaders: Boolean get() = openReaders.get() > 0
 
     // Whether the native library is usable on this device at all.
     //
@@ -66,6 +98,22 @@ class TorrentEngine @Inject constructor() {
 
     val isRunning: Boolean
         get() = session?.isRunning == true
+
+    // Whether a torrent should be offered right now — the check callers actually want.
+    //
+    // isAvailable answers "can this device run it at all"; this folds in the two things the user
+    // controls. Wi-Fi-only is checked here rather than at the settings screen because connectivity
+    // changes between choosing a stream and playing it, and a metered connection at play time is the
+    // moment that matters.
+    val isUsable: Boolean
+        get() = isAvailable && settings.enabled && (!settings.unmeteredOnly || isUnmetered())
+
+    private fun isUnmetered(): Boolean {
+        val manager = appContext.getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+            as? android.net.ConnectivityManager ?: return false
+        val capabilities = manager.getNetworkCapabilities(manager.activeNetwork) ?: return false
+        return capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+    }
 
     // Idempotent: returns the running session, starting one if needed, or null when the engine
     // isn't available on this device. Synchronized because playback resolution and the (later)
@@ -115,15 +163,80 @@ class TorrentEngine @Inject constructor() {
     fun openFile(ref: TorrentRef, trackers: List<String>, saveDir: java.io.File): TorrentFileReader {
         val session = ensureStarted()
             ?: throw java.io.IOException("The torrent engine is unavailable on this device")
-        openReaders.incrementAndGet()
+        // Reading the generation and taking the count must be one step. Split apart, stopAll() landing
+        // between them tags this reader with a generation that is already retired while its increment
+        // counts against the new one — so its close is later dismissed as stale and the count stays one
+        // too high forever, and the session never tears down at the end of playback.
+        val openedAt: Long
+        val isFirstReader: Boolean
+        synchronized(lock) {
+            openedAt = generation.get()
+            isFirstReader = openReaders.getAndIncrement() == 0
+        }
+        if (isFirstReader) {
+            // Outside the lock: this is a binder call into the system, and nothing it reaches needs
+            // engine state. First reader, so bring up the foreground service and the download isn't
+            // stopped the moment the app is backgrounded.
+            TorrentService.start(appContext)
+        }
         return try {
-            TorrentFileReader.open(session, ref, trackers, saveDir, onClosed = ::releaseReader)
+            TorrentFileReader.open(
+                session,
+                ref,
+                trackers,
+                saveDir,
+                onClosed = { handle, path -> releaseReader(openedAt, handle, path) },
+            ).also {
+                activeHandle.set(it.torrentHandle)
+                openPaths.add(it.filePath)
+            }
         } catch (e: Throwable) {
             // The count was taken before open() could fail; give it back, or a failed open would
             // pin the session open for the rest of the process.
-            releaseReader(null)
+            releaseReader(openedAt, handle = null, path = null)
             throw e
         }
+    }
+
+    // A snapshot for the notification, or null when nothing is being read. Returns a plain data
+    // class rather than the handle so no libtorrent type escapes this module.
+    fun stats(): TorrentStats? {
+        val handle = activeHandle.get() ?: return null
+        return runCatching {
+            if (!handle.isValid) return null
+            val status = handle.status()
+            TorrentStats(
+                name = status.name().orEmpty(),
+                downloadRateBytesPerSec = status.downloadRate(),
+                peers = status.numPeers(),
+                seeds = status.numSeeds(),
+                progress = status.progress(),
+            )
+        }.getOrNull()
+    }
+
+    // Tears everything down regardless of reader count — the notification's Stop action. Readers still
+    // holding the torrent will fail their next read with an IOException, which surfaces as a player
+    // error. That is the intended outcome: the user asked it to stop.
+    fun stopAll() {
+        // One critical section for the whole retirement, so no reader can be opened or released
+        // half-way through it and end up attributed to the wrong side of the boundary. stop() takes
+        // the same lock and synchronized is reentrant, so it belongs in here too: releasing before
+        // stopping would let a new playback start a session this call then pulls out from under it.
+        synchronized(lock) {
+            activeHandle.getAndSet(null)?.let { handle -> runCatching { session?.remove(handle) } }
+            // Retires every reader currently open before the count is reset, so their closes can't be
+            // charged against whatever plays next.
+            generation.incrementAndGet()
+            openReaders.set(0)
+            // Cleared with the count, not left to the readers. Their close() will still run and still
+            // call releaseReader, but a reader that never closes cleanly would otherwise leave its path
+            // protected for the rest of the process — permanently exempting the largest file in the
+            // cache from eviction, so the quota could never be met again.
+            openPaths.clear()
+            stop()
+        }
+        TorrentService.stop(appContext)
     }
 
     // Called when a reader closes, and when an open fails after the count was taken.
@@ -131,20 +244,58 @@ class TorrentEngine @Inject constructor() {
     // Removing the torrent is what actually stops peer traffic: pausing or clearing priorities still
     // leaves the session talking to the swarm. Files are left on disk deliberately — they are the
     // cache a resumed playback reads from, and the storage quota is what reclaims them.
-    private fun releaseReader(handle: org.libtorrent4j.TorrentHandle?) {
-        val remaining = openReaders.decrementAndGet()
-        if (handle != null) {
-            synchronized(lock) {
+    private fun releaseReader(
+        openedAt: Long,
+        handle: org.libtorrent4j.TorrentHandle?,
+        path: String? = null,
+    ) {
+        // The generation check and the count mutation are one critical section, matching stopAll().
+        // Checked and then decremented separately, stopAll() landing in the gap would let a reader
+        // that passed the check as current go on to decrement a count that has since been reset for a
+        // new playback — stopping the session that playback is streaming from.
+        val teardown: Boolean
+        synchronized(lock) {
+            if (openedAt != generation.get()) {
+                // A reader from a session stopAll() already tore down. Everything this would otherwise
+                // do has either happened already or belongs to somebody else now:
+                //
+                //  - the count was reset wholesale, so decrementing would take a *live* playback's
+                //    count to zero and stop the session it is streaming from;
+                //  - the torrent left the session with the session itself, and the handle is no longer
+                //    valid to call into;
+                //  - openPaths was cleared, and if the user replayed the same file its path is back in
+                //    the set on behalf of the new reader — removing it here would unprotect a file
+                //    currently being streamed and let the sweep delete it mid-playback.
+                Log.i(TAG, "Ignoring the close of a reader from a stopped session")
+                return
+            }
+            path?.let { openPaths.remove(it) }
+            // Floored at zero rather than a plain decrement, for the same reason: stopAll() can reset
+            // the count under a reader that then closes normally, and a bare decrement would go
+            // negative — after which the next openFile()'s `getAndIncrement() == 0` check is false and
+            // the foreground service never starts for the following playback.
+            val remaining = openReaders.updateAndGet { (it - 1).coerceAtLeast(0) }
+            if (handle != null) {
                 // The flagless overload keeps the downloaded data on disk, which is what we want:
                 // the files are the cache a resumed playback reads from.
                 runCatching { session?.remove(handle) }
                     .onFailure { Log.w(TAG, "Could not remove torrent from the session", it) }
             }
+            teardown = remaining <= 0
+            if (teardown) {
+                // No reader left, so nothing needs the swarm. This is the difference between a torrent
+                // that stops when you stop watching and one that keeps uploading in the background.
+                // Inside the lock, with stop(), so a playback starting right now can't have the
+                // session it just obtained from ensureStarted() stopped out from under it.
+                activeHandle.set(null)
+                stop()
+            }
         }
-        if (remaining <= 0) {
-            // No reader left, so nothing needs the swarm. This is the difference between a torrent
-            // that stops when you stop watching and one that keeps uploading in the background.
-            stop()
+        if (teardown) {
+            // Outside the lock: a binder call and a thread spawn, neither of which touches engine
+            // state that the section above protects.
+            TorrentService.stop(appContext)
+            sweepCache()
         }
     }
 
@@ -165,6 +316,20 @@ class TorrentEngine @Inject constructor() {
                 Log.w(TAG, "Failed to stop torrent session cleanly; keeping the handle to retry", e)
             }
         }
+    }
+
+    // Brings the cache back under quota once nothing is being read. Deliberately here rather than
+    // before a playback: sweeping at open time would compete with the download for IO exactly when
+    // latency matters most, and nothing is protected at this point because no reader is left.
+    //
+    // Off the calling thread — this runs from a reader's close(), which is on a playback thread.
+    private fun sweepCache() {
+        val dir = torrentCacheDir(appContext)
+        val quota = settings.quotaBytes
+        Thread {
+            runCatching { TorrentCacheSweeper.sweep(dir, quotaBytes = quota) }
+                .onFailure { Log.w(TAG, "Torrent cache sweep failed", it) }
+        }.apply { isDaemon = true }.start()
     }
 
     // Streaming-shaped defaults, not download-shaped ones. Deliberately conservative on upload
