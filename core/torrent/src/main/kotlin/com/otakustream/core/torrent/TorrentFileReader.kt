@@ -74,7 +74,11 @@ class TorrentFileReader private constructor(
         return subtitleCandidates.filter { candidate ->
             val index = candidate.fileIndex
             index in progress.indices && progress[index] >= sizes.fileSize(index)
-        }.map { it.copy(path = File(saveDir, it.path).absolutePath) }
+        }.mapNotNull { candidate ->
+            // The path came out of the torrent's own metadata, so it is attacker-controlled; this
+            // one is handed to the player to open directly.
+            TorrentPaths.containedFile(saveDir, candidate.path)?.let { candidate.copy(path = it.absolutePath) }
+        }
     }
 
     // Reads at most up to the end of the piece containing `position`. Deliberately not more: the
@@ -218,7 +222,8 @@ class TorrentFileReader private constructor(
 
             handle.resume()
 
-            val file = File(saveDir, files.filePath(ref.fileIdx))
+            val file = TorrentPaths.containedFile(saveDir, files.filePath(ref.fileIdx))
+                ?: throw IOException("The torrent's file path escapes the download directory")
             // libtorrent creates the file when it allocates storage; give it a moment rather than
             // failing the open on a race with the first write.
             awaitFile(file)
