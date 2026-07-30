@@ -124,12 +124,42 @@ notes say so) and with AniList sign-in disabled.
 | --- | --- |
 | [docs/anilist-setup.md](docs/anilist-setup.md) | Registering the AniList API client that powers in-app sign-in |
 | [docs/architecture.md](docs/architecture.md) | Module map, layering rules, and how playback/history/sources fit together |
+| [docs/building-and-releasing.md](docs/building-and-releasing.md) | Build requirements, the versioning scheme, and how a tagged release is published |
 | [docs/scripted-sources.md](docs/scripted-sources.md) | Writing and hosting a runtime-installable JavaScript source |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Getting a build running, the checks that must pass, and PR conventions |
+| [SECURITY.md](SECURITY.md) | Reporting a vulnerability, and how credentials and network traffic are handled |
+| [CHANGELOG.md](CHANGELOG.md) | What changed in each release |
 
 ## Tech stack
 
 Kotlin · Jetpack Compose · Material 3 · Hilt · Room · Media3 (ExoPlayer) · Cast · Coil · OkHttp ·
 Mozilla Rhino · QuickJS
+
+## Licence
+
+Otaku Stream is free software under the **GNU General Public License v3.0 or later** — see
+[LICENSE](LICENSE). In short: you can use, study, modify, and redistribute it, but if you distribute
+a modified build you have to publish your source under the same terms.
+
+**Google Cast exception.** The app links `play-services-cast-framework`, which is proprietary and
+cannot be distributed under the GPL. Rather than leave anyone redistributing a build in an ambiguous
+position, LICENSE grants an explicit additional permission (GPL v3 §7) to link against the Google
+Play services libraries. Delete the Cast integration and you can drop the exception with it.
+
+### Third-party licences
+
+| Dependency | Licence |
+| --- | --- |
+| AndroidX (Core, Lifecycle, Activity, Compose, Navigation, Room, Security-Crypto, MediaRouter, AppCompat), Media3 | Apache-2.0 |
+| Hilt / Dagger, OkHttp, Coil, Kotlin stdlib + coroutines | Apache-2.0 |
+| [QuickJS wrapper](https://github.com/HarlonWang/quickjs-wrapper) (`wang.harlon.quickjs`) | Apache-2.0 |
+| [jsoup](https://jsoup.org/) | MIT |
+| [Mozilla Rhino](https://github.com/mozilla/rhino) | MPL-2.0 |
+| `play-services-cast-framework` | Proprietary — covered by the exception above |
+
+All of the above are GPL-3.0-compatible except the Cast framework. `org.json` appears in the build
+too, but only as `testImplementation` (the `android.jar` stub throws "not mocked" in JVM tests), so
+it is never distributed in the APK.
 
 ## Acknowledgments
 
