@@ -37,6 +37,8 @@ import com.otakustream.core.sources.api.PlaybackCompletion
 import com.otakustream.core.sources.api.PlaybackQueue
 import com.otakustream.core.sources.api.SkipMark
 import kotlinx.coroutines.CancellationException
+import com.otakustream.core.player.torrent.TorrentDataSource
+import com.otakustream.core.torrent.TorrentUri
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -107,6 +109,7 @@ class PlayerController @Inject constructor(
     private val libraryRepository: LibraryRepository,
     private val playerSettingsPrefs: PlayerSettingsPrefs,
     private val castManager: com.otakustream.core.player.cast.CastManager,
+    private val torrentEngine: com.otakustream.core.torrent.TorrentEngine,
 ) {
     val player: ExoPlayer = ExoPlayer.Builder(appContext, PlayerRenderersFactory(appContext)).build()
 
@@ -394,7 +397,21 @@ class PlayerController @Inject constructor(
             // DefaultDataSource delegates to file/content/asset data sources by URI scheme and
             // falls back to the HTTP factory (headers intact) for http(s) — so local files and
             // content:// URIs from the file picker / "Open with" play, not just remote URLs.
-            val dataSourceFactory = DefaultDataSource.Factory(appContext, httpDataSourceFactory)
+            val baseDataSourceFactory = DefaultDataSource.Factory(appContext, httpDataSourceFactory)
+            // torrent:// urls can't be fetched by any of the above, so they route through the torrent
+            // engine instead. The trackers come from the stashed Video rather than the url: the url is
+            // deliberately just the torrent's identity, so that everything keyed on it above — resume
+            // position, skip segments, history — stays stable across sessions.
+            val dataSourceFactory = if (TorrentUri.isTorrentUrl(url)) {
+                TorrentDataSource.Factory(
+                    engine = torrentEngine,
+                    saveDir = torrentCacheDir(),
+                    trackers = pending?.trackers.orEmpty(),
+                    delegate = baseDataSourceFactory,
+                )
+            } else {
+                baseDataSourceFactory
+            }
             val mediaSource = DefaultMediaSourceFactory(dataSourceFactory).createMediaSource(mediaItem)
 
             currentMediaItem = mediaItem
@@ -432,6 +449,12 @@ class PlayerController @Inject constructor(
         player.prepare()
         player.playWhenReady = wasPlaying
     }
+
+    // Downloaded torrent pieces live here. Under cacheDir on purpose: the OS may reclaim it under
+    // storage pressure, which is the right behaviour for data that can always be re-fetched from the
+    // swarm. A dedicated subdirectory gives the storage quota and eviction (PR3) one place to manage.
+    private fun torrentCacheDir(): java.io.File =
+        java.io.File(appContext.cacheDir, "torrents").apply { mkdirs() }
 
     private suspend fun playNext() {
         val next = PlaybackQueue.resolveNext() ?: return

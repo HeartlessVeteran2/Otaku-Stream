@@ -10,6 +10,7 @@ import com.otakustream.core.sources.api.SourceFilter
 import com.otakustream.core.sources.api.SubtitleTrack
 import com.otakustream.core.sources.api.Video
 import com.otakustream.core.sources.api.VideoSource
+import com.otakustream.core.torrent.TorrentUri
 import com.otakustream.core.sources.stremio.model.StremioCatalog
 import com.otakustream.core.sources.stremio.model.StremioStream
 import com.otakustream.core.sources.stremio.model.parseCatalogResponse
@@ -34,6 +35,10 @@ class StremioVideoSource(
     private val httpClient: OkHttpClient,
     private val stremioRepository: StremioRepository,
     private val streamProviderRegistry: StremioStreamProviderRegistry,
+    // A lambda, not a Boolean: reading it forces the native library probe, and doing that when a
+    // source is constructed would run it during add-on bootstrap for every installed add-on. This
+    // way it happens only when a torrent stream actually needs resolving.
+    private val onDeviceTorrentsAvailable: () -> Boolean,
     manifestUrl: String,
     private val catalog: StremioCatalog,
     private val resources: Set<String>,
@@ -195,6 +200,14 @@ class StremioVideoSource(
             emptyList()
         }
 
+    // Two ways to play a torrent-backed stream, in this order of preference:
+    //
+    // 1. A configured Stremio streaming server, if the user has one. It keeps working exactly as
+    //    before, and someone who went to the trouble of hosting one presumably wants it used.
+    // 2. The on-device engine (issue #8), which needs no server at all.
+    //
+    // Before either existed, a stream with only an infoHash was silently dropped — the list looked
+    // populated and played nothing.
     private fun StremioStream.toVideo(serverBaseUrl: String?, subtitleTracks: List<SubtitleTrack>): Video? = when {
         !url.isNullOrBlank() -> Video(
             url = url,
@@ -211,6 +224,18 @@ class StremioVideoSource(
             // the on-device path added later.
             trackers = trackers,
         )
+        // No server configured, so fall back to playing it on-device. torrent:// is resolved by
+        // :core:torrent via the player's data source; trackers ride alongside because the url has to
+        // stay a stable identity (resume position and history are keyed on it).
+        !infoHash.isNullOrBlank() && onDeviceTorrentsAvailable() -> TorrentUri.build(infoHash, fileIdx)
+            ?.let { torrentUrl ->
+                Video(
+                    url = torrentUrl,
+                    quality = name ?: "torrent",
+                    subtitleTracks = subtitleTracks,
+                    trackers = trackers,
+                )
+            }
         else -> null
     }
 
