@@ -26,8 +26,9 @@ android {
             // Sourced from Gradle properties or env vars so release signing keys never live in the
             // repo. When unset (local/CI without secrets), the release build falls back to the debug
             // key below so assembleRelease still produces an installable, signed APK.
-            val storeFilePath = providers.gradleProperty("RELEASE_STORE_FILE").orNull
-                ?: System.getenv("RELEASE_STORE_FILE")
+            val storeFilePath = (providers.gradleProperty("RELEASE_STORE_FILE").orNull
+                ?: System.getenv("RELEASE_STORE_FILE"))
+                ?.takeIf { it.isNotBlank() }
             if (storeFilePath != null) {
                 storeFile = file(storeFilePath)
                 storePassword = providers.gradleProperty("RELEASE_STORE_PASSWORD").orNull
