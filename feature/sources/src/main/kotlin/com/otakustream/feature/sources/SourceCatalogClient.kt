@@ -1,6 +1,7 @@
 package com.otakustream.feature.sources
 
 import android.content.Context
+import com.otakustream.core.sources.api.RemoteCodeUrl
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -51,6 +52,9 @@ class SourceCatalogClient @Inject constructor(
     suspend fun fetch(): List<SourceCatalogEntry> = withContext(Dispatchers.IO) {
         val repoUrl = prefs.repoUrl.trim()
         if (repoUrl.isEmpty()) return@withContext DEFAULT_ENTRIES
+        // This directory hands back the install URL for every source in it, so a cleartext response
+        // that can be rewritten in flight redirects every install made from the catalog screen.
+        RemoteCodeUrl.require(repoUrl, "A source directory")
         val request = Request.Builder().url(repoUrl).build()
         val call = httpClient.newCall(request)
         // Cancel the blocking OkHttp call if the coroutine is cancelled (navigate away / reload),

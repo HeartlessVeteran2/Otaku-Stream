@@ -25,7 +25,12 @@ sources are installed by the user at runtime. That shapes what counts as a vulne
 - A crafted add-on manifest, stream response, or extension payload causing memory corruption or
   arbitrary code execution.
 - A malicious deep link (`stremio://`, `otakustream://`, `magnet:`) doing something the user didn't
-  ask for.
+  ask for. None of the three acts on its own any more: a `stremio://` link fills the add-on field
+  and waits for a tap, a `magnet:` link is described and confirmed before anything joins a swarm,
+  and an `otakustream://anilist-auth` redirect is refused unless it carries the `state` nonce from a
+  sign-in this app started. Before that nonce existed, any app or web page could hand the app an
+  attacker's AniList token and silently redirect the user's watch history into the attacker's
+  account.
 - Anything that lets one installed source read or tamper with another's data.
 
 **Out of scope** — known and accepted, documented below: cleartext HTTP to source hosts, the fact
@@ -48,7 +53,10 @@ offers:
   in the Android Keystore and never leaves the device, so a restored copy elsewhere couldn't be
   decrypted anyway — the exclusion means no bearer credential leaves the device at all.
 - An earlier version stored it as plaintext in Room. On first read the app migrates any legacy token
-  into the encrypted store and **wipes the Room row**, so no plaintext copy is left behind.
+  into the encrypted store and **wipes the Room row**, then runs `VACUUM`. The delete alone was not
+  enough: SQLite marks the page free rather than erasing it, so the plaintext token could survive in
+  the database file until something happened to reuse that page. The database is also excluded from
+  backup now, which covers anyone whose backup ran before they updated.
 - The AniList **client id** is a public value by design, but it is still kept out of git: it is
   supplied via `local.properties`, `-PanilistClientId`, or the `ANILIST_CLIENT_ID` environment
   variable, and reaches the app through `BuildConfig`.
@@ -63,8 +71,19 @@ frequently plain HTTP. `targetSdk` 28+ blocks cleartext by default, which made t
 silently — the app looked broken rather than blocked. Permitting cleartext is what makes real sources
 work, and TLS is still used wherever a source offers it.
 
-The cost is honest: **traffic to those hosts can be observed and modified in transit.** What that
-does *not* include is credentials — AniList and Stremio account traffic goes to HTTPS endpoints.
+The cost is honest: **traffic to those hosts can be observed and modified in transit.**
+
+Two things are carved out of that allowance, because they are not content:
+
+- **Credential hosts.** `anilist.co` and `strem.io` carry the AniList bearer token and the Stremio
+  account password, and both now have `cleartextTrafficPermitted="false"` domain-configs. This used
+  to be true only because no code happened to build an `http://` URL for them — a code-review
+  guarantee. It is now enforced by the platform: such a request fails at the socket.
+- **Executable code.** Scripts, Mangayomi extensions and the repository indexes that list them must
+  be served over `https` (loopback excepted, so a source can still be developed locally). A script
+  fetched over cleartext can be replaced in flight by anyone on the path, and the app then runs it.
+  A *repo index* is worse, because it supplies the download URL for every extension in it — one
+  rewritten response redirects every later install.
 
 ### Installed extensions run arbitrary code — by design
 

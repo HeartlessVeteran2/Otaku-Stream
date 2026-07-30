@@ -7,4 +7,23 @@
 <full-backup-content>
     <exclude domain="sharedpref" path="otaku_secure_prefs.xml" />
     <exclude domain="sharedpref" path="stremio_account_prefs.xml" />
+    <!--
+      The database holds watch history and the scripted/Mangayomi source code the user installed —
+      a record of what they watch and from where. None of it is a credential, and none of it is
+      worth shipping to a cloud backup the user did not ask for; all of it is rebuildable.
+
+      It also matters for a reason specific to this app: the token used to live as plaintext in
+      Room, and the migration that moved it into the encrypted store deletes the row. SQLite marks
+      the deleted page free rather than erasing it, so the bytes can survive in the file until
+      something overwrites them. TrackingRepository now VACUUMs after that migration, which
+      rewrites the file without the free pages; excluding the database is the belt to that braces,
+      and it covers anyone whose backup ran before they updated.
+    -->
+    <exclude domain="database" path="otaku_stream.db" />
+    <exclude domain="database" path="otaku_stream.db-wal" />
+    <exclude domain="database" path="otaku_stream.db-shm" />
+    <!-- Cookies and local storage from the Cloudflare-challenge WebView, including cf_clearance. -->
+    <exclude domain="file" path="app_webview" />
+    <!-- Rebuildable: HTTP cache, image cache, torrent data. -->
+    <exclude domain="file" path="cache" />
 </full-backup-content>

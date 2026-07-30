@@ -9,9 +9,21 @@
     <cloud-backup>
         <exclude domain="sharedpref" path="otaku_secure_prefs.xml" />
         <exclude domain="sharedpref" path="stremio_account_prefs.xml" />
+        <!-- See backup_rules.xml for why the database is excluded as well as the prefs. -->
+        <exclude domain="database" path="otaku_stream.db" />
+        <exclude domain="database" path="otaku_stream.db-wal" />
+        <exclude domain="database" path="otaku_stream.db-shm" />
+        <exclude domain="file" path="app_webview" />
+        <exclude domain="file" path="cache" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="otaku_secure_prefs.xml" />
         <exclude domain="sharedpref" path="stremio_account_prefs.xml" />
+        <!-- See backup_rules.xml for why the database is excluded as well as the prefs. -->
+        <exclude domain="database" path="otaku_stream.db" />
+        <exclude domain="database" path="otaku_stream.db-wal" />
+        <exclude domain="database" path="otaku_stream.db-shm" />
+        <exclude domain="file" path="app_webview" />
+        <exclude domain="file" path="cache" />
     </device-transfer>
 </data-extraction-rules>

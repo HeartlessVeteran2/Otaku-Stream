@@ -48,6 +48,13 @@ android {
         compose = true
         buildConfig = true
     }
+
+    testOptions {
+        unitTests {
+            // Robolectric needs the merged manifest and resources to build its simulated app.
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 dependencies {
@@ -69,4 +76,9 @@ dependencies {
     testImplementation(libs.junit)
     // Real org.json for JVM unit tests (the android.jar stub throws "not mocked").
     testImplementation(libs.json)
+
+    // AniListAuthState persists its OAuth nonce in SharedPreferences, which the stub android.jar
+    // cannot provide.
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
 }

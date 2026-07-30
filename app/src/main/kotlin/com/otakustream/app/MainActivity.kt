@@ -33,6 +33,15 @@ private val MAX_PIP_ASPECT_RATIO = 2.39
 // Schemes an ACTION_VIEW intent can hand straight to the player. Compared lowercased.
 private val PLAYABLE_SCHEMES = setOf("http", "https", "content", "file")
 
+// A magnet link that arrived from outside the app and has not been agreed to yet. Holds the raw
+// link so nothing is re-derived after the user confirms, and the name only so the prompt can say
+// what it is about to fetch.
+private data class PendingMagnet(val magnet: String, val displayName: String)
+
+// The two halves of an AniList implicit-grant redirect. The state is nullable because a forged
+// redirect simply won't carry one — which is precisely the case the check exists to reject.
+private data class AniListRedirect(val token: String, val state: String?)
+
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
@@ -49,7 +58,14 @@ class MainActivity : ComponentActivity() {
 
     private var pendingStremioInstallUrl by mutableStateOf<String?>(null)
     private var pendingPlayUrl by mutableStateOf<String?>(null)
-    private var pendingAniListToken by mutableStateOf<String?>(null)
+    private var pendingAniListRedirect by mutableStateOf<AniListRedirect?>(null)
+
+    // A magnet link waits here for the user to confirm it, rather than going straight to the player.
+    // Unlike opening an http video, starting a torrent joins a swarm: it announces the user's IP
+    // address to every peer on it and begins uploading. Any web page can hand this app a magnet:
+    // link, so doing that on a single tap — with no statement of what is about to be fetched — is
+    // the app making a network-visible decision on the user's behalf.
+    private var pendingMagnet by mutableStateOf<PendingMagnet?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Must run before super.onCreate: swaps the Splash theme for the app theme and keeps the
@@ -63,7 +79,8 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) {
             pendingStremioInstallUrl = intent.stremioInstallUrl()
             pendingPlayUrl = intent.playableVideoUri()
-            pendingAniListToken = intent.aniListToken()
+            pendingAniListRedirect = intent.aniListRedirect()
+            pendingMagnet = intent.pendingMagnet()
         }
         setContent {
             OtakuStreamTheme {
@@ -73,8 +90,17 @@ class MainActivity : ComponentActivity() {
                         onPendingStremioInstallUrlConsumed = { pendingStremioInstallUrl = null },
                         pendingPlayUrl = pendingPlayUrl,
                         onPendingPlayUrlConsumed = { pendingPlayUrl = null },
-                        pendingAniListToken = pendingAniListToken,
-                        onPendingAniListTokenConsumed = { pendingAniListToken = null },
+                        pendingAniListToken = pendingAniListRedirect?.token,
+                        pendingAniListState = pendingAniListRedirect?.state,
+                        onPendingAniListTokenConsumed = { pendingAniListRedirect = null },
+                        pendingMagnetName = pendingMagnet?.displayName,
+                        onMagnetConfirmed = {
+                            // The stash happens here, on confirm, not at parse time — so declining
+                            // leaves nothing behind for a later playback to pick up.
+                            pendingMagnet?.let { pendingPlayUrl = startMagnetPlayback(it.magnet) }
+                            pendingMagnet = null
+                        },
+                        onMagnetDismissed = { pendingMagnet = null },
                     )
                 }
             }
@@ -86,7 +112,8 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         pendingStremioInstallUrl = intent.stremioInstallUrl()
         pendingPlayUrl = intent.playableVideoUri()
-        pendingAniListToken = intent.aniListToken()
+        pendingAniListRedirect = intent.aniListRedirect()
+        pendingMagnet = intent.pendingMagnet()
     }
 
     private fun Intent.stremioInstallUrl(): String? = data?.takeIf { it.scheme == "stremio" }?.toString()
@@ -99,8 +126,20 @@ class MainActivity : ComponentActivity() {
         // Schemes are case-insensitive per RFC 3986 and Uri doesn't normalise them, so a sender that
         // writes "HTTP://" or "MAGNET:?" hands us a scheme that wouldn't match a lowercase literal.
         val scheme = uri.scheme?.lowercase() ?: return null
-        if (scheme == "magnet") return magnetPlaybackUrl(uri.toString())
+        // Magnets deliberately do not resolve here — they go through pendingMagnet and a confirmation.
         return uri.takeIf { scheme in PLAYABLE_SCHEMES }?.toString()
+    }
+
+    // Parsed early only so the prompt can name what it is about to download; nothing is started and
+    // nothing is stashed until the user confirms.
+    private fun Intent.pendingMagnet(): PendingMagnet? {
+        val uri = takeIf { it.action == Intent.ACTION_VIEW }?.data ?: return null
+        if (uri.scheme?.lowercase() != "magnet") return null
+        val raw = uri.toString()
+        val link = MagnetLinks.parse(raw) ?: return null
+        // An unnamed magnet is legitimate — dn is optional — and the prompt still has to say
+        // something honest rather than an empty string.
+        return PendingMagnet(magnet = raw, displayName = link.displayName ?: "this torrent")
     }
 
     // Magnet → torrent:// plus a tracker stash.
@@ -111,7 +150,7 @@ class MainActivity : ComponentActivity() {
     //
     // historyHandled = false because nothing upstream recorded this play — unlike the catalog flow,
     // there is no view model behind an "Open with"; the player records it itself.
-    private fun magnetPlaybackUrl(magnet: String): String? {
+    private fun startMagnetPlayback(magnet: String): String? {
         val link = MagnetLinks.parse(magnet) ?: return null
         val url = MagnetLinks.toTorrentUrl(link) ?: return null
         PendingPlayback.stash(
@@ -129,14 +168,20 @@ class MainActivity : ComponentActivity() {
     // otakustream://anilist-auth#access_token=...&token_type=Bearer&expires_in=...
     // encodedFragment, not fragment: getFragment() pre-decodes, so a token containing %26/%3D
     // would be corrupted before the split — split the raw fragment, then decode the value once.
-    private fun Intent.aniListToken(): String? =
-        data?.takeIf { it.scheme == "otakustream" && it.host == "anilist-auth" }
-            ?.encodedFragment
-            ?.split("&")
-            ?.firstOrNull { it.startsWith("access_token=") }
-            ?.removePrefix("access_token=")
-            ?.ifEmpty { null }
-            ?.let { Uri.decode(it) }
+    //
+    // The `state` travels with it and is checked before the token is stored — see AniListAuthState.
+    // Both are pulled from the same fragment here so a redirect can never arrive half-parsed, with
+    // a token and no state to judge it by.
+    private fun Intent.aniListRedirect(): AniListRedirect? {
+        val fragment = data?.takeIf { it.scheme == "otakustream" && it.host == "anilist-auth" }
+            ?.encodedFragment ?: return null
+        val fields = fragment.split("&").mapNotNull { field ->
+            val name = field.substringBefore('=', missingDelimiterValue = "")
+            if (name.isEmpty() || '=' !in field) null else name to Uri.decode(field.substringAfter('='))
+        }.toMap()
+        val token = fields["access_token"]?.ifEmpty { null } ?: return null
+        return AniListRedirect(token = token, state = fields["state"])
+    }
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()

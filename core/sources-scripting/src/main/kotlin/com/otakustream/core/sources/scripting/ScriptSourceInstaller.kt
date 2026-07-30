@@ -2,6 +2,7 @@ package com.otakustream.core.sources.scripting
 
 import com.otakustream.core.database.scripted.ScriptedSourceRecord
 import com.otakustream.core.database.scripted.ScriptedSourceRepository
+import com.otakustream.core.sources.api.RemoteCodeUrl
 import com.otakustream.core.sources.api.stableSourceId as sharedStableSourceId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,6 +18,10 @@ class ScriptSourceInstaller @Inject constructor(
     private val repository: ScriptedSourceRepository,
 ) {
     suspend fun installFromUrl(scriptUrl: String): ScriptedVideoSource = withContext(Dispatchers.IO) {
+        // Checked before the request, not after: the point is to never fetch this body at all over a
+        // channel someone can rewrite. See RemoteCodeUrl for why content may be cleartext and code
+        // may not.
+        RemoteCodeUrl.require(scriptUrl, "A source script")
         val request = Request.Builder().url(scriptUrl).build()
         val content = httpClient.newCall(request).execute().use { response ->
             require(response.isSuccessful) { "Failed to download script: HTTP ${response.code}" }
