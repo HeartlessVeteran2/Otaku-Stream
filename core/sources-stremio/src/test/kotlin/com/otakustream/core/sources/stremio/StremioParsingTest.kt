@@ -2,12 +2,73 @@ package com.otakustream.core.sources.stremio
 
 import com.otakustream.core.sources.stremio.model.AddonListOrigin
 import com.otakustream.core.sources.stremio.model.parseAddonCollection
+import com.otakustream.core.sources.stremio.model.parseStreamResponse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class StremioParsingTest {
+
+    @Test
+    fun `parses tracker announce urls from a torrent stream`() {
+        val json = """
+            {"streams":[{
+              "name":"Torrentio 1080p",
+              "infoHash":"8c9c2f1e4a5b6d7e8f9a0b1c2d3e4f5a6b7c8d9e",
+              "fileIdx":2,
+              "sources":[
+                "tracker:udp://tracker.opentrackr.org:1337/announce",
+                "tracker:http://tracker.example.com/announce",
+                "dht:8c9c2f1e4a5b6d7e8f9a0b1c2d3e4f5a6b7c8d9e"
+              ]
+            }]}
+        """.trimIndent()
+        val stream = parseStreamResponse(json).streams.single()
+        assertEquals("8c9c2f1e4a5b6d7e8f9a0b1c2d3e4f5a6b7c8d9e", stream.infoHash)
+        assertEquals(2, stream.fileIdx)
+        // dht: entries are dropped — only announce URLs are usable as trackers.
+        assertEquals(
+            listOf("udp://tracker.opentrackr.org:1337/announce", "http://tracker.example.com/announce"),
+            stream.trackers,
+        )
+    }
+
+    @Test
+    fun `a stream without sources has no trackers`() {
+        val json = """{"streams":[{"infoHash":"8c9c2f1e4a5b6d7e8f9a0b1c2d3e4f5a6b7c8d9e"}]}"""
+        assertTrue(parseStreamResponse(json).streams.single().trackers.isEmpty())
+    }
+
+    @Test
+    fun `drops malformed and duplicate source entries`() {
+        // A bare "tracker:" contributes a blank announce URL, which only produces a failing tracker;
+        // an unprefixed entry is something we don't understand and must not guess at.
+        val json = """
+            {"streams":[{
+              "infoHash":"8c9c2f1e4a5b6d7e8f9a0b1c2d3e4f5a6b7c8d9e",
+              "sources":[
+                "tracker:",
+                "tracker:   ",
+                "udp://unprefixed.example.com/announce",
+                "tracker:udp://dupe.example.com/announce",
+                "tracker:udp://dupe.example.com/announce"
+              ]
+            }]}
+        """.trimIndent()
+        assertEquals(
+            listOf("udp://dupe.example.com/announce"),
+            parseStreamResponse(json).streams.single().trackers,
+        )
+    }
+
+    @Test
+    fun `a sources value of the wrong shape is ignored rather than throwing`() {
+        // Add-on responses are third-party input; a non-array "sources" must not sink the stream list.
+        val json = """{"streams":[{"infoHash":"8c9c2f1e4a5b6d7e8f9a0b1c2d3e4f5a6b7c8d9e","sources":"nope"}]}"""
+        val stream = parseStreamResponse(json).streams.single()
+        assertTrue(stream.trackers.isEmpty())
+    }
 
     @Test
     fun `parses an addon collection entry`() {

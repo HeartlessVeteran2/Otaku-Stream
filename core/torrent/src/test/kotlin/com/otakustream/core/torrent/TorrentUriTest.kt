@@ -1,0 +1,97 @@
+package com.otakustream.core.torrent
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+// The url built here is the identity the whole playback stack keys on — resume position, skip
+// markers, watch history, AniList completion. A change in how it is built or normalized silently
+// orphans every one of those for existing torrents, so the round-trip and the normalization rules
+// are pinned here deliberately.
+class TorrentUriTest {
+
+    private val hash = "8c9c2f1e4a5b6d7e8f9a0b1c2d3e4f5a6b7c8d9e"
+
+    @Test
+    fun `builds canonical url`() {
+        assertEquals("torrent://$hash/0", TorrentUri.build(hash, 0))
+        assertEquals("torrent://$hash/3", TorrentUri.build(hash, 3))
+    }
+
+    @Test
+    fun `null file index means the first file`() {
+        // Stremio add-ons omit fileIdx for single-file torrents; 0 is the protocol's own fallback.
+        assertEquals("torrent://$hash/0", TorrentUri.build(hash, null))
+    }
+
+    @Test
+    fun `round trips`() {
+        val url = TorrentUri.build(hash, 7)!!
+        assertEquals(TorrentRef(hash, 7), TorrentUri.parse(url))
+    }
+
+    @Test
+    fun `normalizes hash case on both build and parse`() {
+        // Two spellings of one torrent must not become two history keys.
+        val upper = hash.uppercase()
+        assertEquals("torrent://$hash/1", TorrentUri.build(upper, 1))
+        assertEquals(TorrentRef(hash, 1), TorrentUri.parse("torrent://$upper/1"))
+        assertEquals(TorrentUri.build(upper, 1), TorrentUri.build(hash, 1))
+    }
+
+    @Test
+    fun `trims surrounding whitespace in the hash`() {
+        assertEquals("torrent://$hash/0", TorrentUri.build("  $hash  ", 0))
+    }
+
+    @Test
+    fun `rejects a hash of the wrong length`() {
+        assertNull(TorrentUri.build(hash.dropLast(1), 0))
+        assertNull(TorrentUri.build(hash + "a", 0))
+        assertNull(TorrentUri.build("", 0))
+    }
+
+    @Test
+    fun `rejects a v2 sha256 info hash`() {
+        // 64 hex chars is a valid BitTorrent v2 hash, but Stremio's protocol is v1 and the engine
+        // resolves v1 — accepting it would produce a url that parses and can never play.
+        assertNull(TorrentUri.build("a".repeat(64), 0))
+    }
+
+    @Test
+    fun `rejects a non-hex hash`() {
+        assertNull(TorrentUri.build("z".repeat(40), 0))
+        assertNull(TorrentUri.build("8c9c2f1e4a5b6d7e8f9a0b1c2d3e4f5a6b7c8d9-", 0))
+    }
+
+    @Test
+    fun `rejects a negative file index`() {
+        assertNull(TorrentUri.build(hash, -1))
+        assertNull(TorrentUri.parse("torrent://$hash/-1"))
+    }
+
+    @Test
+    fun `rejects urls that are not ours`() {
+        assertNull(TorrentUri.parse("https://example.com/video.mkv"))
+        assertNull(TorrentUri.parse("magnet:?xt=urn:btih:$hash"))
+        assertNull(TorrentUri.parse(""))
+    }
+
+    @Test
+    fun `rejects a malformed path`() {
+        assertNull(TorrentUri.parse("torrent://$hash"))
+        assertNull(TorrentUri.parse("torrent://$hash/0/extra"))
+        assertNull(TorrentUri.parse("torrent://$hash/notanumber"))
+        assertNull(TorrentUri.parse("torrent://$hash/"))
+    }
+
+    @Test
+    fun `recognizes its own scheme case-insensitively`() {
+        assertTrue(TorrentUri.isTorrentUrl("torrent://$hash/0"))
+        assertTrue(TorrentUri.isTorrentUrl("TORRENT://$hash/0"))
+        assertFalse(TorrentUri.isTorrentUrl("https://example.com/a.mkv"))
+        assertFalse(TorrentUri.isTorrentUrl("content://media/external/video/1"))
+    }
+}

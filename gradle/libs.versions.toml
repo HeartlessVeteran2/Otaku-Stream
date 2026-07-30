@@ -13,6 +13,7 @@ media3 = "1.5.0"
 room = "2.8.4"
 rhino = "1.7.15"
 quickjs = "3.2.3"
+libtorrent4j = "2.1.0-39"
 jsoup = "1.18.1"
 coroutines = "1.8.1"
 okhttp = "4.12.0"
@@ -57,6 +58,12 @@ room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
 rhino = { group = "org.mozilla", name = "rhino", version.ref = "rhino" }
 quickjs-android = { group = "wang.harlon.quickjs", name = "wrapper-android", version.ref = "quickjs" }
+# BitTorrent engine (MIT; wraps BSD-3 libtorrent-rasterbar). The Java API and the native binary ship
+# as separate artifacts — only arm64 is bundled, because each ABI's .so is ~16 MB uncompressed and
+# AGP stores native libraries uncompressed. See :core:torrent for the availability guard that keeps
+# a 32-bit device from crashing on the missing library.
+libtorrent4j = { group = "org.libtorrent4j", name = "libtorrent4j", version.ref = "libtorrent4j" }
+libtorrent4j-android-arm64 = { group = "org.libtorrent4j", name = "libtorrent4j-android-arm64", version.ref = "libtorrent4j" }
 jsoup = { group = "org.jsoup", name = "jsoup", version.ref = "jsoup" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }

@@ -74,6 +74,7 @@ dependencies {
     implementation(project(":core:network"))
     implementation(project(":core:sources-api"))
     implementation(project(":core:sources-mangayomi"))
+    implementation(project(":core:torrent"))
     implementation(project(":feature:sources"))
     implementation(project(":feature:library"))
     implementation(project(":feature:tracking"))

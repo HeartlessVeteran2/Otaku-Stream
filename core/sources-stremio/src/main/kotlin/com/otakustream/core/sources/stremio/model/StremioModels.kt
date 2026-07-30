@@ -55,7 +55,18 @@ data class StremioMeta(
     val trailerYoutubeId: String?,
 )
 
-data class StremioStream(val url: String?, val infoHash: String?, val fileIdx: Int?, val name: String?, val description: String?)
+// `trackers` comes from the protocol's `sources` array, which mixes tracker announce URLs
+// ("tracker:udp://…") with DHT hints ("dht:<hash>"); only the tracker entries are useful to us. They
+// matter more than they look: an infoHash with no trackers has nothing but DHT to find peers with,
+// which is slow to bootstrap and often finds none at all, so a stream that should work appears dead.
+data class StremioStream(
+    val url: String?,
+    val infoHash: String?,
+    val fileIdx: Int?,
+    val name: String?,
+    val description: String?,
+    val trackers: List<String> = emptyList(),
+)
 
 data class StremioStreamResponse(val streams: List<StremioStream>)
 
@@ -161,6 +172,21 @@ fun parseMetaResponse(json: String): StremioMeta {
     )
 }
 
+// Pulls tracker announce URLs out of a stream's `sources` array. Entries are prefixed strings, e.g.
+// "tracker:udp://tracker.opentrackr.org:1337/announce" or "dht:8c9c…". Anything that isn't a
+// tracker is dropped rather than guessed at, and an entry with an empty URL after the prefix is
+// dropped too — handing libtorrent a blank announce URL just produces a failing tracker.
+private fun JSONObject.parseTrackerSources(): List<String> {
+    val sources = optJSONArray("sources") ?: return emptyList()
+    return (0 until sources.length()).mapNotNull { index ->
+        val entry = sources.stringOrNull(index) ?: return@mapNotNull null
+        if (!entry.startsWith(TRACKER_SOURCE_PREFIX, ignoreCase = true)) return@mapNotNull null
+        entry.substring(TRACKER_SOURCE_PREFIX.length).trim().ifEmpty { null }
+    }.distinct()
+}
+
+private const val TRACKER_SOURCE_PREFIX = "tracker:"
+
 fun parseStreamResponse(json: String): StremioStreamResponse {
     val root = JSONObject(json)
     val streamsArray = root.optJSONArray("streams") ?: JSONArray()
@@ -172,6 +198,7 @@ fun parseStreamResponse(json: String): StremioStreamResponse {
             fileIdx = entry.intOrNull("fileIdx"),
             name = entry.stringOrNull("name"),
             description = entry.stringOrNull("description"),
+            trackers = entry.parseTrackerSources(),
         )
     }
     return StremioStreamResponse(streams = streams)
