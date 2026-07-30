@@ -31,6 +31,10 @@ class TorrentFileReader private constructor(
     private val handle: TorrentHandle,
     private val file: File,
     private val layout: TorrentFileLayout,
+    // Invoked exactly once when this reader closes, so whoever owns the session can decide whether
+    // anything still needs the torrent. The reader itself must not stop the session: several readers
+    // can share one, and it has no way to know about the others.
+    private val onClosed: (TorrentHandle) -> Unit,
 ) : Closeable {
 
     private val raf: RandomAccessFile = RandomAccessFile(file, "r")
@@ -101,11 +105,15 @@ class TorrentFileReader private constructor(
     }
 
     override fun close() {
+        // Guarded so a double close() can't decrement the owner's reader count twice and tear down a
+        // session another reader is still using.
+        if (closed) return
         closed = true
         synchronized(raf) { runCatching { raf.close() } }
         // Deadlines are per-torrent state; leaving them set would keep skewing the scheduler after
         // this reader is gone.
         runCatching { handle.clearPieceDeadlines() }
+        runCatching { onClosed(handle) }
     }
 
     companion object {
@@ -130,6 +138,7 @@ class TorrentFileReader private constructor(
             ref: TorrentRef,
             trackers: List<String>,
             saveDir: File,
+            onClosed: (TorrentHandle) -> Unit,
         ): TorrentFileReader {
             if (!saveDir.exists() && !saveDir.mkdirs()) {
                 throw IOException("Could not create torrent save directory: $saveDir")
@@ -171,7 +180,7 @@ class TorrentFileReader private constructor(
             // libtorrent creates the file when it allocates storage; give it a moment rather than
             // failing the open on a race with the first write.
             awaitFile(file)
-            return TorrentFileReader(handle, file, layout)
+            return TorrentFileReader(handle, file, layout, onClosed)
         }
 
         private fun addAndAwaitHandle(
