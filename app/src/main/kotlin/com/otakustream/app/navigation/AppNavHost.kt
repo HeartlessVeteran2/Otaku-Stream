@@ -47,7 +47,9 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.otakustream.core.player.ui.PlayerScreen
+import com.otakustream.core.sources.api.PendingPlayback
 import com.otakustream.core.sources.api.UiMessages
+import com.otakustream.core.sources.api.Video
 import com.otakustream.feature.library.LibraryScreen
 import com.otakustream.feature.sources.ui.AniListDetailScreen
 import com.otakustream.feature.sources.ui.AniListSearchScreen
@@ -126,6 +128,11 @@ fun AppNavHost(
     // tab — same as how the stremio:// deep link above skips Settings and goes to manage-stremio.
     LaunchedEffect(pendingPlayUrl) {
         pendingPlayUrl?.let { url ->
+            PendingPlayback.stash(
+                Video(url = url, quality = ""),
+                historyHandled = false,
+                provenance = PendingPlayback.Provenance.USER,
+            )
             navController.navigate("player?videoUrl=${Uri.encode(url)}")
             onPendingPlayUrlConsumed()
         }
@@ -216,7 +223,14 @@ fun AppNavHost(
         ) {
             composable(ROUTE_PLAY) {
                 PlayScreen(
-                    onPlayVideo = { url -> navController.navigate("player?videoUrl=${Uri.encode(url)}") },
+                    onPlayVideo = { url ->
+                        PendingPlayback.stash(
+                            Video(url = url, quality = ""),
+                            historyHandled = false,
+                            provenance = PendingPlayback.Provenance.USER,
+                        )
+                        navController.navigate("player?videoUrl=${Uri.encode(url)}")
+                    },
                     onBrowseAddons = { navController.navigate(ROUTE_BROWSE_STREMIO) },
                     onMediaClick = { sourceId, mediaUrl, title -> navController.navigateToDetails(sourceId, mediaUrl, title) },
                     onAniListClick = { mediaId, _ -> navController.navigate("anilist/$mediaId") },

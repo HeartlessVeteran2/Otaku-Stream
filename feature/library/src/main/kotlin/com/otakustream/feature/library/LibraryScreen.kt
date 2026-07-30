@@ -320,16 +320,14 @@ private fun OnDeviceTab(
                             // next to the file to the player. historyHandled = false keeps the
                             // player recording this as a direct play as usual.
                             val sidecars = findSidecarSubtitles(video.dataPath)
-                            if (sidecars.isNotEmpty()) {
-                                PendingPlayback.stash(
-                                    Video(url = url, quality = "", subtitleTracks = sidecars),
-                                    historyHandled = false,
-                                    // The user picked this file from their own device, and the
-                                    // sidecar subtitles were found next to it by the app — so the
-                                    // local schemes on-device playback needs are legitimate here.
-                                    provenance = PendingPlayback.Provenance.USER,
-                                )
-                            }
+                            PendingPlayback.stash(
+                                Video(url = url, quality = "", subtitleTracks = sidecars),
+                                historyHandled = false,
+                                // The user picked this file from their own device, and the
+                                // sidecar subtitles were found next to it by the app — so the
+                                // local schemes on-device playback needs are legitimate here.
+                                provenance = PendingPlayback.Provenance.USER,
+                            )
                             onPlayDirect(url)
                         },
                     )

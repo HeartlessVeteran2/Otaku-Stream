@@ -407,11 +407,9 @@ class PlayerController @Inject constructor(
         // https or the app's own torrent:// identity; file:// and content:// are for URLs the user
         // picked themselves, and refusing those would break on-device playback.
         //
-        // No stash means nothing source-originated got here: sources reach the player only through
-        // PendingPlayback, because that is the only channel headers and subtitle tracks travel on.
-        // A file picked from the picker, an "Open with", or a replay from history all arrive with
-        // no stash and are the user's own choice.
-        val provenance = stashed?.provenance ?: PendingPlayback.Provenance.USER
+        // Missing provenance is restrictive: the in-memory hand-off may have been lost after
+        // process death or may not match the route URL, and it cannot be reconstructed safely.
+        val provenance = stashed?.provenance ?: PendingPlayback.Provenance.SOURCE
         if (!PlayableUrl.isAllowed(url, provenance)) {
             _uiState.value = _uiState.value.copy(error = PlayableUrl.rejectionMessage())
             return
