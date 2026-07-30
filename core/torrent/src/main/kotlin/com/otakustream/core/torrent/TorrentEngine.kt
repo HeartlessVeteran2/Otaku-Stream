@@ -152,6 +152,10 @@ class TorrentEngine @Inject constructor(
                 runCatching { existing.stop() }
                     .onFailure { Log.w(TAG, "Discarding a session that would not stop", it) }
                 session = null
+                // A handle only means anything inside the session that produced it, so one held for
+                // deferred removal dies with that session. Left set, it would be handed to the *new*
+                // session below, where calling into it is undefined at the native layer.
+                handleAwaitingRemoval = null
             }
             var starting: SessionManager? = null
             return try {
@@ -179,22 +183,33 @@ class TorrentEngine @Inject constructor(
     // without libtorrent on its compile classpath.
     @Throws(java.io.IOException::class)
     fun openFile(ref: TorrentRef, trackers: List<String>, saveDir: java.io.File): TorrentFileReader {
-        val session = ensureStarted()
-            ?: throw java.io.IOException("The torrent engine is unavailable on this device")
-        // Reading the generation and taking the count must be one step. Split apart, stopAll() landing
-        // between them tags this reader with a generation that is already retired while its increment
-        // counts against the new one — so its close is later dismissed as stale and the count stays one
-        // too high forever, and the session never tears down at the end of playback.
+        // Acquiring the session and registering the reader are one critical section, because the
+        // deferred teardown runs on its own thread and takes this same lock. Split apart — the shape
+        // this had when teardown was inline — the teardown fires between the two, sees a count of zero
+        // and an unchanged generation, and stops the very session this call is about to read from. The
+        // auto-play case walks straight into it: the previous episode's close schedules a teardown, and
+        // resolving the next episode's stream can easily take the whole grace period. synchronized is
+        // reentrant, so ensureStarted() nesting here costs nothing — it already took this lock for the
+        // whole of its body.
+        val session: SessionManager
         val openedAt: Long
         val isFirstReader: Boolean
         synchronized(lock) {
-            openedAt = generation.get()
-            isFirstReader = openReaders.getAndIncrement() == 0
             // A reader arriving inside the grace window means the previous close was a seek or a
             // retry, not the end of playback — cancel the teardown so the session and the torrent
-            // survive it.
+            // survive it. First, so that a teardown already blocked on this lock finds a non-zero
+            // count when it finally runs and declines to proceed.
             pendingTeardown?.cancel(false)
             pendingTeardown = null
+            // Before the count is taken, so there is nothing to give back on the failure path.
+            session = ensureStarted()
+                ?: throw java.io.IOException("The torrent engine is unavailable on this device")
+            // Reading the generation and taking the count must be one step. Split apart, stopAll()
+            // landing between them tags this reader with a generation that is already retired while its
+            // increment counts against the new one — so its close is later dismissed as stale and the
+            // count stays one too high forever, and the session never tears down at the end of playback.
+            openedAt = generation.get()
+            isFirstReader = openReaders.getAndIncrement() == 0
             // Unless this is a *different* torrent, in which case the held handle belongs to
             // something nobody is watching any more and has to go now. Auto-play reaches here about a
             // second after the previous episode's reader closed, so without this the finished
@@ -416,6 +431,10 @@ class TorrentEngine @Inject constructor(
                 // the native session keeps running. Held onto here instead, and ensureStarted()
                 // discards it if it is still around next time.
                 session = null
+                // The torrent went with the session, so a handle held for deferred removal is now a
+                // pointer into freed native state. Cleared here rather than only at the call sites so
+                // it holds for every path into stop(), not just teardown's.
+                handleAwaitingRemoval = null
                 Log.i(TAG, "Torrent session stopped")
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to stop torrent session cleanly; keeping the handle to retry", e)
