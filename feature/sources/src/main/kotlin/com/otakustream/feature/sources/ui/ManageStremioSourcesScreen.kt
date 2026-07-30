@@ -123,6 +123,8 @@ fun ManageStremioSourcesScreen(
                 }
             }
 
+            TorrentSettingsSection()
+
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
             // Streaming server is a power-user setting most people never touch — tuck it behind an

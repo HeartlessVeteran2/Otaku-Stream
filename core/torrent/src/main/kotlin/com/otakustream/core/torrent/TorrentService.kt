@@ -1,0 +1,151 @@
+package com.otakustream.core.torrent
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
+import android.os.IBinder
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+
+// Keeps an active torrent download alive while the app is backgrounded, and gives the user something
+// to look at and a way out.
+//
+// Without this, Android is free to stop the work behind a backgrounded process, so a download would
+// stall the moment the user switched away and playback would fail for no visible reason. It is also
+// the honest thing to do: a foreground notification is how the platform expects an app to disclose
+// that it is using the network on the user's behalf.
+//
+// dataSync rather than mediaPlayback: the player already runs its own mediaPlayback service, and this
+// one is about moving bytes, which continues even when playback is paused.
+@AndroidEntryPoint
+class TorrentService : Service() {
+
+    @Inject
+    lateinit var engine: TorrentEngine
+
+    private var scope: CoroutineScope? = null
+    private var pollJob: Job? = null
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            // The Stop action is a real stop, not a hide: it tears the session down so the user isn't
+            // left with a dismissed notification and a torrent still running.
+            engine.stopAll()
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        createChannel()
+        startForegroundCompat(buildNotification(stats = null))
+        startPolling()
+        // Not sticky: if the process dies there is no playback left to feed, so a restarted service
+        // would hold a notification over nothing.
+        return START_NOT_STICKY
+    }
+
+    private fun startPolling() {
+        if (pollJob?.isActive == true) return
+        val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default).also { scope = it }
+        pollJob = serviceScope.launch {
+            while (isActive) {
+                val stats = engine.stats()
+                notificationManager()?.notify(NOTIFICATION_ID, buildNotification(stats))
+                delay(POLL_INTERVAL_MS)
+            }
+        }
+    }
+
+    private fun buildNotification(stats: TorrentStats?) =
+        NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(stats?.name?.takeIf { it.isNotBlank() } ?: "Streaming a torrent")
+            .setContentText(
+                stats?.let { "${it.formattedRate()} · ${it.formattedPeers()}" } ?: "Starting…",
+            )
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setOngoing(true)
+            // Low priority and silent: this is status, not news. It must not buzz mid-episode.
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setSilent(true)
+            .addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                "Stop",
+                PendingIntent.getService(
+                    this,
+                    /* requestCode = */ 0,
+                    Intent(this, TorrentService::class.java).setAction(ACTION_STOP),
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                ),
+            )
+            .build()
+
+    private fun startForegroundCompat(notification: android.app.Notification) {
+        ServiceCompat.startForeground(
+            this,
+            NOTIFICATION_ID,
+            notification,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            } else {
+                0
+            },
+        )
+    }
+
+    private fun createChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "Torrent streaming",
+            NotificationManager.IMPORTANCE_LOW,
+        ).apply {
+            description = "Shown while a torrent is being streamed, so it can be stopped at any time."
+            setShowBadge(false)
+        }
+        notificationManager()?.createNotificationChannel(channel)
+    }
+
+    private fun notificationManager(): NotificationManager? =
+        getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+
+    override fun onDestroy() {
+        pollJob?.cancel()
+        scope?.cancel()
+        scope = null
+        super.onDestroy()
+    }
+
+    companion object {
+        private const val CHANNEL_ID = "torrent_streaming"
+        private const val NOTIFICATION_ID = 4201
+        private const val ACTION_STOP = "com.otakustream.core.torrent.action.STOP"
+
+        // Once a second. Fast enough that the rate looks live, slow enough to be irrelevant to battery.
+        private const val POLL_INTERVAL_MS = 1_000L
+
+        fun start(context: Context) {
+            val intent = Intent(context, TorrentService::class.java)
+            runCatching { androidx.core.content.ContextCompat.startForegroundService(context, intent) }
+        }
+
+        fun stop(context: Context) {
+            runCatching { context.stopService(Intent(context, TorrentService::class.java)) }
+        }
+    }
+}

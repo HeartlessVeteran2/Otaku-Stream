@@ -16,7 +16,10 @@ private const val TAG = "TorrentEngine"
 // session at app startup would undo the cold-start work, and most sessions never play a torrent at
 // all.
 @Singleton
-class TorrentEngine @Inject constructor() {
+class TorrentEngine @Inject constructor(
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
+    private val settings: TorrentSettings,
+) {
 
     private val lock = Any()
 
@@ -31,6 +34,21 @@ class TorrentEngine @Inject constructor() {
     // Media3 may open more than one DataSource for a single item. Counting readers is the only signal
     // that is actually true.
     private val openReaders = java.util.concurrent.atomic.AtomicInteger(0)
+
+    // The torrent currently being read, kept only so the notification can report its rate and peer
+    // count. Cleared on release so a stale handle is never queried after removal — calling into a
+    // removed handle is undefined at the native layer.
+    private val activeHandle =
+        java.util.concurrent.atomic.AtomicReference<org.libtorrent4j.TorrentHandle?>(null)
+
+    // Absolute paths of files currently open for reading. The cache sweep is handed these as
+    // protected paths: a sweep triggered from the settings screen can fire while a playback is in
+    // progress, and deleting the file being streamed would kill it.
+    private val openPaths: MutableSet<String> =
+        java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
+
+    // Snapshot for callers that sweep the cache while playback may be running.
+    fun protectedCachePaths(): Set<String> = openPaths.toSet()
 
     // Whether the native library is usable on this device at all.
     //
@@ -66,6 +84,22 @@ class TorrentEngine @Inject constructor() {
 
     val isRunning: Boolean
         get() = session?.isRunning == true
+
+    // Whether a torrent should be offered right now — the check callers actually want.
+    //
+    // isAvailable answers "can this device run it at all"; this folds in the two things the user
+    // controls. Wi-Fi-only is checked here rather than at the settings screen because connectivity
+    // changes between choosing a stream and playing it, and a metered connection at play time is the
+    // moment that matters.
+    val isUsable: Boolean
+        get() = isAvailable && settings.enabled && (!settings.wifiOnly || isUnmetered())
+
+    private fun isUnmetered(): Boolean {
+        val manager = appContext.getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+            as? android.net.ConnectivityManager ?: return false
+        val capabilities = manager.getNetworkCapabilities(manager.activeNetwork) ?: return false
+        return capabilities.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+    }
 
     // Idempotent: returns the running session, starting one if needed, or null when the engine
     // isn't available on this device. Synchronized because playback resolution and the (later)
@@ -115,9 +149,17 @@ class TorrentEngine @Inject constructor() {
     fun openFile(ref: TorrentRef, trackers: List<String>, saveDir: java.io.File): TorrentFileReader {
         val session = ensureStarted()
             ?: throw java.io.IOException("The torrent engine is unavailable on this device")
-        openReaders.incrementAndGet()
+        if (openReaders.getAndIncrement() == 0) {
+            // First reader: bring up the foreground service so the download isn't stopped the moment
+            // the app is backgrounded.
+            TorrentService.start(appContext)
+        }
         return try {
             TorrentFileReader.open(session, ref, trackers, saveDir, onClosed = ::releaseReader)
+                .also {
+                    activeHandle.set(it.torrentHandle)
+                    openPaths.add(it.filePath)
+                }
         } catch (e: Throwable) {
             // The count was taken before open() could fail; give it back, or a failed open would
             // pin the session open for the rest of the process.
@@ -126,12 +168,42 @@ class TorrentEngine @Inject constructor() {
         }
     }
 
+    // A snapshot for the notification, or null when nothing is being read. Returns a plain data
+    // class rather than the handle so no libtorrent type escapes this module.
+    fun stats(): TorrentStats? {
+        val handle = activeHandle.get() ?: return null
+        return runCatching {
+            if (!handle.isValid) return null
+            val status = handle.status()
+            TorrentStats(
+                name = status.name().orEmpty(),
+                downloadRateBytesPerSec = status.downloadRate(),
+                peers = status.numPeers(),
+                seeds = status.numSeeds(),
+                progress = status.progress(),
+            )
+        }.getOrNull()
+    }
+
+    // Tears everything down regardless of reader count — the notification's Stop action. Readers still
+    // holding the torrent will fail their next read with an IOException, which surfaces as a player
+    // error. That is the intended outcome: the user asked it to stop.
+    fun stopAll() {
+        activeHandle.getAndSet(null)?.let { handle ->
+            synchronized(lock) { runCatching { session?.remove(handle) } }
+        }
+        openReaders.set(0)
+        stop()
+        TorrentService.stop(appContext)
+    }
+
     // Called when a reader closes, and when an open fails after the count was taken.
     //
     // Removing the torrent is what actually stops peer traffic: pausing or clearing priorities still
     // leaves the session talking to the swarm. Files are left on disk deliberately — they are the
     // cache a resumed playback reads from, and the storage quota is what reclaims them.
-    private fun releaseReader(handle: org.libtorrent4j.TorrentHandle?) {
+    private fun releaseReader(handle: org.libtorrent4j.TorrentHandle?, path: String? = null) {
+        path?.let { openPaths.remove(it) }
         val remaining = openReaders.decrementAndGet()
         if (handle != null) {
             synchronized(lock) {
@@ -144,7 +216,10 @@ class TorrentEngine @Inject constructor() {
         if (remaining <= 0) {
             // No reader left, so nothing needs the swarm. This is the difference between a torrent
             // that stops when you stop watching and one that keeps uploading in the background.
+            activeHandle.set(null)
             stop()
+            TorrentService.stop(appContext)
+            sweepCache()
         }
     }
 
@@ -165,6 +240,20 @@ class TorrentEngine @Inject constructor() {
                 Log.w(TAG, "Failed to stop torrent session cleanly; keeping the handle to retry", e)
             }
         }
+    }
+
+    // Brings the cache back under quota once nothing is being read. Deliberately here rather than
+    // before a playback: sweeping at open time would compete with the download for IO exactly when
+    // latency matters most, and nothing is protected at this point because no reader is left.
+    //
+    // Off the calling thread — this runs from a reader's close(), which is on a playback thread.
+    private fun sweepCache() {
+        val dir = torrentCacheDir(appContext)
+        val quota = settings.quotaBytes
+        Thread {
+            runCatching { TorrentCacheSweeper.sweep(dir, quotaBytes = quota) }
+                .onFailure { Log.w(TAG, "Torrent cache sweep failed", it) }
+        }.apply { isDaemon = true }.start()
     }
 
     // Streaming-shaped defaults, not download-shaped ones. Deliberately conservative on upload

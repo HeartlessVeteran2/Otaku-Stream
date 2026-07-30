@@ -34,7 +34,7 @@ class TorrentFileReader private constructor(
     // Invoked exactly once when this reader closes, so whoever owns the session can decide whether
     // anything still needs the torrent. The reader itself must not stop the session: several readers
     // can share one, and it has no way to know about the others.
-    private val onClosed: (TorrentHandle) -> Unit,
+    private val onClosed: (TorrentHandle, String) -> Unit,
 ) : Closeable {
 
     private val raf: RandomAccessFile = RandomAccessFile(file, "r")
@@ -43,6 +43,13 @@ class TorrentFileReader private constructor(
     private var closed = false
 
     val length: Long get() = layout.fileLength
+
+    // Exposed for the owning engine's stats snapshot only. Internal so the handle can't leak out of
+    // the module and be used after the torrent is removed.
+    internal val torrentHandle: TorrentHandle get() = handle
+
+    // Absolute path of the file being read, so the cache sweep can protect it from eviction.
+    val filePath: String get() = file.absolutePath
 
     // Reads at most up to the end of the piece containing `position`. Deliberately not more: the
     // next piece may not have arrived, and returning a short read is exactly what a DataSource is
@@ -113,7 +120,7 @@ class TorrentFileReader private constructor(
         // Deadlines are per-torrent state; leaving them set would keep skewing the scheduler after
         // this reader is gone.
         runCatching { handle.clearPieceDeadlines() }
-        runCatching { onClosed(handle) }
+        runCatching { onClosed(handle, file.absolutePath) }
     }
 
     companion object {
@@ -138,7 +145,7 @@ class TorrentFileReader private constructor(
             ref: TorrentRef,
             trackers: List<String>,
             saveDir: File,
-            onClosed: (TorrentHandle) -> Unit,
+            onClosed: (TorrentHandle, String) -> Unit,
         ): TorrentFileReader {
             if (!saveDir.exists() && !saveDir.mkdirs()) {
                 throw IOException("Could not create torrent save directory: $saveDir")

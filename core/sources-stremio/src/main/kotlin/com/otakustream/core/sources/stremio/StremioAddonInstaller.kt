@@ -88,7 +88,7 @@ class StremioAddonInstaller @Inject constructor(
                 httpClient = httpClient,
                 stremioRepository = stremioRepository,
                 streamProviderRegistry = streamProviderRegistry,
-                onDeviceTorrentsAvailable = { torrentEngine.isAvailable },
+                onDeviceTorrentsAvailable = { torrentEngine.isUsable },
                 manifestUrl = manifestUrl,
                 catalog = catalog,
                 resources = resources,
