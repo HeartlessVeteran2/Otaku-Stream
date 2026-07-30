@@ -64,18 +64,34 @@ class TorrentEngine @Inject constructor() {
     // would be a mess to diagnose.
     fun ensureStarted(): SessionManager? {
         if (!isAvailable) return null
-        session?.let { if (it.isRunning) return it }
+        // Everything below is under the same lock stop() takes, deliberately including the
+        // already-running check: an unsynchronized fast path could read a live session, have stop()
+        // discard it, and then hand the caller a stopped manager. This is called once per playback,
+        // not per read, so the lock costs nothing worth optimizing away.
         synchronized(lock) {
-            session?.let { if (it.isRunning) return it }
+            session?.let { existing ->
+                if (existing.isRunning) return existing
+                // A stored session that isn't running is one whose stop() previously failed. Try
+                // once more and discard it either way, so a new session doesn't get created on top
+                // of native state still holding the old ports.
+                runCatching { existing.stop() }
+                    .onFailure { Log.w(TAG, "Discarding a session that would not stop", it) }
+                session = null
+            }
+            var starting: SessionManager? = null
             return try {
-                SessionManager().apply {
-                    start()
-                    applySettings(this)
-                    session = this
-                    Log.i(TAG, "Torrent session started")
-                }
+                starting = SessionManager()
+                starting.start()
+                applySettings(starting)
+                session = starting
+                Log.i(TAG, "Torrent session started")
+                starting
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to start torrent session", e)
+                // start() can fail after the native session has already claimed sockets. It was
+                // never stored in `session`, so stop() can't reach it — release it here or every
+                // retry strands another set of native resources.
+                starting?.let { runCatching { it.stop() } }
                 null
             }
         }
@@ -86,12 +102,16 @@ class TorrentEngine @Inject constructor() {
     fun stop() {
         synchronized(lock) {
             val current = session ?: return
-            session = null
             try {
                 current.stop()
+                // Cleared only once the stop actually succeeded. Clearing first would mean a failed
+                // stop leaves the engine believing it is stopped with no handle left to retry, while
+                // the native session keeps running. Held onto here instead, and ensureStarted()
+                // discards it if it is still around next time.
+                session = null
                 Log.i(TAG, "Torrent session stopped")
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to stop torrent session cleanly", e)
+                Log.w(TAG, "Failed to stop torrent session cleanly; keeping the handle to retry", e)
             }
         }
     }

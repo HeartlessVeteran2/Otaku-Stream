@@ -67,6 +67,16 @@ class TorrentUriTest {
     }
 
     @Test
+    fun `rejects non-ASCII digits that Char isDigit would accept`() {
+        // Char.isDigit() is true for any Unicode decimal digit, so validating with it would let an
+        // Arabic-Indic numeral through as "hex" — producing a url that looks valid and never resolves.
+        assertNull(TorrentUri.build("٣".repeat(40), 0))
+        assertNull(TorrentUri.build(hash.dropLast(1) + "٣", 0))
+        // Fullwidth digits are the same trap.
+        assertNull(TorrentUri.build(hash.dropLast(1) + "０", 0))
+    }
+
+    @Test
     fun `rejects a negative file index`() {
         assertNull(TorrentUri.build(hash, -1))
         assertNull(TorrentUri.parse("torrent://$hash/-1"))

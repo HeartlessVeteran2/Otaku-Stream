@@ -48,7 +48,10 @@ object TorrentUri {
     private fun normalizeInfoHash(value: String): String? {
         val trimmed = value.trim()
         if (trimmed.length != INFO_HASH_LENGTH) return null
-        if (!trimmed.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }) return null
+        // Explicit ASCII ranges, not Char.isDigit(): that accepts any Unicode decimal digit, so an
+        // Arabic-Indic numeral would pass as "hex", survive lowercase() unchanged, and produce a
+        // torrent:// url that looks valid and can never resolve.
+        if (!trimmed.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) return null
         return trimmed.lowercase()
     }
 }
