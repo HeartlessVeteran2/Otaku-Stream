@@ -85,7 +85,13 @@ object TorrentSubtitles {
 
     // Characters that separate the fields of a release filename. A match has to land on one of these,
     // or on the end of the name.
-    private val SEPARATORS = charArrayOf('.', '_', '-', ' ')
+    //
+    // Brackets and parens belong here as much as dots do — "Show.S01E01[eng].srt" beside
+    // "Show.S01E01.mkv" is a normal shape, and leaving them out would demote a sidecar that plainly
+    // does belong to this episode. They're safe to include for the reason a digit isn't: a remainder
+    // starting with a bracket means the name ended exactly where the video's did, so it can't be a
+    // longer episode number.
+    private val SEPARATORS = charArrayOf('.', '_', '-', ' ', '[', '(')
 
     // A bare startsWith is not enough, and the failure is the worst kind: confidently wrong.
     //

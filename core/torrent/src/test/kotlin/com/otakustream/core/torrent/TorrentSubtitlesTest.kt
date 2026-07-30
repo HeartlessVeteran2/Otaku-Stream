@@ -75,6 +75,19 @@ class TorrentSubtitlesTest {
     }
 
     @Test
+    fun `matches a sidecar whose extra field is bracketed`() {
+        // "[eng]" or "(English)" straight after the video's name is a normal shape, and rejecting it
+        // would demote a sidecar that plainly belongs to this episode — in a season pack that means the
+        // alphabetical tiebreak could hand over a different episode's subtitles instead.
+        val files = listOf(
+            entry(0, "Show.S01E01.mkv", 2_000_000_000),
+            entry(1, "Show.S01E02.eng.srt"),
+            entry(2, "Show.S01E01[eng].srt"),
+        )
+        assertEquals(2, TorrentSubtitles.pick(files, videoIndex = 0).first().fileIndex)
+    }
+
+    @Test
     fun `matches a subtitle named exactly like the video`() {
         val files = listOf(
             entry(0, "Show.S01E01.mkv", 2_000_000_000),
