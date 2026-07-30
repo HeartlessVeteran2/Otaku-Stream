@@ -200,7 +200,11 @@ class TorrentFileReader private constructor(
             val entries = (0 until files.numFiles()).map { index ->
                 TorrentFileEntry(index = index, path = files.filePath(index), sizeBytes = files.fileSize(index))
             }
-            val subtitles = TorrentSubtitles.pick(entries, ref.fileIdx)
+            val subtitles = TorrentSubtitles.pick(entries, ref.fileIdx).filter { candidate ->
+                // Subtitle paths come from torrent metadata and are attacker-controlled. Keep the
+                // progress total aligned with the candidates that can safely be opened.
+                TorrentPaths.containedFile(saveDir, candidate.path) != null
+            }
 
             // Everything else is set to IGNORE. Without this, a season pack would download every
             // episode to play one — the user's data, spent on files they didn't ask for.
