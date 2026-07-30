@@ -1,7 +1,13 @@
 package com.otakustream.core.sources.scripting
 
+import okhttp3.Interceptor
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Response
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
@@ -15,8 +21,30 @@ import org.junit.Test
 // escape below actually worked, and the documented sandbox did not exist.
 class ScriptEngineSandboxTest {
 
-    // The bridge is never invoked by these tests; only its presence as a global matters.
-    private val engine = ScriptEngine(HttpBridge(OkHttpClient()))
+    // Every request the bridge makes is answered here instead of going to the network, so the
+    // positive control below can call httpGet for real — through the injected BaseFunction, into
+    // HttpBridge, out through OkHttp's call chain — without a server or a network-dependent test.
+    private val requestedUrls = mutableListOf<String>()
+    private val requestedHeaders = mutableListOf<Map<String, String>>()
+
+    private val httpClient = OkHttpClient.Builder()
+        .addInterceptor(
+            Interceptor { chain ->
+                val request = chain.request()
+                requestedUrls += request.url.toString()
+                requestedHeaders += request.headers.toMultimap().mapValues { it.value.first() }
+                Response.Builder()
+                    .request(request)
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body("""{"items":[]}""".toResponseBody("application/json".toMediaType()))
+                    .build()
+            },
+        )
+        .build()
+
+    private val engine = ScriptEngine(HttpBridge(httpClient))
 
     private fun probe(expression: String): String {
         val scope = engine.load("function probe() { return String($expression); }", "probe.js")
@@ -99,8 +127,64 @@ class ScriptEngineSandboxTest {
     }
 
     @Test
-    fun `the httpGet capability is still injected`() {
+    fun `the httpGet capability still works end to end`() {
+        // Not just "the global is a function". The sandbox works by removing Rhino's Java bridge, and
+        // httpGet is the one thing deliberately left reaching out of the sandbox — so the test that
+        // matters is that a script can still call it and get the host's response back. Asserting the
+        // type alone would stay green if the ClassShutter started refusing the BaseFunction's own
+        // call path.
         assertEquals("function", probe("typeof httpGet"))
+
+        val scope = engine.load(
+            "function fetchIt() { return httpGet('https://example.test/api', '{\"Referer\":\"https://example.test/\"}'); }",
+            "fetch.js",
+        )
+
+        assertEquals("""{"items":[]}""", engine.call(scope, "fetchIt"))
+        assertEquals(listOf("https://example.test/api"), requestedUrls)
+        // The headers argument is the other half of the documented contract — sources need it because
+        // hosts reject requests without a referer.
+        assertEquals("https://example.test/", requestedHeaders.single()["referer"])
+    }
+
+    @Test
+    fun `httpGet failures surface to the script rather than killing the app`() {
+        // A source pointed at a dead host is routine, and the documented behaviour is that the call
+        // fails that one function rather than taking anything else down.
+        val failing = ScriptEngine(
+            HttpBridge(
+                OkHttpClient.Builder()
+                    .addInterceptor { throw java.io.IOException("host is down") }
+                    .build(),
+            ),
+        )
+        val scope = failing.load(
+            "function tryFetch() { try { httpGet('https://down.test/'); return 'no-error'; } catch (e) { return 'caught'; } }",
+            "failing.js",
+        )
+
+        assertEquals("caught", failing.call(scope, "tryFetch"))
+    }
+
+    @Test
+    fun `httpGet does not hand the script a java object it can climb out of`() {
+        // The bridge returns the body as a String. If it ever returned the Response — or anything
+        // else Rhino would wrap as a Java object — the script would have a live Java reference and
+        // the ClassShutter would be the only thing standing between it and the reflection graph.
+        val scope = engine.load(
+            "function typeOfResult() { var r = httpGet('https://example.test/'); return typeof r; }",
+            "type.js",
+        )
+        assertEquals("string", engine.call(scope, "typeOfResult"))
+
+        val probeScope = engine.load(
+            "function getClassOfResult() { return String(httpGet('https://example.test/').getClass); }",
+            "getclass.js",
+        )
+        assertTrue(
+            "the response must not expose getClass",
+            engine.call(probeScope, "getClassOfResult") == "undefined",
+        )
     }
 
     @Test

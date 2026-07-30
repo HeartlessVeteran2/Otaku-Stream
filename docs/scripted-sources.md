@@ -22,9 +22,10 @@ Two mechanisms, both in `ScriptEngine.kt`, and both load-bearing:
 
 `ScriptEngineSandboxTest` holds this to account, and is worth reading as an attack list: it asserts
 each interop global is absent, that `new java.io.File(...)` and `Runtime.exec` fail, that reflection
-is unreachable, and — just as importantly — that ordinary JavaScript, `httpGet`, and per-script scope
-isolation all still work. If you change how scopes or contexts are built, that file is the thing that
-tells you whether you broke the sandbox.
+is unreachable, and — just as importantly — that ordinary JavaScript, per-script scope isolation, and
+a `httpGet` call that actually reaches the host bridge and returns its response all still work. If
+you change how scopes or contexts are built, that file is the thing that tells you whether you broke
+the sandbox.
 
 **What a script *can* still do:** issue arbitrary HTTP requests to arbitrary URLs, including hosts on
 your local network. `httpGet` is a real capability, deliberately. Install sources you trust.

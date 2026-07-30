@@ -98,7 +98,18 @@ class ScriptEngine @Inject constructor(
                 null
             }
 
-            return bridge.httpGet(url, headersJson)
+            // Rhino's interpreter unwinds with `throw (Error) throwable` for anything that is not a
+            // RuntimeException, so a *checked* exception thrown by a host function escapes as a
+            // ClassCastException rather than reaching the script. httpGet's most ordinary failure —
+            // OkHttp's IOException for a host that is down — is exactly that, which meant a source
+            // could not catch its own network errors: `try { httpGet(url) } catch (e) { ... }` never
+            // ran its catch block. throwAsScriptRuntimeEx converts any throwable into the
+            // RuntimeException Rhino expects, so the failure arrives as a normal script error.
+            return try {
+                bridge.httpGet(url, headersJson)
+            } catch (e: Exception) {
+                throw Context.throwAsScriptRuntimeEx(e)
+            }
         }
     }
 }

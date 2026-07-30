@@ -24,10 +24,15 @@ android {
 
     testOptions {
         unitTests {
-            // TorrentCacheSweeper is ordinary java.io code that only touches Android for android.util.Log.
-            // Without this the stub android.jar throws "not mocked" on the first log line, which would
-            // leave the one class that actually deletes the user's files untestable on a JVM runner.
-            isReturnDefaultValues = true
+            // Robolectric needs the merged manifest and resources to build its simulated app.
+            //
+            // Note what is deliberately *not* here: isReturnDefaultValues. That would make every
+            // unmocked Android call in the module quietly return zero, which is fine for the one log
+            // line TorrentCacheSweeper emits and dangerous for everything else — a test could exercise
+            // a path that returns null on a real device and still pass. TorrentCacheSweeperTest runs
+            // under Robolectric instead, which supplies a real android.util.Log, so the strict stub
+            // android.jar stays in force for the module's pure-logic tests.
+            isIncludeAndroidResources = true
         }
     }
 }
@@ -49,4 +54,9 @@ dependencies {
     kapt(libs.hilt.compiler)
 
     testImplementation(libs.junit)
+    // Real Android framework implementations on the JVM runners CI already has — no emulator. Used
+    // by TorrentCacheSweeperTest so the class that deletes the user's files can be tested without
+    // relaxing the Android stubs for the whole module.
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
 }

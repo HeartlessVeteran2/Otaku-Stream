@@ -6,6 +6,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import java.io.File
 
 // The sweeper is the only class in the app that deletes the user's files, and until now it had no
@@ -14,6 +17,13 @@ import java.io.File
 // That gap is exactly how a real bug shipped: the policy has always honoured protected paths, but
 // the caller passed none, so a sweep triggered mid-playback would happily delete the file being
 // streamed. Testing the decision without testing the deletion left the dangerous half uncovered.
+//
+// Robolectric rather than isReturnDefaultValues: the sweeper is ordinary java.io code that touches
+// Android only for android.util.Log, and relaxing the stubs to get past that one call would have
+// applied to the whole module — quietly handing every other test a zero for any framework call it
+// made. This gives the sweeper a real Log and leaves the strict stubs in place everywhere else.
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [33])
 class TorrentCacheSweeperTest {
 
     @get:Rule

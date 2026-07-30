@@ -35,4 +35,8 @@ dependencies {
     kapt(libs.hilt.compiler)
 
     testImplementation(libs.junit)
+    // Real org.json for JVM unit tests. HttpBridge parses the headers argument with JSONObject, and
+    // the stub android.jar throws "not mocked" on it — so without this the httpGet capability could
+    // not be exercised end to end at all.
+    testImplementation(libs.json)
 }

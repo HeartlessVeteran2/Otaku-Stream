@@ -86,7 +86,8 @@ How each engine is confined:
   compromised and revoke it from your AniList account settings.
 - **QuickJS (Mangayomi extensions)** — no ambient Java bridge exists; the only reachable host
   functions are the ones explicitly injected. The HTML helper is parse-only and never touches the
-  network or filesystem, and the crypto helpers operate solely on caller-supplied data.
+  network or filesystem, and the crypto helpers reach nothing but the arguments they are given and
+  the platform's own randomness — no app state, no storage.
 
 Both engines can make arbitrary HTTP requests, including to hosts on your local network. That is the
 capability they exist to have, and it is the reason installing one is a trust decision.
