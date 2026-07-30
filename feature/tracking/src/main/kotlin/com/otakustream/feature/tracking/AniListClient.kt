@@ -22,7 +22,7 @@ private const val ANILIST_GRAPHQL_URL = "https://graphql.anilist.co"
 // it can be unit-tested without the network.
 @Singleton
 class AniListClient @Inject constructor(
-    private val httpClient: OkHttpClient,
+    @com.otakustream.core.network.di.AccountHttpClient private val httpClient: OkHttpClient,
 ) {
     // ---- Discovery (unauthenticated) ----
 

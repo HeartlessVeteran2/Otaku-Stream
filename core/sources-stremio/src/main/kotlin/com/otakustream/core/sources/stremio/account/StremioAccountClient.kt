@@ -38,7 +38,7 @@ data class StremioLibraryItem(
 // authKey is a credential the caller persists — the password is used once here and never stored.
 @Singleton
 class StremioAccountClient @Inject constructor(
-    private val httpClient: OkHttpClient,
+    @com.otakustream.core.network.di.AccountHttpClient private val httpClient: OkHttpClient,
 ) {
     suspend fun login(email: String, password: String): StremioAccount = withContext(Dispatchers.IO) {
         val root = post("$API_BASE/login", JSONObject().put("email", email).put("password", password))

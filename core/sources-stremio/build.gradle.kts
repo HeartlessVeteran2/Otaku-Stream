@@ -30,6 +30,9 @@ dependencies {
     implementation(project(":core:common"))
 
     implementation(libs.androidx.core.ktx)
+    // For the @AccountHttpClient qualifier: this module talks to the user's own account, so it
+    // asks for the client that does not share a cookie jar with installed sources.
+    implementation(project(":core:network"))
     implementation(libs.okhttp)
 
     implementation(libs.hilt.android)
