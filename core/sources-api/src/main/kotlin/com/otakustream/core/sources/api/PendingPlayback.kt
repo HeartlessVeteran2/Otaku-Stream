@@ -15,6 +15,28 @@ data class SkipMark(val startMs: Long, val endMs: Long, val type: String) {
 // serializing headers/subtitles through Compose Navigation args.
 object PendingPlayback {
 
+    // Who chose this URL.
+    //
+    // It decides which schemes the player will accept, and the two cases genuinely differ. A URL the
+    // user picked — a file from the picker, an "Open with" from another app — is legitimately
+    // file:// or content://, and refusing those would break on-device playback, which is a real
+    // feature. A URL an installed source returned is a different thing wearing the same clothes:
+    // nothing stops a source answering getVideoList with
+    // file:///data/data/com.otakustream/databases/otaku_stream.db, and the player would dutifully
+    // open it.
+    //
+    // Neither a blanket allow nor a blanket ban is right, which is why this exists rather than a
+    // flat scheme list.
+    enum class Provenance {
+        // Chosen by the user, or by the app itself: the file picker, an ACTION_VIEW intent the user
+        // acted on, a sidecar subtitle the app found next to a file already being played.
+        USER,
+
+        // Returned by an installed source, add-on or extension. Restricted to schemes that go over
+        // the network, plus the app's own torrent:// identity.
+        SOURCE,
+    }
+
     // historyHandled tells the player whether the stasher already records watch history itself
     // (the catalog flow does); when false — or when nothing was stashed at all — the player
     // records the play as a direct play.
@@ -24,17 +46,21 @@ object PendingPlayback {
         val video: Video,
         val historyHandled: Boolean,
         val skipLookup: (suspend (durationMs: Long) -> List<SkipMark>)? = null,
+        val provenance: Provenance = Provenance.SOURCE,
     )
 
     @Volatile
     private var pending: Stashed? = null
 
+    // provenance defaults to SOURCE: almost every caller is a source, and a caller that forgets to
+    // say gets the restricted treatment rather than the permissive one.
     fun stash(
         video: Video,
         historyHandled: Boolean = true,
         skipLookup: (suspend (durationMs: Long) -> List<SkipMark>)? = null,
+        provenance: Provenance = Provenance.SOURCE,
     ) {
-        pending = Stashed(video, historyHandled, skipLookup)
+        pending = Stashed(video, historyHandled, skipLookup, provenance)
     }
 
     // Consumes and clears the pending video only if its url matches, so a mismatched or

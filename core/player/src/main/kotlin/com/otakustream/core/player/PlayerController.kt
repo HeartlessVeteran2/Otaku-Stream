@@ -33,6 +33,7 @@ import com.otakustream.core.database.skip.SkipSegment
 import com.otakustream.core.database.skip.SkipSegmentRepository
 import com.otakustream.core.database.skip.SkipSegmentType
 import com.otakustream.core.sources.api.PendingPlayback
+import com.otakustream.core.sources.api.PlayableUrl
 import com.otakustream.core.sources.api.PlaybackCompletion
 import com.otakustream.core.sources.api.PlaybackQueue
 import com.otakustream.core.sources.api.SkipMark
@@ -401,6 +402,21 @@ class PlayerController @Inject constructor(
         }
 
         val stashed = PendingPlayback.consume(url)
+
+        // What the player will open depends on who chose the URL. A source may only point at http,
+        // https or the app's own torrent:// identity; file:// and content:// are for URLs the user
+        // picked themselves, and refusing those would break on-device playback.
+        //
+        // No stash means nothing source-originated got here: sources reach the player only through
+        // PendingPlayback, because that is the only channel headers and subtitle tracks travel on.
+        // A file picked from the picker, an "Open with", or a replay from history all arrive with
+        // no stash and are the user's own choice.
+        val provenance = stashed?.provenance ?: PendingPlayback.Provenance.USER
+        if (!PlayableUrl.isAllowed(url, provenance)) {
+            _uiState.value = _uiState.value.copy(error = PlayableUrl.rejectionMessage())
+            return
+        }
+
         val pending = stashed?.video
         currentSkipLookup = stashed?.skipLookup
         _uiState.value = _uiState.value.copy(hasNext = PlaybackQueue.hasResolver())

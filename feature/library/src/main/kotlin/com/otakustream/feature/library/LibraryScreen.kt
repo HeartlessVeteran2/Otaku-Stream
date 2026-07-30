@@ -324,6 +324,10 @@ private fun OnDeviceTab(
                                 PendingPlayback.stash(
                                     Video(url = url, quality = "", subtitleTracks = sidecars),
                                     historyHandled = false,
+                                    // The user picked this file from their own device, and the
+                                    // sidecar subtitles were found next to it by the app — so the
+                                    // local schemes on-device playback needs are legitimate here.
+                                    provenance = PendingPlayback.Provenance.USER,
                                 )
                             }
                             onPlayDirect(url)
