@@ -106,6 +106,8 @@ class TorrentFileReader private constructor(
         // Deadlines are per-torrent state; leaving them set would keep skewing the scheduler after
         // this reader is gone.
         runCatching { handle.clearPieceDeadlines() }
+        // Do not leave the torrent downloading after the player has closed the data source.
+        runCatching { handle.pause() }
     }
 
     companion object {
@@ -205,8 +207,13 @@ class TorrentFileReader private constructor(
                 // Must be the same directory the reader later opens the file from, or the
                 // torrent downloads to one place and is read from another.
                 session.download(magnetFor(ref.infoHash, trackers), saveDir, null)
-                if (!latch.await(METADATA_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-                    throw IOException("Timed out adding torrent ${ref.infoHash}")
+                try {
+                    if (!latch.await(METADATA_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                        throw IOException("Timed out adding torrent ${ref.infoHash}")
+                    }
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw IOException("Interrupted adding torrent ${ref.infoHash}", e)
                 }
                 return found.get() ?: throw IOException("Torrent ${ref.infoHash} was added without a handle")
             } finally {
@@ -221,7 +228,12 @@ class TorrentFileReader private constructor(
                 // A magnet carries no file list, so nothing about the torrent's shape is known until
                 // metadata arrives from a peer.
                 if (info != null && info.isValid) return info
-                Thread.sleep(POLL_INTERVAL_MS)
+                try {
+                    Thread.sleep(POLL_INTERVAL_MS)
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw IOException("Interrupted waiting for torrent metadata", e)
+                }
             }
             throw IOException("Timed out waiting for torrent metadata")
         }
@@ -229,7 +241,12 @@ class TorrentFileReader private constructor(
         private fun awaitFile(file: File) {
             val deadline = System.currentTimeMillis() + FILE_CREATE_TIMEOUT_MS
             while (!file.exists() && System.currentTimeMillis() < deadline) {
-                Thread.sleep(POLL_INTERVAL_MS)
+                try {
+                    Thread.sleep(POLL_INTERVAL_MS)
+                } catch (e: InterruptedException) {
+                    Thread.currentThread().interrupt()
+                    throw IOException("Interrupted waiting for torrent storage at $file", e)
+                }
             }
             if (!file.exists()) throw IOException("Torrent storage was never created at $file")
         }
