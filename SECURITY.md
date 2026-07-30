@@ -76,6 +76,22 @@ Install from sources you trust.
 
 A bug that lets an extension exceed that host API *is* a vulnerability — please report it.
 
+How each engine is confined:
+
+- **Rhino (scripted sources)** — scopes are built with `initSafeStandardObjects()` and every context
+  carries a `ClassShutter` denying all classes, so the Java interop bridge is unreachable. Covered by
+  `ScriptEngineSandboxTest`. Before this was in place the promised sandbox did not exist: a source
+  could reach `java.lang.Class`, and through it the filesystem and the stored AniList token. If you
+  installed a scripted source from a host you do not fully trust before this fix, treat that token as
+  compromised and revoke it from your AniList account settings.
+- **QuickJS (Mangayomi extensions)** — no ambient Java bridge exists; the only reachable host
+  functions are the ones explicitly injected. The HTML helper is parse-only and never touches the
+  network or filesystem, and the crypto helpers reach nothing but the arguments they are given and
+  the platform's own randomness — no app state, no storage.
+
+Both engines can make arbitrary HTTP requests, including to hosts on your local network. That is the
+capability they exist to have, and it is the reason installing one is a trust decision.
+
 ### No code minification
 
 Release builds set `isMinifyEnabled = false`. Extensions call app code by name via reflection, which

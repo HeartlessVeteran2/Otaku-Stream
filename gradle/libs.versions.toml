@@ -21,6 +21,8 @@ coil = "2.7.0"
 securityCrypto = "1.1.0-alpha06"
 junit = "4.13.2"
 json = "20240303"
+robolectric = "4.14.1"
+androidxTest = "1.6.1"
 playServicesCast = "21.5.0"
 mediarouter = "1.7.0"
 appcompat = "1.7.0"
@@ -73,6 +75,11 @@ okhttp-urlconnection = { group = "com.squareup.okhttp3", name = "okhttp-urlconne
 androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 json = { group = "org.json", name = "json", version.ref = "json" }
+# Test-only. Robolectric runs Android framework code on the JVM runners CI already has, so code that
+# touches the framework can be covered without an emulator — and without relaxing the Android stubs
+# module-wide, which would let every other test pass on calls that return null on a real device.
+robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+androidx-test-core = { group = "androidx.test", name = "core", version.ref = "androidxTest" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
