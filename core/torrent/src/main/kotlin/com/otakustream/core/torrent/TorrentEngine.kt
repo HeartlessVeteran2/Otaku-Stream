@@ -50,6 +50,24 @@ class TorrentEngine @Inject constructor(
     // point; the close simply belongs to a session that no longer exists.
     private val generation = java.util.concurrent.atomic.AtomicLong(0)
 
+    // Teardown is deferred, not immediate, because "the last reader closed" is not "playback ended".
+    //
+    // Media3 closes the current DataSource *before* opening its replacement — on every seek past the
+    // buffer, on an error retry, and on setMediaSource, which is exactly what offering in-torrent
+    // subtitles does mid-playback. Each of those drops the reader count to zero for a few
+    // milliseconds. Tearing down on that gap meant every seek stopped the session, removed the
+    // torrent, and then re-added it and waited for metadata again — and ran a cache sweep with
+    // nothing protected, which on a 512 MB quota could delete the file being watched.
+    private val teardownScheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "torrent-teardown").apply { isDaemon = true }
+    }
+
+    // Both guarded by `lock`. The handle is held rather than removed immediately so a seek doesn't
+    // cost a remove-and-re-add of the torrent; it is removed when the teardown actually runs, or
+    // sooner if a *different* torrent starts (see openFile).
+    private var pendingTeardown: java.util.concurrent.ScheduledFuture<*>? = null
+    private var handleAwaitingRemoval: org.libtorrent4j.TorrentHandle? = null
+
     // Absolute paths of files currently open for reading. The cache sweep is handed these as
     // protected paths: a sweep triggered from the settings screen can fire while a playback is in
     // progress, and deleting the file being streamed would kill it.
@@ -172,6 +190,23 @@ class TorrentEngine @Inject constructor(
         synchronized(lock) {
             openedAt = generation.get()
             isFirstReader = openReaders.getAndIncrement() == 0
+            // A reader arriving inside the grace window means the previous close was a seek or a
+            // retry, not the end of playback — cancel the teardown so the session and the torrent
+            // survive it.
+            pendingTeardown?.cancel(false)
+            pendingTeardown = null
+            // Unless this is a *different* torrent, in which case the held handle belongs to
+            // something nobody is watching any more and has to go now. Auto-play reaches here about a
+            // second after the previous episode's reader closed, so without this the finished
+            // episode's torrent would keep talking to peers for the rest of the session.
+            handleAwaitingRemoval?.let { held ->
+                val heldHash = runCatching { held.infoHash().toHex() }.getOrNull()
+                if (!heldHash.equals(ref.infoHash, ignoreCase = true)) {
+                    runCatching { session.remove(held) }
+                        .onFailure { Log.w(TAG, "Could not remove the previous torrent", it) }
+                    handleAwaitingRemoval = null
+                }
+            }
         }
         // A replay from watch history carries no trackers — the url is deliberately just the torrent's
         // identity — so without this it would fall back to DHT alone, which is slow to bootstrap and
@@ -261,6 +296,10 @@ class TorrentEngine @Inject constructor(
             // protected for the rest of the process — permanently exempting the largest file in the
             // cache from eviction, so the quota could never be met again.
             openPaths.clear()
+            // Stop means stop: no grace period, and any teardown already scheduled is redundant now.
+            pendingTeardown?.cancel(false)
+            pendingTeardown = null
+            handleAwaitingRemoval = null
             stop()
         }
         TorrentService.stop(appContext)
@@ -302,23 +341,62 @@ class TorrentEngine @Inject constructor(
             // negative — after which the next openFile()'s `getAndIncrement() == 0` check is false and
             // the foreground service never starts for the following playback.
             val remaining = openReaders.updateAndGet { (it - 1).coerceAtLeast(0) }
-            if (handle != null) {
-                // The flagless overload keeps the downloaded data on disk, which is what we want:
-                // the files are the cache a resumed playback reads from.
+            teardown = remaining <= 0
+            if (teardown) {
+                // Nothing is reading *right now*, which on its own means very little — a seek looks
+                // identical to the end of playback from here. Hold the handle and schedule the real
+                // teardown; openFile() cancels it if a reader arrives inside the window.
+                handle?.let { handleAwaitingRemoval = it }
+                scheduleTeardown(openedAt)
+            } else if (handle != null) {
+                // Another reader is still going, so this handle is one it doesn't share. Remove it
+                // now: removing the torrent is what actually stops peer traffic.
                 runCatching { session?.remove(handle) }
                     .onFailure { Log.w(TAG, "Could not remove torrent from the session", it) }
             }
-            teardown = remaining <= 0
-            if (teardown) {
-                // No reader left, so nothing needs the swarm. This is the difference between a torrent
-                // that stops when you stop watching and one that keeps uploading in the background.
-                // Inside the lock, with stop(), so a playback starting right now can't have the
-                // session it just obtained from ensureStarted() stopped out from under it.
+        }
+    }
+
+    // Caller must hold `lock`.
+    private fun scheduleTeardown(openedAt: Long) {
+        pendingTeardown?.cancel(false)
+        pendingTeardown = runCatching {
+            teardownScheduler.schedule(
+                { tearDownIfStillIdle(openedAt) },
+                TEARDOWN_GRACE_MS,
+                java.util.concurrent.TimeUnit.MILLISECONDS,
+            )
+        }.getOrElse {
+            // The scheduler is gone (process shutting down). Better to tear down immediately than
+            // to leave a session and a foreground notification running.
+            Log.w(TAG, "Could not schedule torrent teardown; tearing down now", it)
+            tearDownIfStillIdle(openedAt)
+            null
+        }
+    }
+
+    // Runs one grace period after the last reader closed. This is the real "playback ended" —
+    // remove the torrent so it stops talking to peers, stop the session, and reclaim disk.
+    private fun tearDownIfStillIdle(openedAt: Long) {
+        val proceed: Boolean
+        synchronized(lock) {
+            pendingTeardown = null
+            // A reader opened during the window (a seek, or the next episode), or stopAll() already
+            // did all of this and retired this generation. Either way it is no longer ours to do.
+            proceed = openReaders.get() <= 0 && openedAt == generation.get()
+            if (proceed) {
+                handleAwaitingRemoval?.let { handle ->
+                    // The flagless overload keeps the downloaded data on disk, which is what we want:
+                    // the files are the cache a resumed playback reads from.
+                    runCatching { session?.remove(handle) }
+                        .onFailure { Log.w(TAG, "Could not remove torrent from the session", it) }
+                }
+                handleAwaitingRemoval = null
                 activeReader.set(null)
                 stop()
             }
         }
-        if (teardown) {
+        if (proceed) {
             // Outside the lock: a binder call and a thread spawn, neither of which touches engine
             // state that the section above protects.
             TorrentService.stop(appContext)
@@ -347,14 +425,22 @@ class TorrentEngine @Inject constructor(
 
     // Brings the cache back under quota once nothing is being read. Deliberately here rather than
     // before a playback: sweeping at open time would compete with the download for IO exactly when
-    // latency matters most, and nothing is protected at this point because no reader is left.
+    // latency matters most.
     //
-    // Off the calling thread — this runs from a reader's close(), which is on a playback thread.
+    // Protected paths are passed even though this only runs when no reader is open. "No reader is
+    // open" was doing more work than it could carry: a seek closes the reader before opening its
+    // replacement, so this used to run mid-playback with nothing protected — and since the file being
+    // streamed is the largest and most recently grown thing in the cache, it was the first thing the
+    // policy chose to delete. The grace period above is what actually fixes that; this is the belt to
+    // its braces, and it costs one set copy.
+    //
+    // Off the calling thread — this can run from a reader's close(), which is on a playback thread.
     private fun sweepCache() {
         val dir = torrentCacheDir(appContext)
         val quota = settings.quotaBytes
+        val protectedPaths = protectedCachePaths()
         Thread {
-            runCatching { TorrentCacheSweeper.sweep(dir, quotaBytes = quota) }
+            runCatching { TorrentCacheSweeper.sweep(dir, quotaBytes = quota, protectedPaths = protectedPaths) }
                 .onFailure { Log.w(TAG, "Torrent cache sweep failed", it) }
         }.apply { isDaemon = true }.start()
     }
@@ -385,5 +471,10 @@ class TorrentEngine @Inject constructor(
 
         // Plenty of peers for one streaming file, without opening hundreds of sockets on a phone.
         const val CONNECTION_LIMIT = 100
+
+        // How long the session survives the last reader closing. Long enough to cover a seek's
+        // close-then-open gap and Media3's error retries, short enough that a user who really has
+        // stopped watching isn't left in a swarm they've forgotten about.
+        const val TEARDOWN_GRACE_MS = 5_000L
     }
 }

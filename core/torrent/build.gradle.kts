@@ -21,6 +21,15 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    testOptions {
+        unitTests {
+            // TorrentCacheSweeper is ordinary java.io code that only touches Android for android.util.Log.
+            // Without this the stub android.jar throws "not mocked" on the first log line, which would
+            // leave the one class that actually deletes the user's files untestable on a JVM runner.
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 dependencies {

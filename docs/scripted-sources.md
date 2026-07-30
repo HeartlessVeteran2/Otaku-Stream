@@ -8,6 +8,27 @@ Scripts run inside an embedded [Mozilla Rhino](https://github.com/mozilla/rhino)
 **interpreted mode**, sandboxed: the only capability exposed to a script is a
 `httpGet(url, headersJson?)` global. No filesystem, no reflection, no Java interop.
 
+### How the sandbox is enforced
+
+Two mechanisms, both in `ScriptEngine.kt`, and both load-bearing:
+
+- The scope is built with Rhino's `initSafeStandardObjects()`. The ordinary
+  `initStandardObjects()` installs Rhino's Java bridge — `Packages`, `java`, `javax`, `org`, `com`,
+  `net`, `JavaAdapter`, `getClass` — and any one of those reaches `java.lang.Class` and from there
+  anything the app process can do.
+- Every script `Context` is created through a `ContextFactory` carrying a `ClassShutter` that
+  refuses to make *any* Java class visible, so a class lookup that somehow got past the first
+  mechanism still fails.
+
+`ScriptEngineSandboxTest` holds this to account, and is worth reading as an attack list: it asserts
+each interop global is absent, that `new java.io.File(...)` and `Runtime.exec` fail, that reflection
+is unreachable, and — just as importantly — that ordinary JavaScript, `httpGet`, and per-script scope
+isolation all still work. If you change how scopes or contexts are built, that file is the thing that
+tells you whether you broke the sandbox.
+
+**What a script *can* still do:** issue arbitrary HTTP requests to arbitrary URLs, including hosts on
+your local network. `httpGet` is a real capability, deliberately. Install sources you trust.
+
 ## The contract
 
 A source script defines two constants and six functions. Each function returns
