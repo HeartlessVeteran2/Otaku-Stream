@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.C
 import com.otakustream.core.database.skip.SkipSegmentType
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,9 +27,28 @@ class PlayerViewModel @Inject constructor(
     // time labels, not the whole player screen.
     val progress: StateFlow<PlaybackProgress> = controller.progress
 
-    private val _subtitleStyle = MutableStateFlow(subtitleStylePrefs.load())
+    // Seeded with the defaults and replaced once the saved style has been read off disk.
+    //
+    // The read used to happen right here, in a field initializer — so constructing this ViewModel
+    // opened and parsed a SharedPreferences file on the main thread, on the frame where the user has
+    // just tapped an episode and is waiting for video. The defaults render correctly, and the real
+    // style lands a frame or two later; subtitles are not even decoded yet at that point.
+    private val _subtitleStyle = MutableStateFlow(SubtitleStyle())
     val subtitleStyle: StateFlow<SubtitleStyle> = _subtitleStyle.asStateFlow()
     private var saveStyleJob: Job? = null
+
+    // Same reasoning, and it has to be readable synchronously by the composable that decides whether
+    // to show the gesture coach — so it is read once, off-thread, rather than on every access.
+    private var hasSeenGestureCoachCached = true
+
+    init {
+        viewModelScope.launch(Dispatchers.IO) {
+            val style = subtitleStylePrefs.load()
+            val seenCoach = onboardingPrefs.hasSeenGestureCoach
+            _subtitleStyle.value = style
+            hasSeenGestureCoachCached = seenCoach
+        }
+    }
 
     fun setSubtitleStyle(style: SubtitleStyle) {
         // Slider drags emit many updates: keep the live preview/apply instant but debounce the
@@ -50,9 +70,15 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    val hasSeenGestureCoach: Boolean get() = onboardingPrefs.hasSeenGestureCoach
+    // Defaults to true — "already seen" — until the real value is read. Erring that way on purpose:
+    // if the read has not landed yet, not showing the coach is a missing hint, whereas showing it is
+    // an overlay on top of a video the user is trying to watch, every single time.
+    val hasSeenGestureCoach: Boolean get() = hasSeenGestureCoachCached
 
-    fun markGestureCoachSeen() { onboardingPrefs.hasSeenGestureCoach = true }
+    fun markGestureCoachSeen() {
+        hasSeenGestureCoachCached = true
+        viewModelScope.launch(Dispatchers.IO) { onboardingPrefs.hasSeenGestureCoach = true }
+    }
 
     fun play(url: String, fromSource: Boolean = false) = controller.play(url, fromSource = fromSource)
 

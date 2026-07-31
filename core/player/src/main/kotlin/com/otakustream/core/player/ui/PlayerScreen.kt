@@ -105,7 +105,11 @@ fun PlayerScreen(
     var showEqualizerSheet by remember { mutableStateOf(false) }
     var showSubtitleStyleSheet by remember { mutableStateOf(false) }
     // Window brightness as a 0..1 fraction, tracked here so the gesture HUD can show a level ring.
-    var brightnessFraction by remember { mutableStateOf(0.5f) }
+    //
+    // Seeded from what the screen is actually showing, not from a made-up 0.5f. Starting at half
+    // meant the first swipe did not adjust brightness, it *jumped* to roughly half — so watching in
+    // a dark room at 5%, the smallest nudge upward flooded the screen at full brightness.
+    var brightnessFraction by remember { mutableStateOf(activity?.currentScreenBrightness() ?: 0.5f) }
     var resizeModeOsd by remember { mutableStateOf<String?>(null) }
     var lastResizeMode by remember { mutableStateOf(uiState.resizeMode) }
 
@@ -447,6 +451,27 @@ internal tailrec fun Context.findActivity(): Activity? = when (this) {
     is ContextWrapper -> baseContext.findActivity()
     else -> null
 }
+
+// What the screen is currently showing, as a 0..1 fraction, so a brightness gesture starts from
+// there instead of from a guess.
+private fun Activity.currentScreenBrightness(): Float {
+    // An override this window has already set — the user used the gesture earlier in this playback.
+    val override = window.attributes.screenBrightness
+    if (override >= 0f) return override.coerceIn(MIN_BRIGHTNESS, 1f)
+    // Otherwise the window is following the system setting, which is what the user is looking at.
+    // Settings.System reports 0..255. Not universally true — a few devices use a different maximum,
+    // and with auto-brightness on this is the manual value rather than the adapted one — but it is
+    // far closer than a constant, and the very next swipe corrects it anyway.
+    return runCatching {
+        val value = android.provider.Settings.System.getInt(
+            contentResolver,
+            android.provider.Settings.System.SCREEN_BRIGHTNESS,
+        )
+        (value / 255f).coerceIn(MIN_BRIGHTNESS, 1f)
+    }.getOrDefault(0.5f)
+}
+
+private const val MIN_BRIGHTNESS = 0.01f
 
 private fun Activity.setScreenBrightness(fraction: Float) {
     val params = window.attributes

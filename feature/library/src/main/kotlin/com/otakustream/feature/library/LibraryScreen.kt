@@ -1,8 +1,7 @@
 package com.otakustream.feature.library
 
-import com.otakustream.core.ui.CoverImage
-import com.otakustream.core.ui.EmptyState
 
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -20,6 +19,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.History
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -38,6 +38,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,7 +47,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import android.net.Uri
 import coil.compose.AsyncImage
 import coil.decode.VideoFrameDecoder
 import coil.request.ImageRequest
@@ -58,11 +58,16 @@ import com.otakustream.core.database.library.LIBRARY_STATUS_WATCHING
 import com.otakustream.core.database.library.WatchHistoryEntry
 import com.otakustream.core.sources.api.PendingPlayback
 import com.otakustream.core.sources.api.Video
+import com.otakustream.core.ui.CoverImage
+import com.otakustream.core.ui.EmptyState
 import com.otakustream.feature.library.local.LocalVideosViewModel
 import com.otakustream.feature.library.local.findSidecarSubtitles
 import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @Composable
 fun LibraryScreen(
@@ -219,10 +224,33 @@ private fun HistoryTab(
     viewModel: LibraryViewModel,
     onMediaClick: (Long, String, String) -> Unit,
 ) {
+    // Clearing history is not undoable and the button sits directly above the list it destroys, so
+    // it asks first. It is also the only destructive action on this screen with no other route back
+    // — the rows themselves came from playback, and nothing rebuilds them.
+    var confirmingClear by remember { mutableStateOf(false) }
+    if (confirmingClear) {
+        AlertDialog(
+            onDismissRequest = { confirmingClear = false },
+            title = { Text("Clear watch history?") },
+            text = { Text("This removes every entry, including your Continue Watching row. It can't be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmingClear = false
+                        viewModel.clearHistory()
+                    },
+                ) { Text("Clear") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmingClear = false }) { Text("Cancel") }
+            },
+        )
+    }
+
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         if (uiState.history.isNotEmpty()) {
             item {
-                TextButton(onClick = viewModel::clearHistory, modifier = Modifier.padding(horizontal = 8.dp)) {
+                TextButton(onClick = { confirmingClear = true }, modifier = Modifier.padding(horizontal = 8.dp)) {
                     Text("Clear history")
                 }
             }
@@ -273,6 +301,10 @@ private fun OnDeviceTab(
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         viewModel.refresh()
     }
+    // For the sidecar-subtitle scan below, which has to leave the main thread and then come back to
+    // navigate. Still alive at that point: this composable only leaves composition once the
+    // navigation it triggers actually happens.
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) { viewModel.refresh() }
 
@@ -316,21 +348,35 @@ private fun OnDeviceTab(
                         },
                         modifier = Modifier.clickable {
                             val url = video.uri.toString()
-                            // VLC-style sidecar subtitles: hand any same-basename .srt/.ass/.ssa/.vtt
-                            // next to the file to the player. historyHandled = false keeps the
-                            // player recording this as a direct play as usual.
-                            val sidecars = findSidecarSubtitles(video.dataPath)
-                            if (sidecars.isNotEmpty()) {
-                                PendingPlayback.stash(
-                                    Video(url = url, quality = "", subtitleTracks = sidecars),
-                                    historyHandled = false,
-                                    // The user picked this file from their own device, and the
-                                    // sidecar subtitles were found next to it by the app — so the
-                                    // local schemes on-device playback needs are legitimate here.
-                                    provenance = PendingPlayback.Provenance.USER,
-                                )
+                            scope.launch {
+                                // VLC-style sidecar subtitles: hand any same-basename
+                                // .srt/.ass/.ssa/.vtt next to the file to the player.
+                                //
+                                // Off the main thread. This lists the directory the video sits in,
+                                // and on a shared-storage folder holding hundreds of files that is
+                                // real disk work — it used to run inside the click handler, so the
+                                // tap that should open the player instead blocked on the filesystem
+                                // and dropped frames on the way out of this screen.
+                                val sidecars = withContext(Dispatchers.IO) {
+                                    findSidecarSubtitles(video.dataPath)
+                                }
+                                if (sidecars.isNotEmpty()) {
+                                    // historyHandled = false keeps the player recording this as a
+                                    // direct play as usual.
+                                    PendingPlayback.stash(
+                                        Video(url = url, quality = "", subtitleTracks = sidecars),
+                                        historyHandled = false,
+                                        // The user picked this file from their own device, and the
+                                        // sidecar subtitles were found next to it by the app — so
+                                        // the local schemes on-device playback needs are legitimate
+                                        // here.
+                                        provenance = PendingPlayback.Provenance.USER,
+                                    )
+                                }
+                                // After the stash, always: the player reads PendingPlayback as it
+                                // starts, so navigating first would race the subtitles into place.
+                                onPlayDirect(url)
                             }
-                            onPlayDirect(url)
                         },
                     )
                 }
