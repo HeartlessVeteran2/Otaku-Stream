@@ -63,6 +63,12 @@ object PendingPlayback {
         pending = Stashed(video, historyHandled, skipLookup, provenance)
     }
 
+    // Reads the pending video without clearing it, so a caller can decide whether to accept the
+    // playback before committing to it. The player uses this to check provenance: consuming first
+    // and validating afterwards would discard the stash on a rejection, and the retry — same URL,
+    // now with no stash — would be judged by the permissive default and play after all.
+    fun peek(url: String): Stashed? = pending?.takeIf { it.video.url == url }
+
     // Consumes and clears the pending video only if its url matches, so a mismatched or
     // already-consumed (e.g. after process death) lookup returns null rather than stale data.
     fun consume(url: String): Stashed? {

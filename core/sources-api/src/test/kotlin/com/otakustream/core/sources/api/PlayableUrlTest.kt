@@ -1,6 +1,7 @@
 package com.otakustream.core.sources.api
 
 import com.otakustream.core.sources.api.PendingPlayback.Provenance
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -70,6 +71,44 @@ class PlayableUrlTest {
         assertFalse(PlayableUrl.isAllowed("/data/data/com.otakustream/databases/otaku_stream.db", Provenance.USER))
         assertFalse(PlayableUrl.isAllowed("", Provenance.SOURCE))
         assertFalse(PlayableUrl.isAllowed("just-some-text", Provenance.USER))
+    }
+
+    @Test
+    fun `peeking does not consume, so a rejected url stays rejected on retry`() {
+        // The bypass this guards against, in the order it actually happened: a source stashes a
+        // file:// url, the player rejects it, the user presses Retry. If the check had consumed the
+        // stash on the way to rejecting, the retry would find no stash, fall through to the
+        // permissive default, and play the file — one tap around the whole gate.
+        val url = "file:///data/data/com.otakustream/databases/otaku_stream.db"
+        PendingPlayback.stash(Video(url = url, quality = ""), provenance = Provenance.SOURCE)
+
+        val first = PendingPlayback.peek(url)?.provenance ?: Provenance.USER
+        assertFalse(PlayableUrl.isAllowed(url, first))
+
+        // Retry: same call, and it must reach the same verdict.
+        val second = PendingPlayback.peek(url)?.provenance ?: Provenance.USER
+        assertEquals(Provenance.SOURCE, second)
+        assertFalse(PlayableUrl.isAllowed(url, second))
+
+        PendingPlayback.consume(url)
+    }
+
+    @Test
+    fun `peek returns nothing for a different url`() {
+        // Same url-matching rule consume() has, so a stale stash cannot lend its provenance to an
+        // unrelated playback.
+        PendingPlayback.stash(Video(url = "https://example.test/a.mp4", quality = ""))
+
+        assertTrue(PendingPlayback.peek("https://example.test/b.mp4") == null)
+
+        PendingPlayback.consume("https://example.test/a.mp4")
+    }
+
+    @Test
+    fun `the rejection message names whoever supplied the link`() {
+        // A user who pasted a bad link should not be sent hunting for a misbehaving source.
+        assertTrue(PlayableUrl.rejectionMessage(Provenance.SOURCE).contains("This source"))
+        assertFalse(PlayableUrl.rejectionMessage(Provenance.USER).contains("This source"))
     }
 
     @Test

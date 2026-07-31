@@ -369,6 +369,28 @@ class PlayerController @Inject constructor(
     }
 
     fun play(url: String, startPositionMs: Long? = null) {
+        // Before anything is mutated. What the player will open depends on who chose the URL: a
+        // source may only point at http, https or the app's own torrent:// identity, while file://
+        // and content:// belong to URLs the user picked, and refusing those would break on-device
+        // playback.
+        //
+        // Peeked rather than consumed. Consuming here and validating afterwards meant a rejected
+        // source URL lost its stash, so pressing Retry re-entered with no stash, fell through to the
+        // permissive default, and played the file — one tap around the whole check.
+        //
+        // No stash means nothing source-originated got here: PendingPlayback is the only channel
+        // headers and subtitle tracks travel on, so it is the only route a source has to the player.
+        // A file from the picker, an "Open with", or a replay from history all arrive without one.
+        val provenance = PendingPlayback.peek(url)?.provenance ?: PendingPlayback.Provenance.USER
+        if (!PlayableUrl.isAllowed(url, provenance)) {
+            // Returning before currentMediaUrl is reassigned and before segmentsJob is restarted:
+            // a refused URL must not become the key progress and completion are recorded against,
+            // and must not leave a Room observation running for a playback that never starts. Any
+            // playback already in progress is left alone.
+            _uiState.value = _uiState.value.copy(error = PlayableUrl.rejectionMessage(provenance))
+            return
+        }
+
         currentMediaUrl = url
         pendingSegmentStartMs = null
         // New media, new playback session: the foreground service must be (re)started when this
@@ -402,21 +424,6 @@ class PlayerController @Inject constructor(
         }
 
         val stashed = PendingPlayback.consume(url)
-
-        // What the player will open depends on who chose the URL. A source may only point at http,
-        // https or the app's own torrent:// identity; file:// and content:// are for URLs the user
-        // picked themselves, and refusing those would break on-device playback.
-        //
-        // No stash means nothing source-originated got here: sources reach the player only through
-        // PendingPlayback, because that is the only channel headers and subtitle tracks travel on.
-        // A file picked from the picker, an "Open with", or a replay from history all arrive with
-        // no stash and are the user's own choice.
-        val provenance = stashed?.provenance ?: PendingPlayback.Provenance.USER
-        if (!PlayableUrl.isAllowed(url, provenance)) {
-            _uiState.value = _uiState.value.copy(error = PlayableUrl.rejectionMessage())
-            return
-        }
-
         val pending = stashed?.video
         currentSkipLookup = stashed?.skipLookup
         _uiState.value = _uiState.value.copy(hasNext = PlaybackQueue.hasResolver())

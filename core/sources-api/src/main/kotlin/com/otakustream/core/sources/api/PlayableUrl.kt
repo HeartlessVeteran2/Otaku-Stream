@@ -31,7 +31,15 @@ object PlayableUrl {
         }
     }
 
-    fun rejectionMessage(): String =
-        "This source returned a link the player won't open. Sources may only point at web or " +
-            "torrent addresses, not at files on your device."
+    // Worded for whoever actually supplied the link. Blaming "this source" for a link the user
+    // pasted themselves is both wrong and unhelpful — they would go looking for a misbehaving
+    // source that does not exist.
+    fun rejectionMessage(provenance: PendingPlayback.Provenance): String = when (provenance) {
+        PendingPlayback.Provenance.SOURCE ->
+            "This source returned a link the player won't open. Sources may only point at web or " +
+                "torrent addresses, not at files on your device."
+        PendingPlayback.Provenance.USER ->
+            "That link can't be played. The player opens web addresses, torrents, and files on " +
+                "your device."
+    }
 }
