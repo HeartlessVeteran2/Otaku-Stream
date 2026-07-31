@@ -627,6 +627,60 @@ class PlayerController @Inject constructor(
         maybePersistProgress(player.currentPosition.coerceAtLeast(0L), force = true)
     }
 
+    // Ends the current playback outright — what leaving the player screen means. Until this existed,
+    // backing out of the player left the episode playing: audio continued over the details screen,
+    // the media notification stayed up, and a torrent kept streaming, with no route back to the
+    // controls that would have stopped any of it.
+    //
+    // Deliberately not release(). The ExoPlayer is a @Singleton shared by every playback in the
+    // process, so releasing it here would leave the next one with a dead player. What is torn down
+    // is the *playback*: position saved, media dropped, jobs cancelled, service stopped.
+    fun stop() {
+        // Before player.stop(), which resets the position to zero — reading it afterwards would
+        // write "the very beginning" over the user's real place in the episode.
+        maybePersistProgress(player.currentPosition.coerceAtLeast(0L), force = true)
+
+        loadJob?.cancel()
+        loadJob = null
+        torrentSubtitleJob?.cancel()
+        torrentSubtitleJob = null
+        segmentsJob?.cancel()
+        segmentsJob = null
+
+        player.stop()
+        // Releases the media source, and with it the DataSources it opened. That is what closes a
+        // torrent reader, so the engine can retire the session instead of streaming a video nobody
+        // is watching.
+        player.clearMediaItems()
+
+        currentMediaUrl = null
+        currentMediaItem = null
+        currentDataSourceFactory = null
+        currentSkipLookup = null
+        manualSegments = emptyList()
+        aniSkipSegments = emptyList()
+        aniSkipFetched = false
+        recomputeSegments()
+        // The chain belongs to the playback that just ended. Left armed, the next thing to open the
+        // player would find a Next button offering an episode of the show the user walked away from.
+        PlaybackQueue.clear()
+
+        if (foregroundServiceStarted) {
+            foregroundServiceStarted = false
+            appContext.stopService(Intent(appContext, PlaybackService::class.java))
+        }
+
+        _uiState.value = _uiState.value.copy(
+            isPlaying = false,
+            isBuffering = false,
+            hasNext = false,
+            activeSkipSegment = null,
+            error = null,
+            notice = null,
+        )
+        _progress.value = PlaybackProgress()
+    }
+
     fun resume() {
         player.playWhenReady = true
     }

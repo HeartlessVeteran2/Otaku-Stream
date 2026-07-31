@@ -167,6 +167,18 @@ fun PlayerScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // Leaving the player ends the playback. Backing out used to only remove the UI: the episode kept
+    // playing underneath the details screen, the media notification stayed up, and a torrent carried
+    // on streaming — with the controls that could have stopped any of it now unreachable.
+    //
+    // This composable is only disposed when the player destination is actually left. Backgrounding
+    // the app does not dispose it (the destination is still on the back stack), and neither does
+    // rotating or entering PiP — the activity declares configChanges and stays on this route — so
+    // background audio and PiP are unaffected.
+    DisposableEffect(Unit) {
+        onDispose { viewModel.controller.stop() }
+    }
+
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -190,6 +202,11 @@ fun PlayerScreen(
                     view.applySubtitleStyle(subtitleStyle)
                 }
             },
+            // Detach before the view is discarded. The ExoPlayer is a process-lifetime @Singleton and
+            // keeps a reference to every PlayerView attached to it, so without this each visit to the
+            // player left another dead view — and the Activity context it holds — alive for as long
+            // as the app ran.
+            onRelease = { view -> view.player = null },
         )
 
         if (!isInPip) {

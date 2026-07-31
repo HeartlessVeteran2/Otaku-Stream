@@ -48,13 +48,17 @@ class SourceRegistry @Inject constructor(
     override fun registerDynamic(source: VideoSource) {
         while (true) {
             val current = _dynamicSources.value
-            if (current.any { it.id == source.id }) {
+            val registered = current.firstOrNull { it.id == source.id }
+            if (registered != null) {
                 // Already registered, so this instance is never going to be used — but it has been
                 // *built*, and for a Mangayomi extension that means a live QuickJS runtime with its
                 // own thread and native context. Dropping the reference does not release either.
                 // Duplicates are routine: a reinstall, or a bootstrap racing a manual install,
                 // produces one.
-                closeQuietly(source)
+                //
+                // Unless the duplicate is this very instance, in which case closing it would kill a
+                // source that is registered and in use.
+                if (registered !== source) closeQuietly(source)
                 return
             }
             if (_dynamicSources.compareAndSet(current, current + source)) return
