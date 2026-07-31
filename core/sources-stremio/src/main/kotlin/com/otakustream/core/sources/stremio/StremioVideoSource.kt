@@ -12,12 +12,14 @@ import com.otakustream.core.sources.api.Video
 import com.otakustream.core.sources.api.VideoSource
 import com.otakustream.core.torrent.TorrentUri
 import com.otakustream.core.sources.stremio.model.StremioCatalog
+import com.otakustream.core.sources.stremio.model.StremioMeta
 import com.otakustream.core.sources.stremio.model.StremioStream
 import com.otakustream.core.sources.stremio.model.parseCatalogResponse
 import com.otakustream.core.sources.stremio.model.parseMetaResponse
 import com.otakustream.core.sources.stremio.model.parseStreamResponse
 import com.otakustream.core.sources.stremio.model.parseSubtitlesResponse
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -48,6 +50,41 @@ class StremioVideoSource(
 ) : VideoSource {
 
     private val baseUrl: String = manifestUrl.removeSuffix("/manifest.json")
+
+    // getMediaDetails and getEpisodeList both derive from the same /meta response, and the details
+    // screen calls them one after the other — so opening any title fetched the identical URL twice,
+    // sequentially, before anything appeared on screen. The in-flight job is cached rather than the
+    // parsed result, so a second caller arriving while the first request is still open joins it
+    // instead of starting another.
+    //
+    // Bounded and access-ordered, matching AniListClient's detail cache. A StremioVideoSource lives
+    // for the whole process, so an unbounded map would hold every title the user ever opened — and
+    // evicting is also what stops a long session from serving an episode list that a currently
+    // airing show has since added to.
+    private val metaCache = object : LinkedHashMap<String, Deferred<StremioMeta>>(META_CACHE_MAX, 0.75f, true) {
+        override fun removeEldestEntry(eldest: Map.Entry<String, Deferred<StremioMeta>>): Boolean =
+            size > META_CACHE_MAX
+    }
+
+    // Guards metaCache: an access-ordered LinkedHashMap reorders itself on a *read*, so even
+    // lookups mutate it and none of it is thread-safe.
+    private val metaCacheLock = Any()
+
+    private suspend fun metaFor(type: String, id: String): StremioMeta = coroutineScope {
+        val key = "$type|$id"
+        val deferred = synchronized(metaCacheLock) {
+            metaCache.getOrPut(key) { async { parseMetaResponse(get("$baseUrl/meta/$type/$id.json")) } }
+        }
+        try {
+            deferred.await()
+        } catch (t: Throwable) {
+            // A failed or cancelled job must not stay cached, or one dropped connection would make
+            // the title permanently unopenable for the rest of the session. Removed by identity, so
+            // this cannot evict a fresh attempt someone else has already installed.
+            synchronized(metaCacheLock) { if (metaCache[key] === deferred) metaCache.remove(key) }
+            throw t
+        }
+    }
 
     override suspend fun getPopular(page: Int): CatalogPage = fetchCatalog(pagingExtra(page))
 
@@ -91,7 +128,7 @@ class StremioVideoSource(
 
     override suspend fun getMediaDetails(media: MediaItem): MediaDetails = withContext(Dispatchers.IO) {
         val (type, id) = splitTypeId(media.url)
-        val meta = parseMetaResponse(get("$baseUrl/meta/$type/$id.json"))
+        val meta = metaFor(type, id)
         MediaDetails(
             media = media,
             description = meta.description,
@@ -109,7 +146,7 @@ class StremioVideoSource(
 
     override suspend fun getEpisodeList(media: MediaItem): List<Episode> = withContext(Dispatchers.IO) {
         val (type, id) = splitTypeId(media.url)
-        val meta = parseMetaResponse(get("$baseUrl/meta/$type/$id.json"))
+        val meta = metaFor(type, id)
         if (meta.videos.isEmpty()) {
             listOf(Episode(url = "$type|${meta.id}", name = meta.name, episodeNumber = 1f))
         } else {
@@ -277,5 +314,10 @@ class StremioVideoSource(
         // Cap every Stremio request so a single slow endpoint (e.g. an overloaded torrent
         // indexer) can't hold up catalog/detail/stream resolution.
         const val REQUEST_TIMEOUT_MS = 12_000L
+
+        // Titles to keep /meta responses for. Small on purpose: the value it exists to capture is
+        // the two calls one details screen makes, and there is one of these caches per registered
+        // catalog, not one for the app.
+        const val META_CACHE_MAX = 20
     }
 }
