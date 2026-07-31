@@ -160,6 +160,10 @@ class MainActivity : ComponentActivity() {
                 trackers = link.trackers,
             ),
             historyHandled = false,
+            // Reached only after the user confirmed the magnet prompt, so this is their choice
+            // rather than a source's. The url is torrent:// either way, but saying so keeps the
+            // provenance honest rather than relying on the scheme happening to be allowed.
+            provenance = PendingPlayback.Provenance.USER,
         )
         return url
     }

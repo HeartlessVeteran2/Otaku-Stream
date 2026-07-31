@@ -69,6 +69,9 @@ private const val PLAYER_SCREEN_TAG = "PlayerScreen"
 @Composable
 fun PlayerScreen(
     videoUrl: String,
+    // True when an installed source chose this url. Carried on the navigation route rather than
+    // inferred, so it survives the app being killed and restored.
+    fromSource: Boolean = false,
     onBack: () -> Unit = {},
     modifier: Modifier = Modifier,
     viewModel: PlayerViewModel = hiltViewModel(),
@@ -132,7 +135,7 @@ fun PlayerScreen(
     ) { /* granted or not, playback proceeds — the notification simply won't show if denied */ }
 
     LaunchedEffect(videoUrl) {
-        viewModel.play(videoUrl)
+        viewModel.play(videoUrl, fromSource)
         // Bring the Cast session listener online so the route button reflects device availability.
         viewModel.warmUpCast()
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {

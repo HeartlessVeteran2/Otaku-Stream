@@ -85,7 +85,12 @@ private const val ROUTE_DETAILS = "details/{sourceId}?mediaUrl={mediaUrl}&title=
 private const val ROUTE_ANILIST_DETAILS = "anilist/{mediaId}"
 private const val ROUTE_ANILIST_WATCH = "anilist-watch/{mediaId}?title={title}"
 private const val ROUTE_ANILIST_SEARCH = "anilist-search"
-private const val ROUTE_PLAYER = "player?videoUrl={videoUrl}"
+// fromSource rides on the route so it survives process death. PendingPlayback is in-memory, and the
+// back stack is not: after the OS kills the app and the user returns, this route is restored with its
+// arguments while the stash is gone. Without the flag, a source-supplied url would come back looking
+// like the user's own choice and be judged by the permissive rules. Only ever tightens — absent means
+// "not known to be from a source", which is what every user-initiated entry point is.
+private const val ROUTE_PLAYER = "player?videoUrl={videoUrl}&fromSource={fromSource}"
 
 private data class BottomTab(val route: String, val label: String, val icon: ImageVector)
 
@@ -332,7 +337,10 @@ fun AppNavHost(
                     sourceId = args?.getLong("sourceId") ?: 0L,
                     mediaUrl = args?.getString("mediaUrl").orEmpty(),
                     mediaTitle = args?.getString("title").orEmpty(),
-                    onPlayVideo = { videoUrl -> navController.navigate("player?videoUrl=${Uri.encode(videoUrl)}") },
+                    // The one entry point where an installed source chose the url.
+                    onPlayVideo = { videoUrl ->
+                        navController.navigate("player?videoUrl=${Uri.encode(videoUrl)}&fromSource=true")
+                    },
                     onOpenTracking = { navController.navigate(ROUTE_TRACKING_SETTINGS) },
                     onBack = { navController.popBackStack() },
                 )
@@ -390,12 +398,17 @@ fun AppNavHost(
                         nullable = true
                         defaultValue = ""
                     },
+                    navArgument("fromSource") {
+                        type = NavType.BoolType
+                        defaultValue = false
+                    },
                 ),
             ) { entry ->
                 // Navigation Compose already URL-decodes query-string arguments — see the note above.
                 val videoUrl = entry.arguments?.getString("videoUrl").orEmpty()
                 PlayerScreen(
                     videoUrl = videoUrl,
+                    fromSource = entry.arguments?.getBoolean("fromSource") == true,
                     onBack = { navController.popBackStack() },
                 )
             }

@@ -33,6 +33,7 @@ import com.otakustream.core.database.skip.SkipSegment
 import com.otakustream.core.database.skip.SkipSegmentRepository
 import com.otakustream.core.database.skip.SkipSegmentType
 import com.otakustream.core.sources.api.PendingPlayback
+import com.otakustream.core.sources.api.PlayableUrl
 import com.otakustream.core.sources.api.PlaybackCompletion
 import com.otakustream.core.sources.api.PlaybackQueue
 import com.otakustream.core.sources.api.SkipMark
@@ -367,7 +368,36 @@ class PlayerController @Inject constructor(
         }
     }
 
-    fun play(url: String, startPositionMs: Long? = null) {
+    fun play(url: String, startPositionMs: Long? = null, fromSource: Boolean = false) {
+        // Before anything is mutated. What the player will open depends on who chose the URL: a
+        // source may only point at http, https or the app's own torrent:// identity, while file://
+        // and content:// belong to URLs the user picked, and refusing those would break on-device
+        // playback.
+        //
+        // Peeked rather than consumed. Consuming here and validating afterwards meant a rejected
+        // source URL lost its stash, so pressing Retry re-entered with no stash, fell through to the
+        // permissive default, and played the file — one tap around the whole check.
+        //
+        // No stash means nothing source-originated got here: PendingPlayback is the only channel
+        // headers and subtitle tracks travel on, so it is the only route a source has to the player.
+        // A file from the picker, an "Open with", or a replay from history all arrive without one.
+        // Either signal saying "a source chose this" is enough, and neither alone is sufficient. The
+        // stash is richer but in-memory, so it is gone after process death; the route argument
+        // survives that but is only set where the app knows a source was involved.
+        val provenance = if (fromSource || PendingPlayback.peek(url)?.provenance == PendingPlayback.Provenance.SOURCE) {
+            PendingPlayback.Provenance.SOURCE
+        } else {
+            PendingPlayback.Provenance.USER
+        }
+        if (!PlayableUrl.isAllowed(url, provenance)) {
+            // Returning before currentMediaUrl is reassigned and before segmentsJob is restarted:
+            // a refused URL must not become the key progress and completion are recorded against,
+            // and must not leave a Room observation running for a playback that never starts. Any
+            // playback already in progress is left alone.
+            _uiState.value = _uiState.value.copy(error = PlayableUrl.rejectionMessage(provenance))
+            return
+        }
+
         currentMediaUrl = url
         pendingSegmentStartMs = null
         // New media, new playback session: the foreground service must be (re)started when this
