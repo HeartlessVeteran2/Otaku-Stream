@@ -13,9 +13,27 @@ object PlaybackQueue {
     @Volatile
     private var resolver: (suspend () -> Video?)? = null
 
+    // Writes are serialized so replaceResolverIfCurrent's compare and set can't be interleaved with
+    // a plain install; reads stay lock-free on the @Volatile field.
+    private val writeLock = Any()
+
     fun setNextResolver(resolver: (suspend () -> Video?)?) {
-        this.resolver = resolver
+        synchronized(writeLock) { this.resolver = resolver }
     }
+
+    // Re-arms the chain, but only if `current` is still the installed resolver.
+    //
+    // An auto-play resolver suspends while it fetches the next episode's stream, and the user can
+    // start a different playback in that window — which installs a resolver for the new chain. The
+    // stale resolver then finishes and re-arms unconditionally, replacing it, and auto-play carries
+    // on through the episode list the user has left. Identity is the check that matters here: "am I
+    // still the resolver anyone would call?" Returns false when the caller has been superseded.
+    fun replaceResolverIfCurrent(current: suspend () -> Video?, next: (suspend () -> Video?)?): Boolean =
+        synchronized(writeLock) {
+            if (resolver !== current) return false
+            resolver = next
+            true
+        }
 
     fun hasResolver(): Boolean = resolver != null
 
@@ -27,6 +45,6 @@ object PlaybackQueue {
         }
 
     fun clear() {
-        resolver = null
+        synchronized(writeLock) { resolver = null }
     }
 }

@@ -38,7 +38,11 @@ class TorrentFileReader private constructor(
     // Invoked exactly once when this reader closes, so whoever owns the session can decide whether
     // anything still needs the torrent. The reader itself must not stop the session: several readers
     // can share one, and it has no way to know about the others.
-    private val onClosed: (TorrentHandle, String) -> Unit,
+    //
+    // Passed the reader rather than its handle and path: the owner keeps a registry of live readers,
+    // and "which reader closed" is a question only identity can answer once two readers of the same
+    // torrent — which is exactly what Media3 opens — are indistinguishable by handle and path.
+    private val onClosed: (TorrentFileReader) -> Unit,
 ) : Closeable {
 
     private val raf: RandomAccessFile = RandomAccessFile(file, "r")
@@ -150,7 +154,7 @@ class TorrentFileReader private constructor(
         // Deadlines are per-torrent state; leaving them set would keep skewing the scheduler after
         // this reader is gone.
         runCatching { handle.clearPieceDeadlines() }
-        runCatching { onClosed(handle, file.absolutePath) }
+        runCatching { onClosed(this) }
     }
 
     companion object {
@@ -175,7 +179,7 @@ class TorrentFileReader private constructor(
             ref: TorrentRef,
             trackers: List<String>,
             saveDir: File,
-            onClosed: (TorrentHandle, String) -> Unit,
+            onClosed: (TorrentFileReader) -> Unit,
         ): TorrentFileReader {
             if (!saveDir.exists() && !saveDir.mkdirs()) {
                 throw IOException("Could not create torrent save directory: $saveDir")

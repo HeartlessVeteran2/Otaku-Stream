@@ -1,7 +1,9 @@
 package com.otakustream.feature.sources.ui
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.otakustream.core.common.runCatchingCancellable
 import com.otakustream.core.database.library.LibraryEntry
 import com.otakustream.core.database.library.LibraryRepository
 import com.otakustream.core.database.library.WatchHistoryEntry
@@ -350,16 +352,26 @@ class MediaDetailsViewModel @Inject constructor(
     // episode the user had started by hand. buildSkipLookup below already avoids exactly this.
     private fun installNextResolver(sourceId: Long, episode: Episode) {
         val mediaUrl = currentMediaUrl.value ?: return
+        // A snapshot of the list as it was when playback started. Auto-play must keep advancing
+        // through the same episode list even after the screen that loaded it is gone, and reading
+        // _uiState later would be reading a ViewModel that no longer has anyone updating it.
+        val episodes = _uiState.value.episodes
+        val currentIndex = episodes.indexOfFirst { it.url == episode.url }
+        if (currentIndex < 0 || currentIndex + 1 !in episodes.indices) {
+            // Nothing follows this episode, so there is nothing to resolve. Installing anyway is
+            // what put a dead Next button in the player controls: hasResolver() is the only thing
+            // driving that button, and a resolver that can only ever return null still counts.
+            // Clearing rather than leaving it alone matters too — whatever the *previous* playback
+            // installed is still armed, and it points into a different show's episode list.
+            PlaybackQueue.clear()
+            return
+        }
         PlaybackQueue.setNextResolver(
             nextVideoResolver(
                 sources = sourceRepository,
                 library = libraryRepository,
                 tracking = trackingManager,
-                // A snapshot of the list as it was when playback started. Auto-play must keep
-                // advancing through the same episode list even after the screen that loaded it is
-                // gone, and reading _uiState later would be reading a ViewModel that no longer
-                // has anyone updating it.
-                episodes = _uiState.value.episodes,
+                episodes = episodes,
                 current = episode,
                 sourceId = sourceId,
                 mediaUrl = mediaUrl,
@@ -509,36 +521,66 @@ private fun nextVideoResolver(
     mediaUrl: String,
     mediaTitle: String,
     coverUrl: String?,
-): suspend () -> Video? = resolver@{
-    val currentIndex = episodes.indexOfFirst { it.url == current.url }
-    val next = episodes.getOrNull(currentIndex + 1) ?: return@resolver null
-    val source = sources.getSource(sourceId) ?: return@resolver null
-    val video = source.getVideoList(next).firstOrNull() ?: return@resolver null
+): suspend () -> Video? {
+    // The resolver has to be able to name itself: re-arming the chain is only correct while this
+    // resolver is still the one PlaybackQueue holds (see replaceResolverIfCurrent), and identity is
+    // the check. A lambda cannot refer to itself as it is being built, so it is handed its own
+    // reference immediately afterwards — set long before anything can invoke it.
+    val self = java.util.concurrent.atomic.AtomicReference<suspend () -> Video?>()
+    val resolver: suspend () -> Video? = resolver@{
+        val currentIndex = episodes.indexOfFirst { it.url == current.url }
+        val next = episodes.getOrNull(currentIndex + 1)
+        if (next == null) {
+            // End of the captured list. Retire the chain so the Next button stops offering an
+            // episode that does not exist, but only if this is still the armed resolver.
+            self.get()?.let { PlaybackQueue.replaceResolverIfCurrent(it, null) }
+            return@resolver null
+        }
+        val source = sources.getSource(sourceId) ?: return@resolver null
+        val video = source.getVideoList(next).firstOrNull() ?: return@resolver null
 
-    // Chain on to the episode after this one, with the same captured list.
-    PlaybackQueue.setNextResolver(
-        nextVideoResolver(sources, library, tracking, episodes, next, sourceId, mediaUrl, mediaTitle, coverUrl),
-    )
+        // Chain on to the episode after this one, with the same captured list — unless the user
+        // started something else while getVideoList was in flight, in which case that newer
+        // playback owns the queue and this chain is done.
+        val stillArmed = self.get()?.let { me ->
+            PlaybackQueue.replaceResolverIfCurrent(
+                me,
+                nextVideoResolver(sources, library, tracking, episodes, next, sourceId, mediaUrl, mediaTitle, coverUrl),
+            )
+        } ?: false
+        if (!stillArmed) return@resolver null
 
-    // Local history at resolve time, so Continue Watching and the episode checkmarks advance with
-    // auto-play. The AniList sync stays deferred to the player reporting this episode finished — it
-    // must never fire the instant the next stream merely resolves.
-    library.recordWatch(
-        WatchHistoryEntry(
-            sourceId = sourceId,
-            mediaUrl = mediaUrl,
-            mediaTitle = mediaTitle,
-            episodeUrl = next.url,
-            episodeName = next.name,
-            episodeNumber = next.episodeNumber,
-            watchedAtEpochMs = System.currentTimeMillis(),
-            coverUrl = coverUrl,
-        ),
-    )
-    val episodeNumber = next.episodeNumber
-    val season = next.season
-    PlaybackCompletion.register(video.url) {
-        tracking.onEpisodeWatched(mediaUrl, episodeNumber, season)
+        // Local history at resolve time, so Continue Watching and the episode checkmarks advance
+        // with auto-play. The AniList sync stays deferred to the player reporting this episode
+        // finished — it must never fire the instant the next stream merely resolves.
+        //
+        // Guarded, because awaiting it here put it on autoplay's critical path in a way the old
+        // fire-and-forget launch never did: PlaybackQueue.resolveNext turns any throw from this
+        // resolver into null, and playNext reads null as "there is no next episode". Unguarded, one
+        // failed database write would stop the episode after it from playing at all, even though its
+        // stream had already resolved. A missing history row is worth far less than continuing
+        // playback.
+        runCatchingCancellable {
+            library.recordWatch(
+                WatchHistoryEntry(
+                    sourceId = sourceId,
+                    mediaUrl = mediaUrl,
+                    mediaTitle = mediaTitle,
+                    episodeUrl = next.url,
+                    episodeName = next.name,
+                    episodeNumber = next.episodeNumber,
+                    watchedAtEpochMs = System.currentTimeMillis(),
+                    coverUrl = coverUrl,
+                ),
+            )
+        }.onFailure { Log.w("MediaDetailsViewModel", "Could not record the auto-played episode", it) }
+        val episodeNumber = next.episodeNumber
+        val season = next.season
+        PlaybackCompletion.register(video.url) {
+            tracking.onEpisodeWatched(mediaUrl, episodeNumber, season)
+        }
+        video
     }
-    video
+    self.set(resolver)
+    return resolver
 }
