@@ -54,7 +54,7 @@ class PlayerViewModel @Inject constructor(
 
     fun markGestureCoachSeen() { onboardingPrefs.hasSeenGestureCoach = true }
 
-    fun play(url: String) = controller.play(url)
+    fun play(url: String, fromSource: Boolean = false) = controller.play(url, fromSource = fromSource)
 
     fun warmUpCast() = controller.warmUpCast()
 
