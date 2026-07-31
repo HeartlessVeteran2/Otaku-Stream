@@ -68,14 +68,38 @@ class TorrentEngine @Inject constructor(
     private var pendingTeardown: java.util.concurrent.ScheduledFuture<*>? = null
     private var handleAwaitingRemoval: org.libtorrent4j.TorrentHandle? = null
 
+    // Every reader currently registered, in the order they were opened. Guarded by `lock`.
+    //
+    // A list rather than a count, because more than one reader is open at a time far more often than
+    // the design first assumed: Media3 opens a second DataSource over the same file before closing
+    // the first on a seek, and the in-torrent subtitle feature adds another. Everything that used to
+    // be tracked separately — which reader is current, which paths are protected — is derived from
+    // this, so those views cannot disagree with each other or outlive the readers they describe.
+    private val liveReaders = mutableListOf<TorrentFileReader>()
+
+    // Info hashes of readers that have taken the count but have not finished opening. Guarded by
+    // `lock`, and a multiset because two opens of the same torrent can be in flight at once.
+    //
+    // liveReaders alone is not the whole picture. openFile() increments the reader count and *then*
+    // blocks in TorrentFileReader.open waiting for metadata, so between those two points a reader
+    // exists as far as the count is concerned and is invisible to anything reading the list. If the
+    // previous reader of that same torrent closes in the window, the count is still above zero, so
+    // teardown is skipped and the close falls through to the "remove it now" branch — which would
+    // remove the torrent the reader still opening is about to read.
+    private val pendingOpens = mutableMapOf<String, Int>()
+
     // Absolute paths of files currently open for reading. The cache sweep is handed these as
     // protected paths: a sweep triggered from the settings screen can fire while a playback is in
     // progress, and deleting the file being streamed would kill it.
-    private val openPaths: MutableSet<String> =
-        java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap())
+    //
+    // Guarded by `lock`, and derived from liveReaders rather than kept as a set. As a set it was a
+    // silent data-loss bug: two readers of the same file added one entry between them, so the first
+    // close unprotected a file the second was still streaming, and the sweep was then free to delete
+    // it mid-playback — the exact failure the protection exists to prevent.
+    private fun protectedPathsLocked(): Set<String> = liveReaders.mapTo(mutableSetOf()) { it.filePath }
 
     // Snapshot for callers that sweep the cache while playback may be running.
-    fun protectedCachePaths(): Set<String> = openPaths.toSet()
+    fun protectedCachePaths(): Set<String> = synchronized(lock) { protectedPathsLocked() }
 
     // Whether anything still holds a file open. True from the moment a playback starts resolving — not
     // from when the torrent's metadata arrives — which is what makes it the right signal for "is there
@@ -210,6 +234,10 @@ class TorrentEngine @Inject constructor(
             // count stays one too high forever, and the session never tears down at the end of playback.
             openedAt = generation.get()
             isFirstReader = openReaders.getAndIncrement() == 0
+            // Declared with the count, for the same reason the count is taken here: from this point
+            // on this reader is real to everything that has to decide whether a torrent is still
+            // needed, even though it will not exist as an object for another few seconds.
+            pendingOpens.merge(ref.infoHash.lowercase(), 1, Int::plus)
             // Unless this is a *different* torrent, in which case the held handle belongs to
             // something nobody is watching any more and has to go now. Auto-play reaches here about a
             // second after the previous episode's reader closed, so without this the finished
@@ -238,23 +266,55 @@ class TorrentEngine @Inject constructor(
             // state.
             TorrentService.start(appContext)
         }
-        return try {
+        val reader = try {
             TorrentFileReader.open(
                 session,
                 ref,
                 effectiveTrackers,
                 saveDir,
-                onClosed = { handle, path -> releaseReader(openedAt, handle, path) },
-            ).also {
-                activeReader.set(it)
-                openPaths.add(it.filePath)
-            }
+                onClosed = { closing -> releaseReader(openedAt, closing) },
+            )
         } catch (e: Throwable) {
             // The count was taken before open() could fail; give it back, or a failed open would
-            // pin the session open for the rest of the process.
-            releaseReader(openedAt, handle = null, path = null)
+            // pin the session open for the rest of the process. No reader exists to deregister.
+            synchronized(lock) { clearPendingOpenLocked(ref.infoHash) }
+            releaseReader(openedAt, reader = null)
             throw e
         }
+        // Registered under the lock, re-checking the generation, because open() above blocks — it
+        // waits for the torrent's metadata, which on a cold magnet can take the better part of a
+        // minute. stopAll() landing in that window retires this generation, resets the count and
+        // empties the reader registry, and the registration would then run *after* all of it.
+        //
+        // Both halves matter. A stale activeReader means stats() calls into a handle whose torrent
+        // has been removed, which is undefined at the native layer. A stale registry entry is worse
+        // in a quiet way: releaseReader returns early for a retired generation, before it can
+        // deregister, so that file stays protected from eviction for the rest of the process — and
+        // once the protected file is the largest thing in the cache, the quota can never be met
+        // again.
+        val stillCurrent = synchronized(lock) {
+            val current = openedAt == generation.get()
+            if (current) {
+                liveReaders += reader
+                activeReader.set(reader)
+            }
+            // Dropped in the same critical section that adds the reader to the list, so there is no
+            // instant where this torrent is neither pending nor live and a close could decide
+            // nothing needs it.
+            clearPendingOpenLocked(ref.infoHash)
+            current
+        }
+        if (!stillCurrent) {
+            // The user stopped playback while this was opening. The reader belongs to a session that
+            // has already been torn down, so it is closed rather than handed back; its close runs
+            // releaseReader, which correctly ignores it as stale. Closing is the *only* release on
+            // this path — routing the throw below through the catch above as well would have run
+            // releaseReader twice for one reader.
+            Log.i(TAG, "Discarding a reader whose session was stopped while it was opening")
+            runCatching { reader.close() }
+            throw java.io.IOException("Playback was stopped while the torrent was opening")
+        }
+        return reader
     }
 
     // A snapshot for the notification, or null when nothing is being read. Returns a plain data
@@ -310,7 +370,10 @@ class TorrentEngine @Inject constructor(
             // call releaseReader, but a reader that never closes cleanly would otherwise leave its path
             // protected for the rest of the process — permanently exempting the largest file in the
             // cache from eviction, so the quota could never be met again.
-            openPaths.clear()
+            liveReaders.clear()
+            // Opens still in flight belong to the generation being retired. Their registration will
+            // find itself stale and close the reader it built, so nothing is left to protect.
+            pendingOpens.clear()
             // Stop means stop: no grace period, and any teardown already scheduled is redundant now.
             pendingTeardown?.cancel(false)
             pendingTeardown = null
@@ -325,11 +388,8 @@ class TorrentEngine @Inject constructor(
     // Removing the torrent is what actually stops peer traffic: pausing or clearing priorities still
     // leaves the session talking to the swarm. Files are left on disk deliberately — they are the
     // cache a resumed playback reads from, and the storage quota is what reclaims them.
-    private fun releaseReader(
-        openedAt: Long,
-        handle: org.libtorrent4j.TorrentHandle?,
-        path: String? = null,
-    ) {
+    private fun releaseReader(openedAt: Long, reader: TorrentFileReader?) {
+        val handle = reader?.torrentHandle
         // The generation check and the count mutation are one critical section, matching stopAll().
         // Checked and then decremented separately, stopAll() landing in the gap would let a reader
         // that passed the check as current go on to decrement a count that has since been reset for a
@@ -344,13 +404,23 @@ class TorrentEngine @Inject constructor(
                 //    count to zero and stop the session it is streaming from;
                 //  - the torrent left the session with the session itself, and the handle is no longer
                 //    valid to call into;
-                //  - openPaths was cleared, and if the user replayed the same file its path is back in
-                //    the set on behalf of the new reader — removing it here would unprotect a file
-                //    currently being streamed and let the sweep delete it mid-playback.
+                //  - the registry was emptied, and if the user replayed the same file its path is
+                //    protected again on behalf of the new reader — deregistering here would unprotect
+                //    a file currently being streamed and let the sweep delete it mid-playback.
                 Log.i(TAG, "Ignoring the close of a reader from a stopped session")
                 return
             }
-            path?.let { openPaths.remove(it) }
+            reader?.let { closing ->
+                // Identity, not path: two readers of the same file are otherwise indistinguishable,
+                // and removing "a reader with this path" would deregister whichever one happened to
+                // be found first.
+                liveReaders.removeAll { it === closing }
+                // activeReader must never outlive the reader it names — stats() and
+                // subtitleProgress() call into it, and a closed reader's torrent may already have
+                // been removed from the session, which is undefined at the native layer. Hand the
+                // role to the newest reader still open, or drop it if this was the last.
+                if (activeReader.get() === closing) activeReader.set(liveReaders.lastOrNull())
+            }
             // Floored at zero rather than a plain decrement, for the same reason: stopAll() can reset
             // the count under a reader that then closes normally, and a bare decrement would go
             // negative — after which the next openFile()'s `getAndIncrement() == 0` check is false and
@@ -363,12 +433,44 @@ class TorrentEngine @Inject constructor(
                 // teardown; openFile() cancels it if a reader arrives inside the window.
                 handle?.let { handleAwaitingRemoval = it }
                 scheduleTeardown(openedAt)
-            } else if (handle != null) {
-                // Another reader is still going, so this handle is one it doesn't share. Remove it
-                // now: removing the torrent is what actually stops peer traffic.
+            } else if (handle != null && !isSharedLocked(handle)) {
+                // Another reader is still going, but not on this torrent, so removing it now is safe
+                // — and removing the torrent is what actually stops peer traffic. The shared case is
+                // the one that had to be excluded: Media3 opens a second DataSource over the same
+                // file before closing the first on a seek, and removing there would pull the torrent
+                // out from under the reader that is still streaming it.
                 runCatching { session?.remove(handle) }
                     .onFailure { Log.w(TAG, "Could not remove torrent from the session", it) }
             }
+        }
+    }
+
+    // Retires one in-flight open of `infoHash`. Caller must hold `lock`. Tolerates an entry that
+    // stopAll() has already cleared, which is why it is a decrement-or-remove rather than a remove.
+    private fun clearPendingOpenLocked(infoHash: String) {
+        val key = infoHash.lowercase()
+        val remaining = (pendingOpens[key] ?: 0) - 1
+        if (remaining > 0) pendingOpens[key] = remaining else pendingOpens.remove(key)
+    }
+
+    // Whether anything else still needs the torrent behind `handle` — a reader already streaming it,
+    // or one still opening it. Caller must hold `lock`.
+    //
+    // Compared by info hash rather than by TorrentHandle identity: handles are thin wrappers that
+    // libtorrent4j hands out afresh, so two of them can name the same torrent.
+    //
+    // Every unreadable hash counts as a match, deliberately. The two outcomes are not symmetric: a
+    // torrent left in place is removed by the teardown path a few seconds later anyway, while a
+    // torrent removed in error kills playback that is in progress. So a transient infoHash() failure
+    // — on either side of the comparison — has to fall towards "still needed".
+    private fun isSharedLocked(handle: org.libtorrent4j.TorrentHandle): Boolean {
+        val closingHash = runCatching { handle.infoHash().toHex() }.getOrNull()
+            // Nothing to compare against, so anything still holding a reader might be holding this.
+            ?: return liveReaders.isNotEmpty() || pendingOpens.isNotEmpty()
+        if (pendingOpens.keys.any { it.equals(closingHash, ignoreCase = true) }) return true
+        return liveReaders.any { other ->
+            val otherHash = runCatching { other.torrentHandle.infoHash().toHex() }.getOrNull()
+            otherHash == null || otherHash.equals(closingHash, ignoreCase = true)
         }
     }
 

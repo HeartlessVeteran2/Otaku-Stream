@@ -134,8 +134,13 @@ fun PlayerScreen(
         ActivityResultContracts.RequestPermission(),
     ) { /* granted or not, playback proceeds — the notification simply won't show if denied */ }
 
+    // The playback this screen started. Held so its cleanup stops that video and no other — see
+    // PlayerController.stop.
+    var playbackSession by remember { mutableStateOf<Long?>(null) }
+
     LaunchedEffect(videoUrl) {
         viewModel.play(videoUrl, fromSource)
+        playbackSession = viewModel.controller.currentPlaybackSession
         // Bring the Cast session listener online so the route button reflects device availability.
         viewModel.warmUpCast()
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
@@ -167,6 +172,25 @@ fun PlayerScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // Leaving the player ends the playback. Backing out used to only remove the UI: the episode kept
+    // playing underneath the details screen, the media notification stayed up, and a torrent carried
+    // on streaming — with the controls that could have stopped any of it now unreachable.
+    //
+    // This composable is only disposed when the player destination is actually left. Backgrounding
+    // the app does not dispose it (the destination is still on the back stack), and neither does
+    // rotating or entering PiP — the activity declares configChanges and stays on this route — so
+    // background audio and PiP are unaffected.
+    //
+    // Scoped to the session this screen started rather than "stop whatever is playing", because
+    // disposal is not the same as owning the playback. Navigating from one video straight to another
+    // composes the incoming screen and disposes the outgoing one in an order Compose does not
+    // promise; an unconditional stop would sometimes kill the video that had just started. The
+    // controller refuses a stop for a session it has already moved past, so both orderings end the
+    // same way.
+    DisposableEffect(Unit) {
+        onDispose { playbackSession?.let { viewModel.controller.stop(it) } }
+    }
+
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -190,6 +214,11 @@ fun PlayerScreen(
                     view.applySubtitleStyle(subtitleStyle)
                 }
             },
+            // Detach before the view is discarded. The ExoPlayer is a process-lifetime @Singleton and
+            // keeps a reference to every PlayerView attached to it, so without this each visit to the
+            // player left another dead view — and the Activity context it holds — alive for as long
+            // as the app ran.
+            onRelease = { view -> view.player = null },
         )
 
         if (!isInPip) {

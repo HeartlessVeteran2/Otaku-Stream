@@ -40,16 +40,47 @@ class SourceRegistry @Inject constructor(
 
     override fun observeSources(): Flow<List<VideoSource>> = _dynamicSources.map { builtIns + it }
 
+    // compareAndSet rather than read-check-write, because the thing being guarded against *is* a
+    // race. Bootstrap registers add-ons in parallel while a manual install can land at any moment;
+    // two of those reading the same list and both writing their own `list + source` means one of the
+    // two sources vanishes from the registry with its QuickJS runtime still alive. Losing the CAS
+    // sends this back through the duplicate check, so the loser is either published or closed.
     override fun registerDynamic(source: VideoSource) {
-        if (_dynamicSources.value.any { it.id == source.id }) return
-        _dynamicSources.value = _dynamicSources.value + source
+        while (true) {
+            val current = _dynamicSources.value
+            val registered = current.firstOrNull { it.id == source.id }
+            if (registered != null) {
+                // Already registered, so this instance is never going to be used — but it has been
+                // *built*, and for a Mangayomi extension that means a live QuickJS runtime with its
+                // own thread and native context. Dropping the reference does not release either.
+                // Duplicates are routine: a reinstall, or a bootstrap racing a manual install,
+                // produces one.
+                //
+                // Unless the duplicate is this very instance, in which case closing it would kill a
+                // source that is registered and in use.
+                if (registered !== source) closeQuietly(source)
+                return
+            }
+            if (_dynamicSources.compareAndSet(current, current + source)) return
+        }
     }
 
     override fun unregisterDynamic(id: Long) {
-        val (removed, remaining) = _dynamicSources.value.partition { it.id == id }
-        _dynamicSources.value = remaining
-        // Release any engine-backed source (e.g. a Mangayomi QuickJS runtime) as it leaves the
-        // registry, so uninstall/reload frees its thread + native context.
-        removed.forEach { source -> (source as? AutoCloseable)?.let { runCatching { it.close() } } }
+        while (true) {
+            val current = _dynamicSources.value
+            val (removed, remaining) = current.partition { it.id == id }
+            if (_dynamicSources.compareAndSet(current, remaining)) {
+                // Release any engine-backed source (e.g. a Mangayomi QuickJS runtime) as it leaves
+                // the registry, so uninstall/reload frees its thread + native context. Closed only
+                // once the removal is the one that actually landed — a losing CAS must not close a
+                // source that is still published.
+                removed.forEach { closeQuietly(it) }
+                return
+            }
+        }
+    }
+
+    private fun closeQuietly(source: VideoSource) {
+        (source as? AutoCloseable)?.let { runCatching { it.close() } }
     }
 }

@@ -143,8 +143,35 @@ class PlayerController @Inject constructor(
     // onIsPlayingChanged). Reset when new media is loaded.
     private var foregroundServiceStarted = false
     private var segmentsJob: Job? = null
+
+    // The coroutine that resolves the resume position and hands the media item to ExoPlayer.
+    // Tracked so a second play() cancels the first: it awaits a Room read before touching the
+    // player, so two quick plays — tapping an episode, backing out, tapping another — could
+    // otherwise both complete, in either order. Losing that race leaves the player showing one
+    // episode with the resume position, headers and subtitle tracks of the other.
+    private var loadJob: Job? = null
     // Waits for subtitle files inside a torrent to download; cancelled when new media is loaded.
     private var torrentSubtitleJob: Job? = null
+    // The AniSkip lookup for the current media. Tracked for the same reason as loadJob: it is a
+    // network call that outlives the playback that started it, and its result is written straight
+    // into aniSkipSegments — so an untracked one publishes the previous episode's intro and outro
+    // markers over whatever is playing by the time it lands.
+    private var aniSkipJob: Job? = null
+    // The auto-play hand-off. Cancelled by stop(), because clearing the queue is not enough on its
+    // own: a resolver that is already suspended fetching the next stream will still return, and this
+    // coroutine would then call play() and restart playback the user has just walked away from.
+    private var playNextJob: Job? = null
+
+    // Identifies the current playback, so a caller can ask to stop *the playback it started* rather
+    // than whatever happens to be playing now.
+    //
+    // The player screen is a composable over a process-lifetime singleton, and composition disposal
+    // is not the same thing as owning what is playing. Navigating from one video straight to another
+    // composes the new screen and disposes the old one, in an order Compose does not promise — so an
+    // unconditional stop() on dispose can kill the playback that just started. The token makes the
+    // outcome the same whichever way the race falls.
+    private val playbackSession = java.util.concurrent.atomic.AtomicLong(0)
+    val currentPlaybackSession: Long get() = playbackSession.get()
     // Manual (database) and AniSkip-fetched segments are tracked separately, then merged into
     // currentSegments with AniSkip winning on overlap.
     private var manualSegments: List<PlayerSkipSegment> = emptyList()
@@ -187,7 +214,8 @@ class PlayerController @Inject constructor(
                     maybeFetchAniSkip()
                 }
                 if (playbackState == Player.STATE_ENDED && PlaybackQueue.autoPlayEnabled) {
-                    scope.launch { playNext() }
+                    playNextJob?.cancel()
+                    playNextJob = scope.launch { playNext() }
                 }
             }
 
@@ -400,6 +428,9 @@ class PlayerController @Inject constructor(
 
         currentMediaUrl = url
         pendingSegmentStartMs = null
+        // Retires whatever the player screen that started the previous video is holding, so its
+        // eventual disposal cannot stop this one.
+        playbackSession.incrementAndGet()
         // New media, new playback session: the foreground service must be (re)started when this
         // one begins playing, and the scrubber must not briefly show the previous video's position.
         foregroundServiceStarted = false
@@ -416,7 +447,11 @@ class PlayerController @Inject constructor(
             notice = null,
         )
 
-        // Reset skip state for the new media before either source repopulates it.
+        // Reset skip state for the new media before either source repopulates it. The lookup is
+        // cancelled as well as the flag reset — the previous episode's request is still in flight,
+        // and its markers would otherwise be written over this video's.
+        aniSkipJob?.cancel()
+        aniSkipJob = null
         manualSegments = emptyList()
         aniSkipSegments = emptyList()
         aniSkipFetched = false
@@ -433,7 +468,6 @@ class PlayerController @Inject constructor(
         val stashed = PendingPlayback.consume(url)
         val pending = stashed?.video
         currentSkipLookup = stashed?.skipLookup
-        _uiState.value = _uiState.value.copy(hasNext = PlaybackQueue.hasResolver())
 
         // No stash (file picker, pasted link, "Open with") — or a stash that explicitly left
         // history to us: record the play here, and drop any auto-play resolver left over from
@@ -443,7 +477,14 @@ class PlayerController @Inject constructor(
             recordDirectPlay(url)
         }
 
-        scope.launch {
+        // Read *after* the clear above, not before. Reading first meant a direct play that had just
+        // discarded a stale resolver still reported hasNext = true, so the Next button appeared and
+        // did nothing — on every file-picker play, pasted link and "Open with" that followed a
+        // catalog session.
+        _uiState.value = _uiState.value.copy(hasNext = PlaybackQueue.hasResolver())
+
+        loadJob?.cancel()
+        loadJob = scope.launch {
             val resumeMs = startPositionMs ?: progressRepository.getSavedPositionMs(url) ?: 0L
             val subtitles = pending?.subtitleTracks.orEmpty().map { it.toPlayerTrack() }
             val mediaItem = MediaItem.Builder()
@@ -614,6 +655,77 @@ class PlayerController @Inject constructor(
         maybePersistProgress(player.currentPosition.coerceAtLeast(0L), force = true)
     }
 
+    // Ends the current playback outright — what leaving the player screen means. Until this existed,
+    // backing out of the player left the episode playing: audio continued over the details screen,
+    // the media notification stayed up, and a torrent kept streaming, with no route back to the
+    // controls that would have stopped any of it.
+    //
+    // Deliberately not release(). The ExoPlayer is a @Singleton shared by every playback in the
+    // process, so releasing it here would leave the next one with a dead player. What is torn down
+    // is the *playback*: position saved, media dropped, jobs cancelled, service stopped.
+    //
+    // Takes the session the caller believes it is stopping (see currentPlaybackSession). A screen
+    // that has already been superseded by a newer play() holds an old token and is refused, which
+    // is what stops a departing player screen from killing the video that replaced it.
+    fun stop(session: Long) {
+        if (session != playbackSession.get()) return
+        // Retire the session here too, so a second stop for the same one — a disposal racing an
+        // explicit stop — cannot run this twice.
+        playbackSession.incrementAndGet()
+
+        // Before player.stop(), which resets the position to zero — reading it afterwards would
+        // write "the very beginning" over the user's real place in the episode.
+        maybePersistProgress(player.currentPosition.coerceAtLeast(0L), force = true)
+
+        loadJob?.cancel()
+        loadJob = null
+        torrentSubtitleJob?.cancel()
+        torrentSubtitleJob = null
+        segmentsJob?.cancel()
+        segmentsJob = null
+        aniSkipJob?.cancel()
+        aniSkipJob = null
+        // Clearing the queue below retires the chain, but a resolver already suspended mid-fetch
+        // still returns — and this coroutine would then call play() and restart a video the user
+        // has just left. PlaybackQueue.resolveNext discards a superseded chain's result as well;
+        // cancelling is the direct answer, that is the one that holds if this lands mid-await.
+        playNextJob?.cancel()
+        playNextJob = null
+
+        player.stop()
+        // Releases the media source, and with it the DataSources it opened. That is what closes a
+        // torrent reader, so the engine can retire the session instead of streaming a video nobody
+        // is watching.
+        player.clearMediaItems()
+
+        currentMediaUrl = null
+        currentMediaItem = null
+        currentDataSourceFactory = null
+        currentSkipLookup = null
+        manualSegments = emptyList()
+        aniSkipSegments = emptyList()
+        aniSkipFetched = false
+        recomputeSegments()
+        // The chain belongs to the playback that just ended. Left armed, the next thing to open the
+        // player would find a Next button offering an episode of the show the user walked away from.
+        PlaybackQueue.clear()
+
+        if (foregroundServiceStarted) {
+            foregroundServiceStarted = false
+            appContext.stopService(Intent(appContext, PlaybackService::class.java))
+        }
+
+        _uiState.value = _uiState.value.copy(
+            isPlaying = false,
+            isBuffering = false,
+            hasNext = false,
+            activeSkipSegment = null,
+            error = null,
+            notice = null,
+        )
+        _progress.value = PlaybackProgress()
+    }
+
     fun resume() {
         player.playWhenReady = true
     }
@@ -715,7 +827,8 @@ class PlayerController @Inject constructor(
         val duration = player.duration
         if (duration <= 0) return
         aniSkipFetched = true
-        scope.launch {
+        aniSkipJob?.cancel()
+        aniSkipJob = scope.launch {
             val marks = runCatching { lookup(duration) }.getOrElse { error ->
                 if (error is CancellationException) throw error
                 emptyList()
