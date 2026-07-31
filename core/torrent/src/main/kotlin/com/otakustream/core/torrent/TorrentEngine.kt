@@ -77,6 +77,17 @@ class TorrentEngine @Inject constructor(
     // this, so those views cannot disagree with each other or outlive the readers they describe.
     private val liveReaders = mutableListOf<TorrentFileReader>()
 
+    // Info hashes of readers that have taken the count but have not finished opening. Guarded by
+    // `lock`, and a multiset because two opens of the same torrent can be in flight at once.
+    //
+    // liveReaders alone is not the whole picture. openFile() increments the reader count and *then*
+    // blocks in TorrentFileReader.open waiting for metadata, so between those two points a reader
+    // exists as far as the count is concerned and is invisible to anything reading the list. If the
+    // previous reader of that same torrent closes in the window, the count is still above zero, so
+    // teardown is skipped and the close falls through to the "remove it now" branch — which would
+    // remove the torrent the reader still opening is about to read.
+    private val pendingOpens = mutableMapOf<String, Int>()
+
     // Absolute paths of files currently open for reading. The cache sweep is handed these as
     // protected paths: a sweep triggered from the settings screen can fire while a playback is in
     // progress, and deleting the file being streamed would kill it.
@@ -223,6 +234,10 @@ class TorrentEngine @Inject constructor(
             // count stays one too high forever, and the session never tears down at the end of playback.
             openedAt = generation.get()
             isFirstReader = openReaders.getAndIncrement() == 0
+            // Declared with the count, for the same reason the count is taken here: from this point
+            // on this reader is real to everything that has to decide whether a torrent is still
+            // needed, even though it will not exist as an object for another few seconds.
+            pendingOpens.merge(ref.infoHash.lowercase(), 1, Int::plus)
             // Unless this is a *different* torrent, in which case the held handle belongs to
             // something nobody is watching any more and has to go now. Auto-play reaches here about a
             // second after the previous episode's reader closed, so without this the finished
@@ -262,6 +277,7 @@ class TorrentEngine @Inject constructor(
         } catch (e: Throwable) {
             // The count was taken before open() could fail; give it back, or a failed open would
             // pin the session open for the rest of the process. No reader exists to deregister.
+            synchronized(lock) { clearPendingOpenLocked(ref.infoHash) }
             releaseReader(openedAt, reader = null)
             throw e
         }
@@ -282,6 +298,10 @@ class TorrentEngine @Inject constructor(
                 liveReaders += reader
                 activeReader.set(reader)
             }
+            // Dropped in the same critical section that adds the reader to the list, so there is no
+            // instant where this torrent is neither pending nor live and a close could decide
+            // nothing needs it.
+            clearPendingOpenLocked(ref.infoHash)
             current
         }
         if (!stillCurrent) {
@@ -351,6 +371,9 @@ class TorrentEngine @Inject constructor(
             // protected for the rest of the process — permanently exempting the largest file in the
             // cache from eviction, so the quota could never be met again.
             liveReaders.clear()
+            // Opens still in flight belong to the generation being retired. Their registration will
+            // find itself stale and close the reader it built, so nothing is left to protect.
+            pendingOpens.clear()
             // Stop means stop: no grace period, and any teardown already scheduled is redundant now.
             pendingTeardown?.cancel(false)
             pendingTeardown = null
@@ -422,17 +445,32 @@ class TorrentEngine @Inject constructor(
         }
     }
 
-    // Whether any still-open reader is reading the same torrent as `handle`. Caller must hold `lock`.
+    // Retires one in-flight open of `infoHash`. Caller must hold `lock`. Tolerates an entry that
+    // stopAll() has already cleared, which is why it is a decrement-or-remove rather than a remove.
+    private fun clearPendingOpenLocked(infoHash: String) {
+        val key = infoHash.lowercase()
+        val remaining = (pendingOpens[key] ?: 0) - 1
+        if (remaining > 0) pendingOpens[key] = remaining else pendingOpens.remove(key)
+    }
+
+    // Whether anything else still needs the torrent behind `handle` — a reader already streaming it,
+    // or one still opening it. Caller must hold `lock`.
     //
     // Compared by info hash rather than by TorrentHandle identity: handles are thin wrappers that
-    // libtorrent4j hands out afresh, so two of them can name the same torrent. A hash that cannot be
-    // read at all counts as a match, which errs towards leaving the torrent in place — the teardown
-    // path removes it a few seconds later regardless, whereas a wrong removal kills live playback.
+    // libtorrent4j hands out afresh, so two of them can name the same torrent.
+    //
+    // Every unreadable hash counts as a match, deliberately. The two outcomes are not symmetric: a
+    // torrent left in place is removed by the teardown path a few seconds later anyway, while a
+    // torrent removed in error kills playback that is in progress. So a transient infoHash() failure
+    // — on either side of the comparison — has to fall towards "still needed".
     private fun isSharedLocked(handle: org.libtorrent4j.TorrentHandle): Boolean {
         val closingHash = runCatching { handle.infoHash().toHex() }.getOrNull()
+            // Nothing to compare against, so anything still holding a reader might be holding this.
+            ?: return liveReaders.isNotEmpty() || pendingOpens.isNotEmpty()
+        if (pendingOpens.keys.any { it.equals(closingHash, ignoreCase = true) }) return true
         return liveReaders.any { other ->
-            runCatching { other.torrentHandle.infoHash().toHex() }.getOrNull()
-                .equals(closingHash, ignoreCase = true)
+            val otherHash = runCatching { other.torrentHandle.infoHash().toHex() }.getOrNull()
+            otherHash == null || otherHash.equals(closingHash, ignoreCase = true)
         }
     }
 

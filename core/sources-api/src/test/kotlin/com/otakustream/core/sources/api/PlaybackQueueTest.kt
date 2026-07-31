@@ -89,6 +89,52 @@ class PlaybackQueueTest {
         assertFalse(PlaybackQueue.hasResolver())
     }
 
+    // The gap no in-resolver guard can close: ownership changes after the resolver's last check but
+    // before it returns. These three are a set — the first two prove a superseded result is thrown
+    // away, and the third proves the check does not also throw away a healthy chain's own result,
+    // which is what a generation bumped in the wrong place would do.
+
+    @Test
+    fun `a video resolved after the queue changed hands is discarded`() {
+        // Standing in for the user picking a different show while this resolver was suspended
+        // fetching a stream: by the time it returns, the queue belongs to that newer playback.
+        val stale: suspend () -> Video? = {
+            PlaybackQueue.setNextResolver(resolverReturning("new-playback"))
+            Video(url = "stale-episode", quality = "720p")
+        }
+        PlaybackQueue.setNextResolver(stale)
+
+        assertNull(runSync { PlaybackQueue.resolveNext() })
+    }
+
+    @Test
+    fun `a video resolved after the queue was cleared is discarded`() {
+        // PlayerController.stop clears the queue when the user leaves the player. Without this, the
+        // resolver still returns and playback restarts on a screen the user has already left.
+        val orphan: suspend () -> Video? = {
+            PlaybackQueue.clear()
+            Video(url = "orphan-episode", quality = "720p")
+        }
+        PlaybackQueue.setNextResolver(orphan)
+
+        assertNull(runSync { PlaybackQueue.resolveNext() })
+    }
+
+    @Test
+    fun `a chain re-arming itself keeps its own result`() {
+        val self = java.util.concurrent.atomic.AtomicReference<suspend () -> Video?>()
+        val resolver: suspend () -> Video? = {
+            // Advancing the same chain by one episode, which is what every auto-play does. Counting
+            // this as a change of ownership would discard every episode auto-play ever resolves.
+            PlaybackQueue.replaceResolverIfCurrent(checkNotNull(self.get()), resolverReturning("episode-3"))
+            Video(url = "episode-2", quality = "720p")
+        }
+        self.set(resolver)
+        PlaybackQueue.setNextResolver(resolver)
+
+        assertEquals("episode-2", runSync { PlaybackQueue.resolveNext() }?.url)
+    }
+
     private fun resolverReturning(url: String): suspend () -> Video? = { Video(url = url, quality = "720p") }
 
     // core:sources-api is deliberately free of kotlinx-coroutines, so there is no runBlocking here.

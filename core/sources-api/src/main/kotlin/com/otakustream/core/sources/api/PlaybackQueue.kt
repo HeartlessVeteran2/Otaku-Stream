@@ -13,21 +13,35 @@ object PlaybackQueue {
     @Volatile
     private var resolver: (suspend () -> Video?)? = null
 
+    // Which *chain* the installed resolver belongs to. Bumped whenever ownership of the queue
+    // changes hands — a new playback installing its own resolver, or a direct play clearing it —
+    // but not when a chain re-arms itself, which is the same chain advancing by one episode.
+    //
+    // This is the thing that makes resolveNext safe. A resolver suspends for as long as it takes to
+    // fetch the next episode's stream, and the user can start a different show in that window. Every
+    // guard placed *inside* the resolver still leaves the gap between its last check and the moment
+    // it returns, and a video returned through that gap is played on top of the user's actual
+    // choice. Only the queue can close it, because only the queue sees both ends of the call.
+    @Volatile
+    private var chain: Long = 0
+
     // Writes are serialized so replaceResolverIfCurrent's compare and set can't be interleaved with
-    // a plain install; reads stay lock-free on the @Volatile field.
+    // a plain install; reads stay lock-free on the @Volatile fields.
     private val writeLock = Any()
 
     fun setNextResolver(resolver: (suspend () -> Video?)?) {
-        synchronized(writeLock) { this.resolver = resolver }
+        synchronized(writeLock) {
+            this.resolver = resolver
+            chain++
+        }
     }
 
     // Re-arms the chain, but only if `current` is still the installed resolver.
     //
-    // An auto-play resolver suspends while it fetches the next episode's stream, and the user can
-    // start a different playback in that window — which installs a resolver for the new chain. The
-    // stale resolver then finishes and re-arms unconditionally, replacing it, and auto-play carries
-    // on through the episode list the user has left. Identity is the check that matters here: "am I
-    // still the resolver anyone would call?" Returns false when the caller has been superseded.
+    // Deliberately does not bump `chain`: this is one chain advancing to its next episode, not a
+    // change of ownership, and a resolver must not invalidate its own in-flight result. Identity is
+    // the check that matters — "am I still the resolver anyone would call?" Returns false when the
+    // caller has been superseded, which is how a stale chain learns to stop re-arming.
     fun replaceResolverIfCurrent(current: suspend () -> Video?, next: (suspend () -> Video?)?): Boolean =
         synchronized(writeLock) {
             if (resolver !== current) return false
@@ -37,14 +51,30 @@ object PlaybackQueue {
 
     fun hasResolver(): Boolean = resolver != null
 
-    suspend fun resolveNext(): Video? = runCatching { resolver?.invoke() }
-        .getOrElse { error ->
-            // kotlin.coroutines.cancellation keeps this module free of kotlinx-coroutines.
-            if (error is kotlin.coroutines.cancellation.CancellationException) throw error
-            null
+    suspend fun resolveNext(): Video? {
+        val armed: (suspend () -> Video?)?
+        val startedAt: Long
+        synchronized(writeLock) {
+            armed = resolver
+            startedAt = chain
         }
+        val video = runCatching { armed?.invoke() }
+            .getOrElse { error ->
+                // kotlin.coroutines.cancellation keeps this module free of kotlinx-coroutines.
+                if (error is kotlin.coroutines.cancellation.CancellationException) throw error
+                null
+            }
+        // The queue changed hands while this was resolving, so whatever came back belongs to a
+        // playback nobody is watching any more. Discarding it is the whole point: the caller reads
+        // null as "there is no next episode", which is exactly right for a chain that has been
+        // superseded or cleared.
+        return synchronized(writeLock) { if (chain == startedAt) video else null }
+    }
 
     fun clear() {
-        synchronized(writeLock) { resolver = null }
+        synchronized(writeLock) {
+            resolver = null
+            chain++
+        }
     }
 }

@@ -134,8 +134,13 @@ fun PlayerScreen(
         ActivityResultContracts.RequestPermission(),
     ) { /* granted or not, playback proceeds — the notification simply won't show if denied */ }
 
+    // The playback this screen started. Held so its cleanup stops that video and no other — see
+    // PlayerController.stop.
+    var playbackSession by remember { mutableStateOf<Long?>(null) }
+
     LaunchedEffect(videoUrl) {
         viewModel.play(videoUrl, fromSource)
+        playbackSession = viewModel.controller.currentPlaybackSession
         // Bring the Cast session listener online so the route button reflects device availability.
         viewModel.warmUpCast()
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
@@ -175,8 +180,15 @@ fun PlayerScreen(
     // the app does not dispose it (the destination is still on the back stack), and neither does
     // rotating or entering PiP — the activity declares configChanges and stays on this route — so
     // background audio and PiP are unaffected.
+    //
+    // Scoped to the session this screen started rather than "stop whatever is playing", because
+    // disposal is not the same as owning the playback. Navigating from one video straight to another
+    // composes the incoming screen and disposes the outgoing one in an order Compose does not
+    // promise; an unconditional stop would sometimes kill the video that had just started. The
+    // controller refuses a stop for a session it has already moved past, so both orderings end the
+    // same way.
     DisposableEffect(Unit) {
-        onDispose { viewModel.controller.stop() }
+        onDispose { playbackSession?.let { viewModel.controller.stop(it) } }
     }
 
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {

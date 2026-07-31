@@ -542,6 +542,11 @@ private fun nextVideoResolver(
         // Chain on to the episode after this one, with the same captured list — unless the user
         // started something else while getVideoList was in flight, in which case that newer
         // playback owns the queue and this chain is done.
+        //
+        // This stops a stale chain re-arming over a newer one. It does *not* make the video returned
+        // below safe on its own: ownership can change again between here and the return, and no
+        // check placed inside a resolver can close that gap. PlaybackQueue.resolveNext is what does,
+        // by re-checking the chain once this has returned.
         val stillArmed = self.get()?.let { me ->
             PlaybackQueue.replaceResolverIfCurrent(
                 me,
