@@ -12,7 +12,13 @@ fun JSONObject.stringOrEmpty(key: String): String = if (isNull(key)) "" else opt
 
 fun JSONObject.stringOrNull(key: String): String? = stringOrEmpty(key).ifEmpty { null }
 
-fun JSONObject.intOrNull(key: String): Int? = if (has(key) && !isNull(key)) getInt(key) else null
+// getInt throws when the value is present but not coercible to a number — a string like "N/A", an
+// object, an empty string. A Stremio meta with one such field would take down the parse of the whole
+// response, and the caller sees an empty catalog rather than one item with a missing year. Coercion
+// is kept (getInt does accept "5"), but a value that cannot be read is simply absent, which is what
+// the name promises.
+fun JSONObject.intOrNull(key: String): Int? =
+    if (has(key) && !isNull(key)) runCatching { getInt(key) }.getOrNull() else null
 
 fun JSONObject.stringListOrEmpty(key: String): List<String> {
     val array = optJSONArray(key) ?: return emptyList()

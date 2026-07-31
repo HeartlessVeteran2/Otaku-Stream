@@ -433,7 +433,6 @@ class PlayerController @Inject constructor(
         val stashed = PendingPlayback.consume(url)
         val pending = stashed?.video
         currentSkipLookup = stashed?.skipLookup
-        _uiState.value = _uiState.value.copy(hasNext = PlaybackQueue.hasResolver())
 
         // No stash (file picker, pasted link, "Open with") — or a stash that explicitly left
         // history to us: record the play here, and drop any auto-play resolver left over from
@@ -442,6 +441,12 @@ class PlayerController @Inject constructor(
             PlaybackQueue.clear()
             recordDirectPlay(url)
         }
+
+        // Read *after* the clear above, not before. Reading first meant a direct play that had just
+        // discarded a stale resolver still reported hasNext = true, so the Next button appeared and
+        // did nothing — on every file-picker play, pasted link and "Open with" that followed a
+        // catalog session.
+        _uiState.value = _uiState.value.copy(hasNext = PlaybackQueue.hasResolver())
 
         scope.launch {
             val resumeMs = startPositionMs ?: progressRepository.getSavedPositionMs(url) ?: 0L

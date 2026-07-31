@@ -23,4 +23,7 @@ android {
 
 dependencies {
     testImplementation(libs.junit)
+    // Real org.json for JVM unit tests — the stub android.jar throws "not mocked", which would make
+    // the JSON helpers in this module untestable.
+    testImplementation(libs.json)
 }
