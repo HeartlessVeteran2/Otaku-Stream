@@ -41,7 +41,14 @@ class SourceRegistry @Inject constructor(
     override fun observeSources(): Flow<List<VideoSource>> = _dynamicSources.map { builtIns + it }
 
     override fun registerDynamic(source: VideoSource) {
-        if (_dynamicSources.value.any { it.id == source.id }) return
+        if (_dynamicSources.value.any { it.id == source.id }) {
+            // Already registered, so this instance is never going to be used — but it has been
+            // *built*, and for a Mangayomi extension that means a live QuickJS runtime with its own
+            // thread and native context. Dropping the reference does not release either. Duplicates
+            // are routine: a reinstall, or a bootstrap racing a manual install, produces one.
+            (source as? AutoCloseable)?.let { runCatching { it.close() } }
+            return
+        }
         _dynamicSources.value = _dynamicSources.value + source
     }
 

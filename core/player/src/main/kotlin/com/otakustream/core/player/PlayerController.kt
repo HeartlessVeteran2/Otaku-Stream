@@ -143,6 +143,13 @@ class PlayerController @Inject constructor(
     // onIsPlayingChanged). Reset when new media is loaded.
     private var foregroundServiceStarted = false
     private var segmentsJob: Job? = null
+
+    // The coroutine that resolves the resume position and hands the media item to ExoPlayer.
+    // Tracked so a second play() cancels the first: it awaits a Room read before touching the
+    // player, so two quick plays — tapping an episode, backing out, tapping another — could
+    // otherwise both complete, in either order. Losing that race leaves the player showing one
+    // episode with the resume position, headers and subtitle tracks of the other.
+    private var loadJob: Job? = null
     // Waits for subtitle files inside a torrent to download; cancelled when new media is loaded.
     private var torrentSubtitleJob: Job? = null
     // Manual (database) and AniSkip-fetched segments are tracked separately, then merged into
@@ -448,7 +455,8 @@ class PlayerController @Inject constructor(
         // catalog session.
         _uiState.value = _uiState.value.copy(hasNext = PlaybackQueue.hasResolver())
 
-        scope.launch {
+        loadJob?.cancel()
+        loadJob = scope.launch {
             val resumeMs = startPositionMs ?: progressRepository.getSavedPositionMs(url) ?: 0L
             val subtitles = pending?.subtitleTracks.orEmpty().map { it.toPlayerTrack() }
             val mediaItem = MediaItem.Builder()

@@ -239,16 +239,41 @@ class TorrentEngine @Inject constructor(
             TorrentService.start(appContext)
         }
         return try {
-            TorrentFileReader.open(
+            val reader = TorrentFileReader.open(
                 session,
                 ref,
                 effectiveTrackers,
                 saveDir,
                 onClosed = { handle, path -> releaseReader(openedAt, handle, path) },
-            ).also {
-                activeReader.set(it)
-                openPaths.add(it.filePath)
+            )
+            // Registered under the lock, re-checking the generation, because open() above blocks —
+            // it waits for the torrent's metadata, which on a cold magnet can take the better part
+            // of a minute. stopAll() landing in that window retires this generation, resets the
+            // count and clears openPaths, and the registration would then run *after* all of it.
+            //
+            // Both halves matter. A stale activeReader means stats() calls into a handle whose
+            // torrent has been removed, which is undefined at the native layer. A stale openPaths
+            // entry is worse in a quiet way: releaseReader returns early for a retired generation,
+            // before it removes the path, so that file stays protected from eviction for the rest
+            // of the process — and once the protected file is the largest thing in the cache, the
+            // quota can never be met again.
+            val stillCurrent = synchronized(lock) {
+                val current = openedAt == generation.get()
+                if (current) {
+                    activeReader.set(reader)
+                    openPaths.add(reader.filePath)
+                }
+                current
             }
+            if (!stillCurrent) {
+                // The user stopped playback while this was opening. The reader belongs to a session
+                // that has already been torn down, so it is closed rather than handed back; its
+                // close is correctly ignored as stale by releaseReader.
+                Log.i(TAG, "Discarding a reader whose session was stopped while it was opening")
+                runCatching { reader.close() }
+                throw java.io.IOException("Playback was stopped while the torrent was opening")
+            }
+            reader
         } catch (e: Throwable) {
             // The count was taken before open() could fail; give it back, or a failed open would
             // pin the session open for the rest of the process.
