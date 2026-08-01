@@ -14,13 +14,16 @@ interface SourceRepository {
     fun getSource(id: Long): VideoSource?
     fun registerDynamic(source: VideoSource)
 
-    // Swap whatever is registered under `id` for `source`, atomically.
+    // Swap whatever is registered under `source.id` for `source`, atomically.
     //
     // Not unregister-then-register: those are two compareAndSet loops, and any registration landing
     // between them wins — after which registerDynamic sees a duplicate, closes the caller's freshly
     // built instance and returns, leaving the caller believing it swapped. The reload-after-editing
     // preferences path then reported success while the registry kept serving the old preferences.
-    fun replaceDynamic(id: Long, source: VideoSource)
+    //
+    // The target id comes from the source rather than a separate parameter, so there is no way to
+    // ask for a swap that removes one id and installs another.
+    fun replaceDynamic(source: VideoSource)
 
     fun unregisterDynamic(id: Long)
     fun observeSources(): Flow<List<VideoSource>>
@@ -77,12 +80,21 @@ class SourceRegistry @Inject constructor(
     // One compareAndSet, so there is no moment where the id is unregistered and something else can
     // claim it. The displaced instances are closed once the swap has actually taken — closing before
     // would kill a live source if the loop had to retry.
-    override fun replaceDynamic(id: Long, source: VideoSource) {
+    //
+    // In place, not remove-and-append: this list is the source picker's order and the priority the
+    // home rails interleave by, so appending would silently reorder the UI every time an extension's
+    // preferences were saved.
+    override fun replaceDynamic(source: VideoSource) {
         while (true) {
             val current = _dynamicSources.value
-            val next = current.filterNot { it.id == id } + source
+            val index = current.indexOfFirst { it.id == source.id }
+            val next = if (index < 0) {
+                current + source
+            } else {
+                current.toMutableList().apply { this[index] = source }
+            }
             if (_dynamicSources.compareAndSet(current, next)) {
-                current.forEach { if (it.id == id && it !== source) closeQuietly(it) }
+                current.forEach { if (it.id == source.id && it !== source) closeQuietly(it) }
                 return
             }
         }

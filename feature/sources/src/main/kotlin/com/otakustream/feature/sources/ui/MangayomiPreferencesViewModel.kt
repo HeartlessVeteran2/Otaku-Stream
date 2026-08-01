@@ -151,11 +151,17 @@ class MangayomiPreferencesViewModel @Inject constructor(
                 val replacement = factory.createFromRecord(current.copy(prefsJson = prefsJson))
                 try {
                     withContext(NonCancellable) {
+                        // Re-read rather than trusting the record fetched before the engine came up:
+                        // bringing QuickJS up takes long enough for the extension to be uninstalled
+                        // in the meantime, and committing then would write preferences for a deleted
+                        // record and register a source with nothing behind it.
+                        val stillInstalled = mangayomiRepository.getAll().any { it.id == sourceId }
+                        if (!stillInstalled) error("Extension is no longer installed")
                         mangayomiRepository.updatePrefs(sourceId, prefsJson)
                         // Atomic: unregister-then-register left a window where a concurrent
                         // registration could claim the id, after which our replacement would be
                         // silently closed and discarded while this reported success.
-                        sourceRepository.replaceDynamic(sourceId, replacement)
+                        sourceRepository.replaceDynamic(replacement)
                     }
                 } catch (t: Throwable) {
                     // Never registered, so nothing else will ever close it — and it owns a QuickJS
@@ -163,12 +169,21 @@ class MangayomiPreferencesViewModel @Inject constructor(
                     runCatching { replacement.close() }
                     throw t
                 }
+                // Both outcomes are reported only if the values on screen are still the ones this
+                // save captured. Otherwise a save that finished after the user moved on would tick
+                // "Saved" — or show a rejection — next to values it knows nothing about. Success
+                // clears any earlier error for the same reason: leaving one visible beside "Saved"
+                // describes two different attempts at once.
                 if (editVersion == editsAtStart) {
-                    _uiState.value = _uiState.value.copy(saved = true)
+                    _uiState.value = _uiState.value.copy(saved = true, error = null)
                 }
             }.onFailure { failure ->
                 if (failure is CancellationException) throw failure
-                _uiState.value = _uiState.value.copy(error = failure.message ?: "Failed to save preferences")
+                if (editVersion == editsAtStart) {
+                    _uiState.value = _uiState.value.copy(
+                        error = failure.message ?: "Failed to save preferences",
+                    )
+                }
             }
             }
         }

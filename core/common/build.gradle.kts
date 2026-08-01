@@ -22,7 +22,9 @@ android {
 }
 
 dependencies {
-    implementation(libs.kotlinx.coroutines.android)
+    // api, not implementation: InFlightCache takes a CoroutineScope in its public
+    // constructor, so coroutines is part of this module's ABI, not an internal detail.
+    api(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

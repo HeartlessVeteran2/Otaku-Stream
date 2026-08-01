@@ -41,7 +41,7 @@ interface WatchHistoryDao {
     // The name this media was last filed under. Used when replaying a url the app can't derive a
     // readable name from — torrent://<hash>/0 has none — so re-watching keeps the title it already
     // had instead of degrading to a path segment.
-    @Query("SELECT mediaTitle FROM watch_history WHERE mediaUrl = :mediaUrl ORDER BY watchedAtEpochMs DESC LIMIT 1")
+    @Query("SELECT mediaTitle FROM watch_history WHERE mediaUrl = :mediaUrl ORDER BY watchedAtEpochMs DESC, id DESC LIMIT 1")
     suspend fun lastTitleFor(mediaUrl: String): String?
 
     @Insert

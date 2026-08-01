@@ -47,8 +47,11 @@ class AniListSearchViewModel @Inject constructor(
     // is exactly what retrying a failed one means.
     private data class SearchRequest(val query: String, val settleFirst: Boolean)
 
+    // replay = 1 because the collector below is started from `init` and a request can be emitted
+    // before it subscribes — a SharedFlow with no subscriber drops rather than buffers, which would
+    // lose the first search outright and leave a retry's spinner running forever.
     private val requests = MutableSharedFlow<SearchRequest>(
-        extraBufferCapacity = 1,
+        replay = 1,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
 

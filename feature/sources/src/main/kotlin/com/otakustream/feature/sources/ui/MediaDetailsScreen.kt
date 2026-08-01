@@ -47,6 +47,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -442,7 +443,12 @@ private fun StreamPickerSheet(choices: List<Video>, onSelect: (Video) -> Unit, o
             itemsIndexed(choices) { index, video ->
                 ListItem(
                     headlineContent = { Text(text = prettyQuality(video.quality, index)) },
-                    modifier = Modifier.fillMaxWidth().clickable { onSelect(video) },
+                    // Role.Button: the radios carried a control role for screen readers, and plain
+                    // clickable text does not. Button, not RadioButton — these are one-shot actions,
+                    // not a persistent choice.
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(role = Role.Button) { onSelect(video) },
                 )
             }
         }

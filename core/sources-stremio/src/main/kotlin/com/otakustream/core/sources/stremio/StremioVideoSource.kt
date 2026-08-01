@@ -56,8 +56,9 @@ class StremioVideoSource(
 
     // getMediaDetails and getEpisodeList both derive from the same /meta response, and the details
     // screen calls them one after the other — so opening any title fetched the identical URL twice,
-    // sequentially, before anything appeared on screen. InFlightCache shares the request rather than
-    // the result, so a second caller arriving while the first is still open joins it.
+    // sequentially, before anything appeared on screen. InFlightCache covers both halves of that: a
+    // caller arriving while the request is open joins it, and one arriving shortly after it finished
+    // reuses the result until the TTL expires, measured from when the response landed.
     //
     // The scope is the source's own, not any caller's: a StremioVideoSource lives for the whole
     // process, and a job parented to whoever happened to ask first would die when they navigated

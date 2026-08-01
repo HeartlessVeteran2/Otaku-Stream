@@ -27,7 +27,7 @@ import kotlinx.coroutines.async
 //
 //  - Age is measured from completion, and only for a job that *succeeded*. From creation, a slow
 //    request hands its first reader a result that has already spent most of its life; and a failed
-//    job that were timestamped could be re-used by a caller arriving between the timestamp and the
+//    job that was timestamped could be re-used by a caller arriving between the timestamp and the
 //    eviction. An unfinished job has no age at all, so it is always joinable — expiring one would
 //    start a duplicate alongside a request that is running perfectly well.
 class InFlightCache<K : Any, V>(
@@ -46,6 +46,13 @@ class InFlightCache<K : Any, V>(
     private val produce: suspend (K) -> V,
 ) {
 
+    init {
+        // Ahead of the map below, which is sized from this. Zero would make every insertion instantly
+        // evictable, silently turning off both the sharing and the caching while still looking like a
+        // configured bound.
+        require(maxEntries > 0) { "maxEntries must be positive, was $maxEntries" }
+    }
+
     private class Entry<V>(val job: Deferred<V>) {
         @Volatile
         var completedAtMs: Long = NEVER
@@ -56,7 +63,13 @@ class InFlightCache<K : Any, V>(
     // access ordering makes the most-used key the *last* one evicted, so without a TTL the entry
     // most likely to have changed is exactly the one that would never be refreshed.
     private val entries = object : LinkedHashMap<K, Entry<V>>(maxEntries, 0.75f, true) {
-        override fun removeEldestEntry(eldest: Map.Entry<K, Entry<V>>): Boolean = size > maxEntries
+        // Only completed entries are evictable. Dropping a running one does not cancel it — it just
+        // hides it, so the next caller for that key starts a second identical production alongside
+        // the first, which is precisely what this class exists to prevent. The map can therefore
+        // exceed `maxEntries` while many distinct requests are in flight; that excess is bounded by
+        // how many the callers actually have outstanding, and it drains as they complete.
+        override fun removeEldestEntry(eldest: Map.Entry<K, Entry<V>>): Boolean =
+            size > maxEntries && eldest.value.job.isCompleted
     }
 
     // Guards `entries`. An access-ordered LinkedHashMap reorders itself on a *read*, so even a

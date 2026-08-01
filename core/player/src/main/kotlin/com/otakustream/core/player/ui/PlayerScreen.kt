@@ -131,13 +131,17 @@ fun PlayerScreen(
         if (brightnessFraction == null) {
             val seed = when {
                 measured == null -> UNKNOWN_BRIGHTNESS
-                // Under adaptive brightness the reading is the manual slider, and the ambient
-                // adjustment sits on top of it unread — in a dark room the screen can be far dimmer
-                // than the slider says. Seeding from a bright slider would let the first swipe jump
-                // *up*, which is the same flood this whole path exists to prevent, just arrived at
-                // differently. Capping at the midpoint bounds that worst case while still using the
-                // real value whenever it is already dim, which is exactly the dark-room case.
-                measured.approximate -> minOf(measured.fraction, UNKNOWN_BRIGHTNESS)
+                // Under adaptive brightness the reading is only the manual slider; the ambient
+                // adjustment sits on top of it and no public API reports the result. In a dark room
+                // the screen can be a fraction of what the slider says, so seeding from the slider
+                // would let the first swipe jump *up* — the same flood this path exists to prevent.
+                //
+                // So the guess is deliberately biased low rather than centred. The two ways of being
+                // wrong are not equally bad: landing dimmer than expected is fixed by continuing the
+                // same swipe, while landing far brighter at night is painful and cannot be taken
+                // back. The slider still wins when it is already below the ceiling, which is the
+                // dark-room case that motivated all of this.
+                measured.approximate -> minOf(measured.fraction, ADAPTIVE_SEED_CEILING)
                 else -> measured.fraction
             }
             val settled = (seed + bankedBrightnessDelta).coerceIn(MIN_BRIGHTNESS, 1f)
@@ -563,6 +567,11 @@ private const val MIN_BRIGHTNESS = 0.01f
 // because starting a *relative* gesture from a fabricated middle is what makes the first swipe jump
 // rather than adjust.
 private const val UNKNOWN_BRIGHTNESS = 0.5f
+
+// The most the baseline may be under adaptive brightness, where the real value is unknowable. Low on
+// purpose — see the seeding logic: a first swipe that lands too dim costs the user nothing, and one
+// that lands too bright at night is the failure this whole path exists to avoid.
+private const val ADAPTIVE_SEED_CEILING = 0.2f
 
 private fun Activity.setScreenBrightness(fraction: Float) {
     val params = window.attributes
