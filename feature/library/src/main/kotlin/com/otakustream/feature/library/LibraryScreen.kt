@@ -39,6 +39,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,7 +79,10 @@ fun LibraryScreen(
     viewModel: LibraryViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    var selectedTab by remember { mutableIntStateOf(0) }
+    // rememberSaveable: which tab you were on survives a rotation and a process-death restore.
+    // Plain remember dropped it, so coming back to the app landed on Watchlist however deep into
+    // History or On device you had been.
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
 
     // Direct plays (local files, pasted links) have no details page — route them straight back
     // into the player; catalog entries open their details as before.
