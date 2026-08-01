@@ -37,6 +37,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -114,13 +115,28 @@ fun PlayerScreen(
     // something real is known: the measured value below, or failing that a read taken at the moment
     // of the first drag.
     var brightnessFraction by remember { mutableStateOf<Float?>(null) }
+    // Drag distance that arrived before the baseline did. A drag in that window can't be applied
+    // yet and mustn't block on the read, so it is banked here and settled below.
+    var bankedBrightnessDelta by remember { mutableFloatStateOf(0f) }
     // Read off the main thread: this reaches a ContentProvider, and doing that during composition
     // put a provider round-trip on the frame the user is waiting for video on — the same mistake
-    // this pass is removing elsewhere. Skipped once the user has gestured, so a slow read can never
-    // land on top of a baseline they have already set.
+    // this pass is removing elsewhere.
     LaunchedEffect(activity) {
         val measured = withContext(Dispatchers.IO) { activity?.currentScreenBrightness() }
-        if (brightnessFraction == null) brightnessFraction = measured
+        // Only if the user hasn't already established a baseline — a slow read must never land on
+        // top of a value they set themselves.
+        if (brightnessFraction == null) {
+            // UNKNOWN_BRIGHTNESS only if the device reports nothing at all; otherwise this is a real
+            // measurement. Any drag that happened while the read was in flight is applied on top of
+            // it now, so the gesture is honoured rather than swallowed.
+            val seed = measured ?: UNKNOWN_BRIGHTNESS
+            val settled = (seed + bankedBrightnessDelta).coerceIn(MIN_BRIGHTNESS, 1f)
+            brightnessFraction = settled
+            if (bankedBrightnessDelta != 0f) {
+                bankedBrightnessDelta = 0f
+                activity?.setScreenBrightness(settled)
+            }
+        }
     }
     var resizeModeOsd by remember { mutableStateOf<String?>(null) }
     var lastResizeMode by remember { mutableStateOf(uiState.resizeMode) }
@@ -250,18 +266,18 @@ fun PlayerScreen(
                 onSeekBy = viewModel::seekBy,
                 onVolumeDeltaChange = viewModel::adjustVolume,
                 onBrightnessDeltaChange = { delta ->
-                    // If the off-thread read has not landed yet, take it here rather than starting
-                    // from a fabricated middle. That is a ContentProvider hit on the main thread,
-                    // which is why it is not how the baseline is normally obtained — but by the
-                    // time a drag arrives the first frame is long since rendered, and it can happen
-                    // at most once per playback. UNKNOWN_BRIGHTNESS remains only for a device that
-                    // will not report the setting at all.
                     val base = brightnessFraction
-                        ?: activity?.currentScreenBrightness()
-                        ?: UNKNOWN_BRIGHTNESS
-                    val next = (base + delta).coerceIn(MIN_BRIGHTNESS, 1f)
-                    brightnessFraction = next
-                    activity?.setScreenBrightness(next)
+                    if (base == null) {
+                        // No baseline yet. Bank the movement instead of reading the setting here —
+                        // that read hits a ContentProvider, and this runs in a pointer callback, so
+                        // doing it inline would stall the very drag it is meant to serve. The
+                        // LaunchedEffect above applies this the moment the value lands.
+                        bankedBrightnessDelta += delta
+                    } else {
+                        val next = (base + delta).coerceIn(MIN_BRIGHTNESS, 1f)
+                        brightnessFraction = next
+                        activity?.setScreenBrightness(next)
+                    }
                 },
                 // Read the flow's current value so the HUD ring tracks the drag without waiting
                 // on a recomposition of the collected uiState.

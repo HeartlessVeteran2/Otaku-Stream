@@ -1,5 +1,6 @@
 package com.otakustream.core.sources.mangayomi
 
+import android.os.SystemClock
 import com.otakustream.core.sources.api.CatalogPage
 import com.otakustream.core.sources.api.Episode
 import com.otakustream.core.sources.api.MediaDetails
@@ -55,9 +56,15 @@ class MangayomiVideoSource(
     // likely to have gained an episode, is precisely the one that would keep serving an old episode
     // list for the rest of the session. A timestamp bounds that however often the entry is read.
     //
-    // Monotonic, not wall clock: a device clock correction would otherwise expire every entry at
-    // once or push one into the future where it never expires at all.
-    private class CachedDetail(val job: Deferred<String>, val startedAtNanos: Long)
+    // Timed from completion, not creation — same reasoning as StremioVideoSource.CachedMeta, which
+    // this deliberately mirrors: a slow getDetail would otherwise hand its first reader a result
+    // that had already spent most of its life waiting to exist, and an in-flight job could be judged
+    // too old to join, starting a duplicate call into the same extension. elapsedRealtime because it
+    // is monotonic *and* keeps counting while the device sleeps.
+    private class CachedDetail(val job: Deferred<String>) {
+        @Volatile
+        var completedAtElapsedMs: Long = 0L
+    }
 
     // An access-ordered LinkedHashMap reorders itself on a read, so lookups mutate it too.
     private val detailCacheLock = Any()
@@ -156,16 +163,9 @@ class MangayomiVideoSource(
     }
 
     private suspend fun detailFor(url: String): String {
-        val now = System.nanoTime()
         val entry = synchronized(detailCacheLock) {
             val existing = detailCache[url]
-            // Age runs from when the request *started*, not when it finished, so a slow response
-            // can't arrive already most of the way through its own lifetime.
-            if (existing != null && now - existing.startedAtNanos < DETAIL_CACHE_TTL_NANOS) {
-                existing
-            } else {
-                newDetailEntry(url, now).also { detailCache[url] = it }
-            }
+            if (existing != null && existing.isUsable()) existing else newDetailEntry(url).also { detailCache[url] = it }
         }
         // Started outside the lock: keeps the JS call off the critical section, and guarantees the
         // entry is installed in the map before its completion handler can run.
@@ -176,8 +176,18 @@ class MangayomiVideoSource(
         return entry.job.await()
     }
 
+    // Either the call has not finished — a second caller should join it rather than start its own
+    // into the same extension — or it finished recently enough to still be current. A completed job
+    // whose timestamp is not yet set is treated as stale; that window is nanoseconds wide, and
+    // refetching is the safe side of it.
+    private fun CachedDetail.isUsable(): Boolean {
+        if (!job.isCompleted) return true
+        val completedAt = completedAtElapsedMs
+        return completedAt != 0L && SystemClock.elapsedRealtime() - completedAt < DETAIL_CACHE_TTL_MS
+    }
+
     // Caller must hold `detailCacheLock`.
-    private fun newDetailEntry(url: String, startedAtNanos: Long): CachedDetail {
+    private fun newDetailEntry(url: String): CachedDetail {
         // LAZY, so the job cannot complete before it has been stored. Started eagerly, a getDetail
         // that fails immediately — a closed runtime, an extension throwing on entry — can run its
         // completion handler before `detailCache[url] = entry` executes, so the eviction below finds
@@ -185,10 +195,11 @@ class MangayomiVideoSource(
         val job = detailScope.async(start = CoroutineStart.LAZY) {
             runtime.invoke("getDetail", listOf(url)) ?: "{}"
         }
-        val entry = CachedDetail(job, startedAtNanos)
+        val entry = CachedDetail(job)
         // A failed job is evicted so a transient error isn't cached and doesn't block every later
         // open of the title. By identity, so a fresh attempt someone else installed survives.
         job.invokeOnCompletion { cause ->
+            entry.completedAtElapsedMs = SystemClock.elapsedRealtime()
             if (cause != null) {
                 synchronized(detailCacheLock) { if (detailCache[url] === entry) detailCache.remove(url) }
             }
@@ -242,10 +253,10 @@ class MangayomiVideoSource(
         // two calls one details screen makes, and there is one of these per installed extension.
         const val DETAIL_CACHE_MAX = 20
 
-        // How long a cached getDetail response stays usable. Long enough to cover the pair of calls
-        // one details screen makes and a user flicking between titles; short enough that a show
-        // which aired an episode while the app sat in the background is picked up on the next open
-        // rather than at the next cold start.
-        val DETAIL_CACHE_TTL_NANOS = TimeUnit.MINUTES.toNanos(5)
+        // How long a cached getDetail response stays usable, measured from when it arrived. Long
+        // enough to cover the pair of calls one details screen makes and a user flicking between
+        // titles; short enough that a show which aired an episode while the app sat in the
+        // background is picked up on the next open rather than at the next cold start.
+        val DETAIL_CACHE_TTL_MS = TimeUnit.MINUTES.toMillis(5)
     }
 }

@@ -19,7 +19,9 @@ import com.otakustream.core.torrent.MagnetLinks
 // uses.
 //
 // historyHandled = false because nothing upstream recorded this play — there is no view model
-// behind an "Open with" or a pasted link, so the player records it itself.
+// behind an "Open with" or a pasted link, so the player records it itself. The magnet's `dn` goes
+// with it as directPlayTitle: the url is torrent://<hash>/0, so left to derive a name from that the
+// player would file every torrent in Continue Watching as "0" — its last path segment.
 //
 // Provenance is USER on both paths. MainActivity only reaches here after the user accepted the
 // magnet prompt, and PlayScreen only after they pasted the link themselves — either way this is
@@ -32,6 +34,7 @@ internal fun magnetToPlayableUrl(magnet: String): String? {
         video = Video(url = url, quality = link.displayName ?: "torrent", trackers = link.trackers),
         historyHandled = false,
         provenance = PendingPlayback.Provenance.USER,
+        directPlayTitle = link.displayName,
     )
     return url
 }

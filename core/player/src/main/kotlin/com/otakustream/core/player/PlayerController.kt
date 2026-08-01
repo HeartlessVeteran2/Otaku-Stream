@@ -474,7 +474,7 @@ class PlayerController @Inject constructor(
         // an earlier catalog session so finishing this video can't chain into a stale episode.
         if (stashed == null || !stashed.historyHandled) {
             PlaybackQueue.clear()
-            recordDirectPlay(url)
+            recordDirectPlay(url, stashed?.directPlayTitle)
         }
 
         // Read *after* the clear above, not before. Reading first meant a direct play that had just
@@ -619,13 +619,15 @@ class PlayerController @Inject constructor(
     // A play that arrived outside the catalog flow (local file, pasted URL, "Open with") still
     // belongs in watch history / continue watching — recorded here since play() is the one
     // choke point every path funnels through.
-    private fun recordDirectPlay(url: String) {
+    // title, when the caller knows one, wins over deriving it from the URL — a URL that is an
+    // identity rather than a path has no name in it to find.
+    private fun recordDirectPlay(url: String, title: String?) {
         scope.launch {
             libraryRepository.recordWatch(
                 WatchHistoryEntry(
                     sourceId = DIRECT_PLAY_SOURCE_ID,
                     mediaUrl = url,
-                    mediaTitle = deriveDisplayTitle(url),
+                    mediaTitle = title?.takeIf { it.isNotBlank() } ?: deriveDisplayTitle(url),
                     episodeUrl = url,
                     episodeName = "",
                     episodeNumber = 0f,

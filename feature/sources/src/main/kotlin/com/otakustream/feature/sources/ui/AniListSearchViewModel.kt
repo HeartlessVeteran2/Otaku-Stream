@@ -7,14 +7,13 @@ import com.otakustream.feature.tracking.AniListMedia
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 
 data class AniListSearchUiState(
@@ -26,7 +25,6 @@ data class AniListSearchUiState(
 
 // Searches AniList's own catalog (not just installed sources) so users can find any anime, open its
 // AniList detail, and Watch from there. Debounced so typing doesn't fire a request per keystroke.
-@OptIn(FlowPreview::class)
 @HiltViewModel
 class AniListSearchViewModel @Inject constructor(
     private val aniListClient: AniListClient,
@@ -35,17 +33,33 @@ class AniListSearchViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(AniListSearchUiState())
     val uiState: StateFlow<AniListSearchUiState> = _uiState.asStateFlow()
 
-    private val queryFlow = MutableStateFlow("")
+    // Typing and retrying are the same event with different urgency, so they share one stream and
+    // the wait lives *inside* the collector rather than in a `debounce()` operator on one branch.
+    //
+    // Two separate flows merged instead — the obvious shape — leaves them unable to cancel each
+    // other: a retry tapped while a keystroke's debounce was still pending would start the search
+    // immediately and then have it cancelled and restarted when that pending emission landed a
+    // moment later, costing a duplicate request. collectLatest cancels the delay below, so here a
+    // retry supersedes pending typing and pending typing supersedes an earlier keystroke, with one
+    // rule covering both.
+    //
+    // A StateFlow would also refuse to re-emit an unchanged value, and re-running the *same* query
+    // is exactly what retrying a failed one means.
+    private data class SearchRequest(val query: String, val settleFirst: Boolean)
 
-    // Retries go around the debounce rather than through it. A StateFlow will not re-emit an
-    // unchanged value, so running the *same* search again — which is exactly what retrying a failed
-    // one means — needs its own channel; and a tap on "Try again" is not typing, so making it wait
-    // out the typing debounce just leaves the button looking broken for a third of a second.
-    private val retries = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    private val requests = MutableSharedFlow<SearchRequest>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
 
     init {
         viewModelScope.launch {
-            merge(queryFlow.debounce(SEARCH_DEBOUNCE_MS), retries).collectLatest { query ->
+            requests.collectLatest { request ->
+                // Typing waits for the user to stop; a tap on "Try again" is already deliberate and
+                // runs now — making it sit out the typing debounce just leaves the button looking
+                // broken for a third of a second.
+                if (request.settleFirst) delay(SEARCH_DEBOUNCE_MS)
+                val query = request.query
                 if (query.isBlank()) {
                     _uiState.value = _uiState.value.copy(results = emptyList(), isSearching = false, error = null)
                     return@collectLatest
@@ -68,7 +82,7 @@ class AniListSearchViewModel @Inject constructor(
 
     fun onQueryChange(query: String) {
         _uiState.value = _uiState.value.copy(query = query)
-        queryFlow.value = query
+        requests.tryEmit(SearchRequest(query, settleFirst = true))
     }
 
     // Re-runs the current search. Almost every failure here is a dropped connection, and before this
@@ -81,7 +95,7 @@ class AniListSearchViewModel @Inject constructor(
         // request is actually under way — and the gap between the two is where the button reads as
         // unresponsive, since the error message it replaces is still sitting there.
         _uiState.value = _uiState.value.copy(isSearching = true, error = null)
-        retries.tryEmit(query)
+        requests.tryEmit(SearchRequest(query, settleFirst = false))
     }
 
     private companion object {

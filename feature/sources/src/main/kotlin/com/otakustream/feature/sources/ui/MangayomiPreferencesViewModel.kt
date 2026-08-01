@@ -122,13 +122,32 @@ class MangayomiPreferencesViewModel @Inject constructor(
                     }
                 }
                 val prefsJson = resolved.toString()
-                // Persist, then swap the live source for one rebuilt with the new preferences.
-                // NonCancellable so the DB write + registry swap complete atomically.
-                withContext(NonCancellable) {
-                    mangayomiRepository.updatePrefs(sourceId, prefsJson)
-                    val updated = mangayomiRepository.getAll().firstOrNull { it.id == sourceId } ?: return@withContext
-                    sourceRepository.unregisterDynamic(sourceId)
-                    sourceRepository.registerDynamic(factory.createFromRecord(updated))
+                // Build the replacement first, and only commit once it exists.
+                //
+                // createFromRecord brings the JS engine up with these values, which is the whole
+                // point — it is what makes "Saved" mean the extension accepted them. But that means
+                // it can throw on a value the extension rejects, and in that order the throw landed
+                // after the write and the unregister: the rejected value was persisted, the working
+                // source was gone from the registry, and the user was left with an error message and
+                // no extension. Constructing first makes the failure a no-op — nothing is written and
+                // nothing is unregistered, so the previously working source keeps running.
+                //
+                // NonCancellable covers the commit alone, so leaving the screen can't strand the
+                // registry half-swapped.
+                val current = mangayomiRepository.getAll().firstOrNull { it.id == sourceId }
+                    ?: error("Extension is no longer installed")
+                val replacement = factory.createFromRecord(current.copy(prefsJson = prefsJson))
+                try {
+                    withContext(NonCancellable) {
+                        mangayomiRepository.updatePrefs(sourceId, prefsJson)
+                        sourceRepository.unregisterDynamic(sourceId)
+                        sourceRepository.registerDynamic(replacement)
+                    }
+                } catch (t: Throwable) {
+                    // Never registered, so nothing else will ever close it — and it owns a QuickJS
+                    // thread and native context.
+                    runCatching { replacement.close() }
+                    throw t
                 }
                 _uiState.value = _uiState.value.copy(saved = true)
             }.onFailure { failure ->

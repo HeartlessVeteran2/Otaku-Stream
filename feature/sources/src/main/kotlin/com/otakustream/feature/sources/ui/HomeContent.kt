@@ -65,7 +65,7 @@ fun HomeContent(
 
     // A LazyColumn, not a Column with verticalScroll. Both scroll; the difference is when the rails
     // compose. A scrolling Column composes all of them on the first frame, so opening the app
-    // created all six rails — with maybe two on screen — before anything could be drawn. Each
+    // created every available rail — with maybe two on screen — before anything could be drawn. Each
     // LazyRow only composed its visible tiles, but the rail itself, its header and its measurement
     // were still work done up front. Lazily, the rails below the fold cost nothing until they are
     // scrolled to. Each rail is one item with its header, so a header can never be stranded on

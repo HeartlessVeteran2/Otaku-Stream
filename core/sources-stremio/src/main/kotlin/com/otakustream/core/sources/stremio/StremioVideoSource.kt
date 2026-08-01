@@ -1,5 +1,6 @@
 package com.otakustream.core.sources.stremio
 
+import android.os.SystemClock
 import com.otakustream.core.database.stremio.StremioRepository
 import com.otakustream.core.sources.api.CatalogPage
 import com.otakustream.core.sources.api.Episode
@@ -76,10 +77,22 @@ class StremioVideoSource(
     // most likely to have gained an episode — is exactly the one that would keep serving a stale
     // list. A timestamp bounds that regardless of how often it is read.
     //
-    // Monotonic, not wall clock: a device clock correction (NTP sync, a manual change, a timezone
-    // shift that moves the clock) would otherwise either expire every entry at once or push one an
-    // arbitrary distance into the future, where it never expires at all.
-    private class CachedMeta(val job: Deferred<StremioMeta>, val startedAtNanos: Long)
+    // The age of a *result*, so the clock starts when the job completes, not when it was created.
+    // Timed from creation, a request that took four minutes would be handed to its first reader
+    // already four minutes into a five-minute life. Zero until then, which also means an in-flight
+    // job is never too old to join — expiring one would start a duplicate request alongside a
+    // perfectly good one still running, which is the exact opposite of what this cache is for.
+    //
+    // elapsedRealtime, not currentTimeMillis or nanoTime. Wall clock lets an NTP correction or a
+    // manual change expire everything at once, or push an entry so far into the future it never
+    // expires. nanoTime is monotonic but stops while the device is suspended, so a phone asleep in a
+    // pocket overnight would wake with entries that had not aged a second — and catching a show that
+    // aired while the app sat in the background is precisely what this TTL is for. elapsedRealtime
+    // is monotonic *and* counts sleep.
+    private class CachedMeta(val job: Deferred<StremioMeta>) {
+        @Volatile
+        var completedAtElapsedMs: Long = 0L
+    }
 
     // Guards metaCache: an access-ordered LinkedHashMap reorders itself on a *read*, so even
     // lookups mutate it and none of it is thread-safe.
@@ -95,16 +108,9 @@ class StremioVideoSource(
 
     private suspend fun metaFor(type: String, id: String): StremioMeta {
         val key = "$type|$id"
-        val now = System.nanoTime()
         val entry = synchronized(metaCacheLock) {
             val existing = metaCache[key]
-            // Age is measured from when the request *started*, not when it finished, so a slow
-            // response cannot arrive already most of the way through its own lifetime.
-            if (existing != null && now - existing.startedAtNanos < META_CACHE_TTL_NANOS) {
-                existing
-            } else {
-                newMetaEntry(key, type, id, now).also { metaCache[key] = it }
-            }
+            if (existing != null && existing.isUsable()) existing else newMetaEntry(key, type, id).also { metaCache[key] = it }
         }
         // Started outside the lock. The job is LAZY, so nothing runs until here — which keeps the
         // network call off the critical section and, more importantly, guarantees the entry is
@@ -117,8 +123,21 @@ class StremioVideoSource(
         return entry.job.await()
     }
 
+    // Still worth joining: either the request has not finished — in which case a second caller
+    // should wait on it rather than fire its own — or it finished recently enough for the result to
+    // still be current.
+    //
+    // A completed job whose timestamp is not yet set (`0L`) is treated as stale. That is a
+    // nanosecond-wide window between the job finishing and its completion handler running, and
+    // refetching is the safe side of it: the alternative is serving a result with no known age.
+    private fun CachedMeta.isUsable(): Boolean {
+        if (!job.isCompleted) return true
+        val completedAt = completedAtElapsedMs
+        return completedAt != 0L && SystemClock.elapsedRealtime() - completedAt < META_CACHE_TTL_MS
+    }
+
     // Caller must hold `metaCacheLock`.
-    private fun newMetaEntry(key: String, type: String, id: String, startedAtNanos: Long): CachedMeta {
+    private fun newMetaEntry(key: String, type: String, id: String): CachedMeta {
         // LAZY, so the job cannot complete before it has been stored. Started eagerly, a request
         // that fails immediately — an unreachable host, a rejected URL — can run its completion
         // handler *before* `metaCache[key] = entry` executes, so the eviction below finds nothing to
@@ -127,8 +146,9 @@ class StremioVideoSource(
         val job = metaScope.async(start = CoroutineStart.LAZY) {
             parseMetaResponse(get("$baseUrl/meta/$type/$id.json"))
         }
-        val entry = CachedMeta(job, startedAtNanos)
+        val entry = CachedMeta(job)
         job.invokeOnCompletion { cause ->
+            entry.completedAtElapsedMs = SystemClock.elapsedRealtime()
             // Only a job that actually failed is evicted, and only if it is still the installed one.
             // A cached failure would otherwise make the title unopenable for the rest of the session.
             if (cause != null) {
@@ -372,10 +392,10 @@ class StremioVideoSource(
         // catalog, not one for the app.
         const val META_CACHE_MAX = 20
 
-        // How long a cached /meta response stays usable. Long enough to cover the pair of calls one
-        // details screen makes and a user flicking back and forth between titles; short enough that
-        // a show which aired an episode while the app sat in the background is picked up on the next
-        // open rather than at the next cold start.
-        val META_CACHE_TTL_NANOS = TimeUnit.MINUTES.toNanos(5)
+        // How long a cached /meta response stays usable, measured from when it arrived. Long enough
+        // to cover the pair of calls one details screen makes and a user flicking back and forth
+        // between titles; short enough that a show which aired an episode while the app sat in the
+        // background is picked up on the next open rather than at the next cold start.
+        val META_CACHE_TTL_MS = TimeUnit.MINUTES.toMillis(5)
     }
 }
