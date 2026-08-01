@@ -97,7 +97,7 @@ class MainActivity : ComponentActivity() {
                         onMagnetConfirmed = {
                             // The stash happens here, on confirm, not at parse time — so declining
                             // leaves nothing behind for a later playback to pick up.
-                            pendingMagnet?.let { pendingPlayUrl = magnetToPlayableUrl(it.magnet) }
+                            pendingMagnet?.let { pendingPlayUrl = prepareMagnetPlayback(it.magnet) }
                             pendingMagnet = null
                         },
                         onMagnetDismissed = { pendingMagnet = null },

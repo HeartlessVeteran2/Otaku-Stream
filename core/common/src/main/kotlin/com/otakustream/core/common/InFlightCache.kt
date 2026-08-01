@@ -104,6 +104,13 @@ class InFlightCache<K : Any, V>(
 
     // Drops completed entries, oldest-accessed first, until the bound is met. In-flight entries are
     // skipped rather than stopping the scan, so a slow request cannot pin the cache above its bound.
+    //
+    // The bound is therefore over *results*, not entries: with more than `maxEntries` distinct
+    // requests genuinely in flight at once the map exceeds it until they finish. That is deliberate
+    // — the alternative is dropping a running request, which does not cancel it and just guarantees
+    // the next caller duplicates it. The excess is bounded by how many requests the owner actually
+    // has outstanding, which for the source adapters here is a couple per screen.
+    //
     // Caller must hold `lock`.
     private fun trimLocked() {
         if (entries.size <= maxEntries) return
@@ -118,6 +125,10 @@ class InFlightCache<K : Any, V>(
     }
 
     private fun Entry<V>.isUsable(): Boolean {
+        // Cancelled first: a job that is cancelling reports isCompleted == false but is already
+        // doomed, so joining it hands every later caller the same failure. Treating it as unusable
+        // makes the next caller start a fresh one.
+        if (job.isCancelled) return false
         if (!job.isCompleted) return true
         val completedAt = completedAtMs
         return completedAt != NEVER && nowMs() - completedAt < ttlMs

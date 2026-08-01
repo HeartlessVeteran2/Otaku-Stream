@@ -121,12 +121,16 @@ class MangayomiPreferencesViewModel @Inject constructor(
     private val saveLock = Mutex()
 
     fun save() {
+        // Captured here, not inside the coroutine: launching and then waiting on saveLock can take
+        // arbitrarily long, and reading the items after that would persist edits the user made
+        // *after* pressing Save — and then label them Saved.
+        val editsAtStart = editVersion
+        val itemsAtStart = _uiState.value.items
         viewModelScope.launch {
             saveLock.withLock {
-                val editsAtStart = editVersion
                 runCatching {
                     val resolved = JSONObject()
-                    _uiState.value.items.forEach { item ->
+                    itemsAtStart.forEach { item ->
                         when (item) {
                             is PrefItem.ListPref ->
                                 resolved.put(item.key, item.entryValues.getOrNull(item.selectedIndex) ?: "")
@@ -148,10 +152,17 @@ class MangayomiPreferencesViewModel @Inject constructor(
                         ?: error("Extension is no longer installed")
                     val replacement = factory.createFromRecord(current.copy(prefsJson = prefsJson))
 
+                    // Tracks who owns `replacement` if something throws. Once the registry has it,
+                    // closing it here would leave the extension live but pointing at a dead QuickJS
+                    // runtime — the source would still be listed and would fail on every call.
+                    var registered = false
                     try {
                         // NonCancellable covers the commit alone, so leaving the screen cannot
                         // strand the registry half-swapped.
                         withContext(NonCancellable) {
+                            // Persist before swapping. The other order meant a failed write ran the
+                            // catch below on an instance the registry already owned.
+                            mangayomiRepository.updatePrefs(sourceId, prefsJson)
                             // The registry decides whether this extension still exists, rather than
                             // a check beforehand. Bringing QuickJS up takes long enough for the user
                             // to uninstall meanwhile, and re-reading the record only narrows that
@@ -161,12 +172,12 @@ class MangayomiPreferencesViewModel @Inject constructor(
                             if (!sourceRepository.replaceDynamic(replacement)) {
                                 error("Extension is no longer installed")
                             }
-                            mangayomiRepository.updatePrefs(sourceId, prefsJson)
+                            registered = true
                         }
                     } catch (t: Throwable) {
-                        // Never registered, so nothing else will ever close it — and it owns a
-                        // QuickJS thread and native context.
-                        runCatching { replacement.close() }
+                        // Only when nothing else took ownership — otherwise this owns a QuickJS
+                        // thread and native context that nothing would ever release.
+                        if (!registered) runCatching { replacement.close() }
                         throw t
                     }
 
@@ -197,9 +208,14 @@ class MangayomiPreferencesViewModel @Inject constructor(
     private var editVersion = 0
 
     private fun updateItem(key: String, transform: (PrefItem) -> PrefItem) {
+        val current = _uiState.value
+        val updated = current.items.map { if (it.key == key) transform(it) else it }
+        // Re-picking the option that is already selected is not an edit. Treating it as one bumped
+        // the version and cleared "Saved", so the screen claimed unsaved changes that don't exist.
+        if (updated == current.items) return
         editVersion++
-        _uiState.value = _uiState.value.copy(
-            items = _uiState.value.items.map { if (it.key == key) transform(it) else it },
+        _uiState.value = current.copy(
+            items = updated,
             saved = false,
             // The values on screen are no longer the ones that were rejected, so the rejection no
             // longer describes anything the user can see.

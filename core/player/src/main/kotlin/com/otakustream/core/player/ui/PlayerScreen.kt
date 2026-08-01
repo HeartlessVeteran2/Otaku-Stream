@@ -52,6 +52,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.util.UnstableApi
@@ -125,7 +126,13 @@ fun PlayerScreen(
     // put a provider round-trip on the frame the user is waiting for video on — the same mistake
     // this pass is removing elsewhere.
     LaunchedEffect(activity) {
-        val measured = withContext(Dispatchers.IO) { activity?.currentScreenBrightness() }
+        // Bounded. The read is normally a few milliseconds, but a ContentProvider call has no
+        // guaranteed ceiling, and until it lands every drag is banked rather than applied — so an
+        // unlucky read would leave the gesture inert for as long as it took. Past the deadline the
+        // fallback is used and drags go live; a late result is simply ignored.
+        val measured = withTimeoutOrNull(BRIGHTNESS_READ_TIMEOUT_MS) {
+            withContext(Dispatchers.IO) { activity?.currentScreenBrightness() }
+        }
         // Only if the user hasn't already established a baseline — a slow read must never land on
         // top of a value they set themselves.
         if (brightnessFraction == null) {
@@ -572,6 +579,11 @@ private const val UNKNOWN_BRIGHTNESS = 0.5f
 // purpose — see the seeding logic: a first swipe that lands too dim costs the user nothing, and one
 // that lands too bright at night is the failure this whole path exists to avoid.
 private const val ADAPTIVE_SEED_CEILING = 0.2f
+
+// How long the brightness gesture will wait for the real value before falling back. Long enough
+// that the normal read always wins, short enough that a slow provider cannot make the first swipe
+// feel dead.
+private const val BRIGHTNESS_READ_TIMEOUT_MS = 250L
 
 private fun Activity.setScreenBrightness(fraction: Float) {
     val params = window.attributes

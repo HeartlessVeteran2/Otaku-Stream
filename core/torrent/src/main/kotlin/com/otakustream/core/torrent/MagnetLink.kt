@@ -63,8 +63,26 @@ object MagnetLinks {
         }
 
         val hash = infoHash ?: return null
-        return MagnetLink(infoHash = hash, trackers = trackers.distinct(), displayName = displayName)
+        return MagnetLink(
+            infoHash = hash,
+            // Bounded here rather than at each call site, because every one of them feeds a link
+            // that arrived from outside the app — pasted, or shared in by another app. A crafted
+            // magnet can carry thousands of `tr` parameters, and each one becomes a host the session
+            // announces to and a string persisted with the torrent.
+            trackers = trackers.distinct().take(MAX_TRACKERS),
+            displayName = displayName?.let(::sanitizeDisplayName),
+        )
     }
+
+    // `dn` is attacker-supplied text that ends up in watch history and on screen. Control characters
+    // (including the newlines that would break a single-line row) are dropped, runs of whitespace
+    // collapsed, and the result bounded — a megabyte-long name is not a title, it is a payload.
+    private fun sanitizeDisplayName(raw: String): String? = raw
+        .filter { it == ' ' || !it.isISOControl() }
+        .replace(WHITESPACE_RUN, " ")
+        .trim()
+        .take(MAX_DISPLAY_NAME_LENGTH)
+        .ifBlank { null }
 
     // Magnet → the app's own stable playback identity. fileIdx 0 because a magnet says nothing about
     // which file inside the torrent is meant; for the single-file torrents these links overwhelmingly
@@ -114,4 +132,13 @@ object MagnetLinks {
         // 32 base32 characters carry exactly 160 bits, so a correct hash leaves nothing over.
         return out.toString().takeIf { it.length == HEX_HASH_LENGTH }
     }
+
+    // Generous next to what a real magnet carries (a handful to a few dozen) and small enough that a
+    // crafted one cannot turn a single paste into a swarm of announce targets.
+    private const val MAX_TRACKERS = 64
+
+    // Long enough for a full release name, short enough that history rows stay rows.
+    private const val MAX_DISPLAY_NAME_LENGTH = 200
+
+    private val WHITESPACE_RUN = Regex("\\s+")
 }

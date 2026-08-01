@@ -42,7 +42,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.otakustream.app.R
-import com.otakustream.app.magnetToPlayableUrl
+import com.otakustream.app.prepareMagnetPlayback
 import com.otakustream.core.torrent.MagnetLinks
 import com.otakustream.feature.sources.ui.HomeContent
 
@@ -146,7 +146,7 @@ fun PlayScreen(
                 // swarm publishes the user's IP; a link they pasted into this dialog is already
                 // their deliberate choice, and asking twice for one action is noise.
                 val playable = if (url.startsWith("magnet:", ignoreCase = true)) {
-                    magnetToPlayableUrl(url)
+                    prepareMagnetPlayback(url)
                 } else {
                     url
                 }
@@ -170,8 +170,8 @@ private fun PasteUrlDialog(onDismiss: () -> Unit, onPlay: (String) -> Unit) {
     // one arrives broken — starts with "magnet:" all the same, so a prefix check enables Play for a
     // link the conversion below then refuses, and the tap does nothing at all with no explanation.
     // Greyed out is at least honest about it.
-    val isMagnet = remember(trimmed) { MagnetLinks.parse(trimmed) != null }
-    val isPlayable = isMagnet ||
+    val isValidMagnet = remember(trimmed) { MagnetLinks.parse(trimmed) != null }
+    val isPlayable = isValidMagnet ||
         listOf("http://", "https://", "content://", "file://").any { trimmed.startsWith(it, ignoreCase = true) }
     AlertDialog(
         onDismissRequest = onDismiss,

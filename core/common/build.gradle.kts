@@ -22,9 +22,12 @@ android {
 }
 
 dependencies {
-    // api, not implementation: InFlightCache takes a CoroutineScope in its public
-    // constructor, so coroutines is part of this module's ABI, not an internal detail.
-    api(libs.kotlinx.coroutines.android)
+    // api, not implementation: InFlightCache takes a CoroutineScope in its public constructor, so
+    // coroutines is part of this module's ABI, not an internal detail.
+    //
+    // -core, not -android: nothing here touches Dispatchers.Main or the Android dispatcher
+    // integration, and exposing -android would push it onto every consumer of this module.
+    api(libs.kotlinx.coroutines.core)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
