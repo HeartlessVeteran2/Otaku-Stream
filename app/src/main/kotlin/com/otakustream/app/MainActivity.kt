@@ -20,8 +20,6 @@ import androidx.compose.ui.Modifier
 import com.otakustream.app.navigation.AppNavHost
 import com.otakustream.app.ui.theme.OtakuStreamTheme
 import com.otakustream.core.player.PlayerController
-import com.otakustream.core.sources.api.PendingPlayback
-import com.otakustream.core.sources.api.Video
 import com.otakustream.core.torrent.MagnetLinks
 import dagger.Lazy
 import dagger.hilt.android.AndroidEntryPoint

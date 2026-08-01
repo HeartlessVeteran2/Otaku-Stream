@@ -164,19 +164,36 @@ class MangayomiPreferencesViewModel @Inject constructor(
                         // NonCancellable covers the commit alone, so leaving the screen cannot
                         // strand the registry half-swapped.
                         withContext(NonCancellable) {
-                            // Persist before swapping. The other order meant a failed write ran the
-                            // catch below on an instance the registry already owned.
-                            mangayomiRepository.updatePrefs(sourceId, prefsJson)
+                            // The swap goes first because it is the only identity check there is.
+                            //
                             // The registry decides whether this extension still exists, rather than
                             // a check beforehand. Bringing QuickJS up takes long enough for the user
                             // to uninstall meanwhile, and re-reading the record only narrows that
                             // window — the delete can still land between the check and the swap.
-                            // replaceDynamic refuses once the id is gone, which is the same instant
-                            // uninstall removes it, so no ordering can resurrect a removed source.
+                            // replaceDynamic refuses once `replacing` is no longer the registered
+                            // instance, so no ordering can resurrect a removed source.
+                            //
+                            // Writing first instead meant the write happened before anything had
+                            // established that `replacing` was still the thing being edited. An
+                            // extension's id is its own, so uninstalling and reinstalling it
+                            // reuses that id — and updatePrefs writes *by id*. A save that overlapped
+                            // a reinstall therefore stamped these preferences onto the fresh install's
+                            // record and then reported failure when the swap was refused: the user
+                            // saw an error while a different install silently inherited values it
+                            // never asked for. Gating on the swap means the write can only ever reach
+                            // the record whose identity was just verified.
                             if (!sourceRepository.replaceDynamic(replacing, replacement)) {
                                 error("Extension is no longer installed")
                             }
                             registered = true
+                            // Disk after memory. If this throws, the registry is serving the values
+                            // the user asked for and the error says they were not persisted, so a
+                            // restart reverts them — visible and recoverable. There is no rolling
+                            // back to `replacing`: replaceDynamic closed it as it took, and
+                            // reinstating a closed runtime would leave the extension listed and
+                            // broken. Reporting the failure and keeping the live source is the
+                            // better of the two.
+                            mangayomiRepository.updatePrefs(sourceId, prefsJson)
                         }
                     } catch (t: Throwable) {
                         // Only when nothing else took ownership — otherwise this owns a QuickJS

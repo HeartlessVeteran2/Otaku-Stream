@@ -54,6 +54,9 @@ object MagnetLinks {
             val separator = pair.indexOf('=')
             if (separator <= 0 || separator == pair.length - 1) return@forEach
             val key = pair.substring(0, separator).lowercase()
+            // Checked before decoding, not after: a magnet with thousands of `tr` parameters would
+            // otherwise pay for decoding and allocating every one of them just to discard it.
+            if (key == "tr" && trackers.size >= MAX_TRACKERS) return@forEach
             val value = decode(pair.substring(separator + 1)) ?: return@forEach
 
             when (key) {
@@ -61,7 +64,11 @@ object MagnetLinks {
                 // Take the first btih and ignore the rest: v2 hashes are not supported, and picking
                 // one up here would build a url that parses but can never resolve.
                 "xt" -> if (infoHash == null) infoHash = normalizeHash(value)
-                "tr" -> if (trackers.size < MAX_TRACKERS) trackers += value
+                // A control character has no business in an announce URL — it is either a broken
+                // link or an attempt to smuggle a delimiter through something that later splits on
+                // one. Nothing in this app persists trackers delimited today, so this is hygiene
+                // rather than a fix for a live bug, but the value goes to libtorrent verbatim.
+                "tr" -> if (value.none { it.isISOControl() }) trackers += value
                 "dn" -> displayName = value.ifBlank { null }
             }
         }
@@ -82,7 +89,14 @@ object MagnetLinks {
     // (including the newlines that would break a single-line row) are dropped, runs of whitespace
     // collapsed, and the result bounded — a megabyte-long name is not a title, it is a payload.
     private fun sanitizeDisplayName(raw: String): String? = raw
-        .filter { it == ' ' || !it.isISOControl() }
+        // Bounded before the scans below, not after: filter/replace/trim each walk the whole string
+        // and allocate a copy, so a megabyte-long `dn` paid for all of that before `take` applied.
+        // Generous headroom over the final limit so collapsing whitespace still has room to work.
+        .take(MAX_DISPLAY_NAME_LENGTH * SANITIZE_INPUT_HEADROOM)
+        // Bidi overrides and isolates are not ISO controls, and they reorder the text around them —
+        // enough to make a magnet's name read as something else entirely in the confirmation prompt
+        // that exists precisely so the user can see what they are about to fetch.
+        .filter { it == ' ' || !(it.isISOControl() || it in BIDI_CONTROLS) }
         .replace(WHITESPACE_RUN, " ")
         .trim()
         .take(MAX_DISPLAY_NAME_LENGTH)
@@ -151,4 +165,14 @@ object MagnetLinks {
     // row: U+2028 LINE SEPARATOR, U+2029 PARAGRAPH SEPARATOR, and the non-breaking spaces in
     // \p{Z}. None of those are ISO controls either, so the filter above does not catch them.
     private val WHITESPACE_RUN = Regex("[\\s\\p{Z}\\u2028\\u2029]+")
+
+    // How much raw input to keep before sanitising, as a multiple of the final limit.
+    private const val SANITIZE_INPUT_HEADROOM = 4
+
+    // LRM/RLM/ALM, the LRE..RLO embedding/override set, PDF, and the U+2066..U+2069 isolates.
+    private val BIDI_CONTROLS = setOf(
+        '\u200E', '\u200F', '\u061C',
+        '\u202A', '\u202B', '\u202C', '\u202D', '\u202E',
+        '\u2066', '\u2067', '\u2068', '\u2069',
+    )
 }

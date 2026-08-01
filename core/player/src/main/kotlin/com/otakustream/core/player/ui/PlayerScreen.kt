@@ -127,13 +127,16 @@ fun PlayerScreen(
     // put a provider round-trip on the frame the user is waiting for video on — the same mistake
     // this pass is removing elsewhere.
     LaunchedEffect(activity) {
-        // Raced, not wrapped. `withTimeoutOrNull { withContext(IO) { blocking() } }` does not
-        // actually bound anything: the timeout cannot preempt a blocking call, so the outer
-        // coroutine still waits for it to return. Awaiting a Deferred *is* cancellable, so the
-        // deadline works and an over-running read is simply orphaned and ignored.
+        // Raced, not wrapped. `withTimeoutOrNull { withContext(IO) { blocking() } }` bounds nothing:
+        // a timeout cannot preempt a blocking call, so the outer coroutine waits for it regardless.
+        // Awaiting a Deferred *is* cancellable, so the deadline below genuinely fires and the
+        // gesture stops being held up.
         //
-        // The bound matters because until the value lands every drag is banked rather than applied,
-        // and a ContentProvider call has no guaranteed ceiling.
+        // What it does not do is stop the read. `reading` is a child of this effect, so an
+        // over-running provider call keeps its IO thread until it returns, and leaving the screen
+        // waits on it. Bounding that too would mean a scope outliving the composition, which is a
+        // larger mechanism than a settings read deserves — the deadline exists to keep the *gesture*
+        // responsive, not to abandon the work.
         val reading = async(Dispatchers.IO) { activity?.currentScreenBrightness() }
         val measured = withTimeoutOrNull(BRIGHTNESS_READ_TIMEOUT_MS) { reading.await() }
         // Only if the user hasn't already established a baseline — a slow read must never land on

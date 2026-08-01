@@ -101,7 +101,11 @@ class SourceRegistry @Inject constructor(
             val current = _dynamicSources.value
             // By identity, and re-checked on every attempt: a lost CAS means the list changed under
             // us, and what changed may be exactly this id being uninstalled and installed afresh.
-            val index = current.indexOfFirst { it === expected }
+            // Both conditions: identity answers "still the registration I meant", and the id check
+            // makes the documented invariant real rather than merely asserted — a replacement with a
+            // different id would otherwise drop `expected`'s id and install a second entry for its
+            // own.
+            val index = current.indexOfFirst { it === expected && it.id == source.id }
             if (index < 0) return false
             val next = current.toMutableList().apply { this[index] = source }
             if (_dynamicSources.compareAndSet(current, next)) {
