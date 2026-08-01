@@ -1,5 +1,6 @@
 package com.otakustream.feature.sources.ui
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,6 +16,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -67,10 +69,17 @@ fun AniListSearchScreen(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier.fillMaxWidth().padding(32.dp),
                 ) { CircularProgressIndicator() }
-                uiState.error != null -> Box(
-                    contentAlignment = Alignment.Center,
+                // A failed search was a dead end: the message sat there and the only way to try
+                // again was to edit the query, which is not what the user wants to change. Almost
+                // every failure here is a dropped connection, so offer the one action that fixes it.
+                uiState.error != null -> Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize().padding(32.dp),
-                ) { Text(uiState.error!!, color = MaterialTheme.colorScheme.error) }
+                ) {
+                    Text(uiState.error!!, color = MaterialTheme.colorScheme.error)
+                    OutlinedButton(onClick = viewModel::retry) { Text("Try again") }
+                }
                 uiState.results.isEmpty() && uiState.query.isBlank() -> CenterMessage(
                     "Search for an anime to get started.",
                 )

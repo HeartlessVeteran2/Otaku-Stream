@@ -5,15 +5,16 @@ import androidx.lifecycle.viewModelScope
 import com.otakustream.feature.tracking.AniListClient
 import com.otakustream.feature.tracking.AniListMedia
 import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 data class AniListSearchUiState(
     val query: String = "",
@@ -35,9 +36,14 @@ class AniListSearchViewModel @Inject constructor(
 
     private val queryFlow = MutableStateFlow("")
 
+    // Bumped by retry(). queryFlow is a StateFlow and will not re-emit an unchanged value, so
+    // running the *same* search again — which is exactly what retrying a failed one means — needs
+    // something else to change.
+    private val retryTick = MutableStateFlow(0)
+
     init {
         viewModelScope.launch {
-            queryFlow.debounce(SEARCH_DEBOUNCE_MS).collectLatest { query ->
+            combine(queryFlow, retryTick) { query, _ -> query }.debounce(SEARCH_DEBOUNCE_MS).collectLatest { query ->
                 if (query.isBlank()) {
                     _uiState.value = _uiState.value.copy(results = emptyList(), isSearching = false, error = null)
                     return@collectLatest
@@ -61,6 +67,13 @@ class AniListSearchViewModel @Inject constructor(
     fun onQueryChange(query: String) {
         _uiState.value = _uiState.value.copy(query = query)
         queryFlow.value = query
+    }
+
+    // Re-runs the current search. Almost every failure here is a dropped connection, and before this
+    // the only way to trigger another attempt was to change the query — which is not the thing the
+    // user wants to change.
+    fun retry() {
+        retryTick.value++
     }
 
     private companion object {

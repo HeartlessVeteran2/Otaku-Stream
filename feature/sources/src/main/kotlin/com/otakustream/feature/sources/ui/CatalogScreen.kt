@@ -304,7 +304,11 @@ private fun MediaCard(
             shape = MaterialTheme.shapes.small,
             modifier = Modifier.align(Alignment.TopEnd).padding(4.dp),
         ) {
-            IconButton(onClick = onToggleSave, modifier = Modifier.size(32.dp)) {
+            // 40.dp, not 32: this is a real tap target sitting on top of a poster that is itself
+            // clickable, so a miss doesn't do nothing — it opens the title. Material's minimum is
+            // 48 dp; 40 is the most that fits over a 120 dp tile without covering the artwork, and
+            // it is a good deal harder to miss than 32.
+            IconButton(onClick = onToggleSave, modifier = Modifier.size(40.dp)) {
                 Icon(
                     imageVector = if (saved) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
                     contentDescription = if (saved) "Remove from library" else "Save to library",

@@ -8,6 +8,7 @@ import com.otakustream.core.sources.api.VideoSource
 import com.otakustream.feature.sources.SourceBootstrapper
 import com.otakustream.feature.sources.SourceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -18,16 +19,21 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import javax.inject.Inject
 
 private const val RAIL_ITEM_CAP = 20
 private const val CONTINUE_WATCHING_CAP = 10
 // Soft cap per source per rail so one slow source can't hold up the whole home fan-out.
 private const val RAIL_FETCH_TIMEOUT_MS = 15_000L
+
+// How long registrations must stay quiet before the rails are rebuilt. Long enough to swallow the
+// bootstrap burst, short enough that installing a single add-on still feels immediate.
+private const val SOURCE_SETTLE_MS = 300L
 
 data class HomeUiState(
     val popular: List<CatalogEntry> = emptyList(),
@@ -67,10 +73,18 @@ class HomeViewModel @Inject constructor(
             sourceBootstrapper.ensureStarted()
             // React to every registration change (bootstrap above, addon install/removal later)
             // so a newly installed add-on populates the home without a restart.
-            sourceRepository.observeSources().collectLatest { sources ->
-                _uiState.value = _uiState.value.copy(hasAnySources = sources.isNotEmpty())
-                refreshRails(sources)
-            }
+            sourceRepository.observeSources()
+                // Bootstrap registers persisted sources one at a time, so a user with six add-ons
+                // produced six emissions in a burst — and each one cancelled the rail fan-out and
+                // started a fresh round of requests to every source registered so far. Letting the
+                // burst settle turns that into a single fan-out. The wait is a fraction of the
+                // network round-trips it saves.
+                .debounce(SOURCE_SETTLE_MS)
+                .distinctUntilChanged()
+                .collectLatest { sources ->
+                    _uiState.value = _uiState.value.copy(hasAnySources = sources.isNotEmpty())
+                    refreshRails(sources)
+                }
         }
     }
 

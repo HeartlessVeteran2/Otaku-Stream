@@ -43,8 +43,16 @@ class MangayomiSourceFactory @Inject constructor(
 
     // Rebuilds a source from its persisted record (script + metadata + resolved preferences) — used
     // to reload an extension after its preferences change and at cold-start bootstrap.
+    //
+    // forceBringup = false, which is what the parameter above was added for and what this call site
+    // was missing: every persisted extension was starting a QuickJS thread and parsing its whole
+    // script before the home screen could render, on every cold start. Nothing here needs the engine
+    // — the metadata comes from the record — and the first catalog call brings it up anyway. A
+    // malformed script now surfaces on first use rather than at bootstrap, which is both later and
+    // closer to where the user can see it; install still validates eagerly.
     suspend fun createFromRecord(record: MangayomiSourceRecord): MangayomiVideoSource = create(
         source = record.scriptContent,
+        forceBringup = false,
         override = MangayomiSourceMetadata(
             id = record.id,
             name = record.name,
