@@ -51,6 +51,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import androidx.lifecycle.Lifecycle
@@ -126,13 +127,15 @@ fun PlayerScreen(
     // put a provider round-trip on the frame the user is waiting for video on — the same mistake
     // this pass is removing elsewhere.
     LaunchedEffect(activity) {
-        // Bounded. The read is normally a few milliseconds, but a ContentProvider call has no
-        // guaranteed ceiling, and until it lands every drag is banked rather than applied — so an
-        // unlucky read would leave the gesture inert for as long as it took. Past the deadline the
-        // fallback is used and drags go live; a late result is simply ignored.
-        val measured = withTimeoutOrNull(BRIGHTNESS_READ_TIMEOUT_MS) {
-            withContext(Dispatchers.IO) { activity?.currentScreenBrightness() }
-        }
+        // Raced, not wrapped. `withTimeoutOrNull { withContext(IO) { blocking() } }` does not
+        // actually bound anything: the timeout cannot preempt a blocking call, so the outer
+        // coroutine still waits for it to return. Awaiting a Deferred *is* cancellable, so the
+        // deadline works and an over-running read is simply orphaned and ignored.
+        //
+        // The bound matters because until the value lands every drag is banked rather than applied,
+        // and a ContentProvider call has no guaranteed ceiling.
+        val reading = async(Dispatchers.IO) { activity?.currentScreenBrightness() }
+        val measured = withTimeoutOrNull(BRIGHTNESS_READ_TIMEOUT_MS) { reading.await() }
         // Only if the user hasn't already established a baseline — a slow read must never land on
         // top of a value they set themselves.
         if (brightnessFraction == null) {

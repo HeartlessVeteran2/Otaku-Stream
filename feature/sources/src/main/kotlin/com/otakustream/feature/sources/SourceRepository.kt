@@ -24,11 +24,18 @@ interface SourceRepository {
     // The target id comes from the source rather than a separate parameter, so there is no way to
     // ask for a swap that removes one id and installs another.
     //
-    // Returns false, having registered nothing, when no source with that id is registered. That is
-    // the uninstall race: a reload can be built while the extension is being removed, and appending
-    // it would resurrect a source whose record is already deleted — alive, with its JS engine, and
-    // backed by nothing. The caller is expected to close the instance it built.
-    fun replaceDynamic(source: VideoSource): Boolean
+    // `expected` is the instance the caller believes is registered, matched by identity. Returns
+    // false, having registered nothing, when that exact instance is no longer there.
+    //
+    // Identity rather than id, because an id-only check cannot tell "still the one I set out to
+    // replace" from "uninstalled and reinstalled while I was working". Both leave the id present;
+    // only the second means the caller's replacement is stale, built from a record that has since
+    // been replaced — and swapping it in would close a live runtime that someone else just
+    // installed. Refusing also covers plain uninstall, where the id is gone entirely and appending
+    // would resurrect a source whose record is deleted.
+    //
+    // The caller owns the instance it built and is expected to close it when this returns false.
+    fun replaceDynamic(expected: VideoSource, source: VideoSource): Boolean
 
     fun unregisterDynamic(id: Long)
     fun observeSources(): Flow<List<VideoSource>>
@@ -89,17 +96,16 @@ class SourceRegistry @Inject constructor(
     // In place, not remove-and-append: this list is the source picker's order and the priority the
     // home rails interleave by, so appending would silently reorder the UI every time an extension's
     // preferences were saved.
-    override fun replaceDynamic(source: VideoSource): Boolean {
+    override fun replaceDynamic(expected: VideoSource, source: VideoSource): Boolean {
         while (true) {
             val current = _dynamicSources.value
-            val index = current.indexOfFirst { it.id == source.id }
-            // Nothing to replace. Refusing rather than appending is what closes the uninstall race:
-            // the id left the registry while this replacement was being built, so installing it now
-            // would bring back a source the user has removed.
+            // By identity, and re-checked on every attempt: a lost CAS means the list changed under
+            // us, and what changed may be exactly this id being uninstalled and installed afresh.
+            val index = current.indexOfFirst { it === expected }
             if (index < 0) return false
             val next = current.toMutableList().apply { this[index] = source }
             if (_dynamicSources.compareAndSet(current, next)) {
-                current.forEach { if (it.id == source.id && it !== source) closeQuietly(it) }
+                if (expected !== source) closeQuietly(expected)
                 return true
             }
         }

@@ -52,6 +52,9 @@ class InFlightCache<K : Any, V>(
         // evictable, silently turning off both the sharing and the caching while still looking like a
         // configured bound.
         require(maxEntries > 0) { "maxEntries must be positive, was $maxEntries" }
+        // Zero is meaningful — share in-flight work, never reuse a finished result. Negative is not,
+        // and would quietly do the same thing while looking like a configured lifetime.
+        require(ttlMs >= 0) { "ttlMs must not be negative, was $ttlMs" }
     }
 
     // completedAtMs is written by the job body itself, before the value is returned, so it is

@@ -150,6 +150,10 @@ class MangayomiPreferencesViewModel @Inject constructor(
                     // and no extension. Constructing first makes a rejection a no-op.
                     val current = mangayomiRepository.getAll().firstOrNull { it.id == sourceId }
                         ?: error("Extension is no longer installed")
+                    // Captured before the engine comes up, so the swap below can tell "still the
+                    // source I set out to replace" from "uninstalled and reinstalled meanwhile".
+                    val replacing = sourceRepository.getSource(sourceId)
+                        ?: error("Extension is no longer installed")
                     val replacement = factory.createFromRecord(current.copy(prefsJson = prefsJson))
 
                     // Tracks who owns `replacement` if something throws. Once the registry has it,
@@ -169,7 +173,7 @@ class MangayomiPreferencesViewModel @Inject constructor(
                             // window — the delete can still land between the check and the swap.
                             // replaceDynamic refuses once the id is gone, which is the same instant
                             // uninstall removes it, so no ordering can resurrect a removed source.
-                            if (!sourceRepository.replaceDynamic(replacement)) {
+                            if (!sourceRepository.replaceDynamic(replacing, replacement)) {
                                 error("Extension is no longer installed")
                             }
                             registered = true

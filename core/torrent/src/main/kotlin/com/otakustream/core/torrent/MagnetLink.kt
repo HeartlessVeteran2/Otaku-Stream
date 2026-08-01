@@ -41,7 +41,11 @@ object MagnetLinks {
         if (query.isEmpty()) return null
 
         var infoHash: String? = null
-        val trackers = mutableListOf<String>()
+        // A set, and capped as it fills: `distinct().take(n)` afterwards still builds the whole
+        // list first, so a magnet with thousands of `tr` parameters does all that work before the
+        // bound applies. LinkedHashSet keeps announce order, which trackers are listed in for a
+        // reason.
+        val trackers = LinkedHashSet<String>()
         var displayName: String? = null
 
         query.split('&').forEach { pair ->
@@ -57,7 +61,7 @@ object MagnetLinks {
                 // Take the first btih and ignore the rest: v2 hashes are not supported, and picking
                 // one up here would build a url that parses but can never resolve.
                 "xt" -> if (infoHash == null) infoHash = normalizeHash(value)
-                "tr" -> trackers += value
+                "tr" -> if (trackers.size < MAX_TRACKERS) trackers += value
                 "dn" -> displayName = value.ifBlank { null }
             }
         }
@@ -65,11 +69,11 @@ object MagnetLinks {
         val hash = infoHash ?: return null
         return MagnetLink(
             infoHash = hash,
-            // Bounded here rather than at each call site, because every one of them feeds a link
-            // that arrived from outside the app — pasted, or shared in by another app. A crafted
-            // magnet can carry thousands of `tr` parameters, and each one becomes a host the session
-            // announces to and a string persisted with the torrent.
-            trackers = trackers.distinct().take(MAX_TRACKERS),
+            // Bounded during the scan above rather than at each call site, because every one of
+            // them feeds a link that arrived from outside the app — pasted, or shared in by another
+            // app. A crafted magnet can carry thousands of `tr` parameters, and each one becomes a
+            // host the session announces to and a string persisted with the torrent.
+            trackers = trackers.toList(),
             displayName = displayName?.let(::sanitizeDisplayName),
         )
     }
@@ -82,6 +86,9 @@ object MagnetLinks {
         .replace(WHITESPACE_RUN, " ")
         .trim()
         .take(MAX_DISPLAY_NAME_LENGTH)
+        // take() counts UTF-16 code units, so a cut can land between the halves of a surrogate pair
+        // and leave a lone high surrogate — malformed text for both the UI and the database. Drop it.
+        .let { if (it.lastOrNull()?.isHighSurrogate() == true) it.dropLast(1) else it }
         .ifBlank { null }
 
     // Magnet → the app's own stable playback identity. fileIdx 0 because a magnet says nothing about
@@ -140,5 +147,8 @@ object MagnetLinks {
     // Long enough for a full release name, short enough that history rows stay rows.
     private const val MAX_DISPLAY_NAME_LENGTH = 200
 
-    private val WHITESPACE_RUN = Regex("\\s+")
+    // \s in Java regex is ASCII-only, so it misses the separators that actually break a single-line
+    // row: U+2028 LINE SEPARATOR, U+2029 PARAGRAPH SEPARATOR, and the non-breaking spaces in
+    // \p{Z}. None of those are ISO controls either, so the filter above does not catch them.
+    private val WHITESPACE_RUN = Regex("[\\s\\p{Z}\\u2028\\u2029]+")
 }
