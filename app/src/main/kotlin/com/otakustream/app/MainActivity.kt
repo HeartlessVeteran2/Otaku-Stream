@@ -20,8 +20,6 @@ import androidx.compose.ui.Modifier
 import com.otakustream.app.navigation.AppNavHost
 import com.otakustream.app.ui.theme.OtakuStreamTheme
 import com.otakustream.core.player.PlayerController
-import com.otakustream.core.sources.api.PendingPlayback
-import com.otakustream.core.sources.api.Video
 import com.otakustream.core.torrent.MagnetLinks
 import dagger.Lazy
 import dagger.hilt.android.AndroidEntryPoint
@@ -97,7 +95,7 @@ class MainActivity : ComponentActivity() {
                         onMagnetConfirmed = {
                             // The stash happens here, on confirm, not at parse time — so declining
                             // leaves nothing behind for a later playback to pick up.
-                            pendingMagnet?.let { pendingPlayUrl = startMagnetPlayback(it.magnet) }
+                            pendingMagnet?.let { pendingPlayUrl = prepareMagnetPlayback(it.magnet) }
                             pendingMagnet = null
                         },
                         onMagnetDismissed = { pendingMagnet = null },
@@ -140,32 +138,6 @@ class MainActivity : ComponentActivity() {
         // An unnamed magnet is legitimate — dn is optional — and the prompt still has to say
         // something honest rather than an empty string.
         return PendingMagnet(magnet = raw, displayName = link.displayName ?: "this torrent")
-    }
-
-    // Magnet → torrent:// plus a tracker stash.
-    //
-    // The trackers can't ride in the url: it is the identity resume position and watch history are
-    // keyed on, and it has to stay the same for a given torrent however the link that introduced it
-    // was written. So they go through the same out-of-band channel the catalog flow uses.
-    //
-    // historyHandled = false because nothing upstream recorded this play — unlike the catalog flow,
-    // there is no view model behind an "Open with"; the player records it itself.
-    private fun startMagnetPlayback(magnet: String): String? {
-        val link = MagnetLinks.parse(magnet) ?: return null
-        val url = MagnetLinks.toTorrentUrl(link) ?: return null
-        PendingPlayback.stash(
-            video = Video(
-                url = url,
-                quality = link.displayName ?: "torrent",
-                trackers = link.trackers,
-            ),
-            historyHandled = false,
-            // Reached only after the user confirmed the magnet prompt, so this is their choice
-            // rather than a source's. The url is torrent:// either way, but saying so keeps the
-            // provenance honest rather than relying on the scheme happening to be allowed.
-            provenance = PendingPlayback.Provenance.USER,
-        )
-        return url
     }
 
     // AniList's implicit-grant redirect puts the token in the URL fragment:

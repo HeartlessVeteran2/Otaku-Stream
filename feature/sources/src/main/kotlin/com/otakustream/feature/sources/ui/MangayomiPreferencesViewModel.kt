@@ -11,6 +11,8 @@ import com.otakustream.feature.sources.SourceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -110,38 +112,135 @@ class MangayomiPreferencesViewModel @Inject constructor(
         (it as? PrefItem.EditTextPref)?.copy(value = value) ?: it
     }
 
+    // Serialised, and the "Saved" tick is tied to the values it actually saved.
+    //
+    // Bringing the JS engine up takes long enough for a second Save — or an edit — to land while the
+    // first is still running. Without the lock, two saves could commit out of order and leave the
+    // registry holding the older values; without the version check, a save completing after the user
+    // had already changed something would tick "Saved" next to values that were never written.
+    private val saveLock = Mutex()
+
     fun save() {
+        // Captured here, not inside the coroutine: launching and then waiting on saveLock can take
+        // arbitrarily long, and reading the items after that would persist edits the user made
+        // *after* pressing Save — and then label them Saved.
+        val editsAtStart = editVersion
+        val itemsAtStart = _uiState.value.items
         viewModelScope.launch {
-            runCatching {
-                val resolved = JSONObject()
-                _uiState.value.items.forEach { item ->
-                    when (item) {
-                        is PrefItem.ListPref -> resolved.put(item.key, item.entryValues.getOrNull(item.selectedIndex) ?: "")
-                        is PrefItem.SwitchPref -> resolved.put(item.key, item.checked)
-                        is PrefItem.EditTextPref -> resolved.put(item.key, item.value)
+            saveLock.withLock {
+                runCatching {
+                    val resolved = JSONObject()
+                    itemsAtStart.forEach { item ->
+                        when (item) {
+                            is PrefItem.ListPref ->
+                                resolved.put(item.key, item.entryValues.getOrNull(item.selectedIndex) ?: "")
+                            is PrefItem.SwitchPref -> resolved.put(item.key, item.checked)
+                            is PrefItem.EditTextPref -> resolved.put(item.key, item.value)
+                        }
+                    }
+                    val prefsJson = resolved.toString()
+
+                    // Build the replacement first, and only commit once it exists.
+                    //
+                    // createFromRecord brings the JS engine up with these values, which is the whole
+                    // point — it is what makes "Saved" mean the extension accepted them. But that
+                    // means it can throw on a value the extension rejects, and in the old order the
+                    // throw landed after the write and the unregister: the rejected value was
+                    // persisted, the working source was gone, and the user was left with an error
+                    // and no extension. Constructing first makes a rejection a no-op.
+                    val current = mangayomiRepository.getAll().firstOrNull { it.id == sourceId }
+                        ?: error("Extension is no longer installed")
+                    // Captured before the engine comes up, so the swap below can tell "still the
+                    // source I set out to replace" from "uninstalled and reinstalled meanwhile".
+                    val replacing = sourceRepository.getSource(sourceId)
+                        ?: error("Extension is no longer installed")
+                    val replacement = factory.createFromRecord(current.copy(prefsJson = prefsJson))
+
+                    // Tracks who owns `replacement` if something throws. Once the registry has it,
+                    // closing it here would leave the extension live but pointing at a dead QuickJS
+                    // runtime — the source would still be listed and would fail on every call.
+                    var registered = false
+                    try {
+                        // NonCancellable covers the commit alone, so leaving the screen cannot
+                        // strand the registry half-swapped.
+                        withContext(NonCancellable) {
+                            // The swap goes first because it is the only identity check there is.
+                            //
+                            // The registry decides whether this extension still exists, rather than
+                            // a check beforehand. Bringing QuickJS up takes long enough for the user
+                            // to uninstall meanwhile, and re-reading the record only narrows that
+                            // window — the delete can still land between the check and the swap.
+                            // replaceDynamic refuses once `replacing` is no longer the registered
+                            // instance, so no ordering can resurrect a removed source.
+                            //
+                            // Writing first instead meant the write happened before anything had
+                            // established that `replacing` was still the thing being edited. An
+                            // extension's id is its own, so uninstalling and reinstalling it
+                            // reuses that id — and updatePrefs writes *by id*. A save that overlapped
+                            // a reinstall therefore stamped these preferences onto the fresh install's
+                            // record and then reported failure when the swap was refused: the user
+                            // saw an error while a different install silently inherited values it
+                            // never asked for. Gating on the swap means the write can only ever reach
+                            // the record whose identity was just verified.
+                            if (!sourceRepository.replaceDynamic(replacing, replacement)) {
+                                error("Extension is no longer installed")
+                            }
+                            registered = true
+                            // Disk after memory. If this throws, the registry is serving the values
+                            // the user asked for and the error says they were not persisted, so a
+                            // restart reverts them — visible and recoverable. There is no rolling
+                            // back to `replacing`: replaceDynamic closed it as it took, and
+                            // reinstating a closed runtime would leave the extension listed and
+                            // broken. Reporting the failure and keeping the live source is the
+                            // better of the two.
+                            mangayomiRepository.updatePrefs(sourceId, prefsJson)
+                        }
+                    } catch (t: Throwable) {
+                        // Only when nothing else took ownership — otherwise this owns a QuickJS
+                        // thread and native context that nothing would ever release.
+                        if (!registered) runCatching { replacement.close() }
+                        throw t
+                    }
+
+                    // Reported only if the values on screen are still the ones this save captured;
+                    // otherwise a save finishing after the user moved on would tick "Saved" next to
+                    // values it knows nothing about. Clearing the error for the same reason: one
+                    // left visible beside "Saved" describes two different attempts at once.
+                    if (editVersion == editsAtStart) {
+                        _uiState.value = _uiState.value.copy(saved = true, error = null)
+                    }
+                }.onFailure { failure ->
+                    if (failure is CancellationException) throw failure
+                    if (editVersion == editsAtStart) {
+                        // saved = false too: a failed retry after an earlier success would otherwise
+                        // show "Saved" and an error side by side.
+                        _uiState.value = _uiState.value.copy(
+                            saved = false,
+                            error = failure.message ?: "Failed to save preferences",
+                        )
                     }
                 }
-                val prefsJson = resolved.toString()
-                // Persist, then swap the live source for one rebuilt with the new preferences.
-                // NonCancellable so the DB write + registry swap complete atomically.
-                withContext(NonCancellable) {
-                    mangayomiRepository.updatePrefs(sourceId, prefsJson)
-                    val updated = mangayomiRepository.getAll().firstOrNull { it.id == sourceId } ?: return@withContext
-                    sourceRepository.unregisterDynamic(sourceId)
-                    sourceRepository.registerDynamic(factory.createFromRecord(updated))
-                }
-                _uiState.value = _uiState.value.copy(saved = true)
-            }.onFailure { failure ->
-                if (failure is CancellationException) throw failure
-                _uiState.value = _uiState.value.copy(error = failure.message ?: "Failed to save preferences")
             }
         }
     }
 
+    // Bumped on every edit so an in-flight save can tell whether the values it captured are still
+    // the ones on screen.
+    private var editVersion = 0
+
     private fun updateItem(key: String, transform: (PrefItem) -> PrefItem) {
-        _uiState.value = _uiState.value.copy(
-            items = _uiState.value.items.map { if (it.key == key) transform(it) else it },
+        val current = _uiState.value
+        val updated = current.items.map { if (it.key == key) transform(it) else it }
+        // Re-picking the option that is already selected is not an edit. Treating it as one bumped
+        // the version and cleared "Saved", so the screen claimed unsaved changes that don't exist.
+        if (updated == current.items) return
+        editVersion++
+        _uiState.value = current.copy(
+            items = updated,
             saved = false,
+            // The values on screen are no longer the ones that were rejected, so the rejection no
+            // longer describes anything the user can see.
+            error = null,
         )
     }
 

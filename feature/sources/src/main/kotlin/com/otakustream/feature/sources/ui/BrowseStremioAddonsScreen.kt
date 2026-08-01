@@ -1,12 +1,13 @@
 package com.otakustream.feature.sources.ui
 
-import com.otakustream.core.ui.CoverImage
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -39,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.sources.stremio.model.AddonListOrigin
 import com.otakustream.core.sources.stremio.model.OfficialAddonListing
+import com.otakustream.core.ui.CoverImage
 
 @Composable
 fun BrowseStremioAddonsScreen(
@@ -52,53 +54,58 @@ fun BrowseStremioAddonsScreen(
         modifier = modifier.fillMaxSize(),
         topBar = { BackTopBar(title = "Add-on directory", onBack = onBack) },
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-            Text(
-                text = "Browse official and community add-ons and tap Install to add them to your catalog.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-
-            CustomListField(
-                savedUrl = uiState.customListUrl,
-                error = uiState.customListError,
-                onSave = viewModel::saveCustomListUrl,
-            )
-
-            if (uiState.isLoading) {
-                CircularProgressIndicator(modifier = Modifier.padding(top = 16.dp))
-            }
-
-            uiState.error?.let { error ->
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        LazyColumn(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
+            // The header is one item rather than several: it is a fixed run of content always
+            // composed together, so splitting it would buy no laziness.
+            item {
+                Column {
                     Text(
-                        text = error,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f),
+                        text = "Browse official and community add-ons and tap Install to add them to your catalog.",
+                        style = MaterialTheme.typography.bodySmall,
                     )
-                    TextButton(onClick = viewModel::load) { Text("Retry") }
+
+                    CustomListField(
+                        savedUrl = uiState.customListUrl,
+                        error = uiState.customListError,
+                        onSave = viewModel::saveCustomListUrl,
+                    )
+
+                    if (uiState.isLoading) {
+                        CircularProgressIndicator(modifier = Modifier.padding(top = 16.dp))
+                    }
+
+                    uiState.error?.let { error ->
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                            Text(
+                                text = error,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = viewModel::load) { Text("Retry") }
+                        }
+                    }
+
+                    if (!uiState.isLoading && uiState.error == null && uiState.listings.isEmpty()) {
+                        Text(
+                            text = "Couldn't find any add-ons right now.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 16.dp),
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
             }
 
-            if (!uiState.isLoading && uiState.error == null && uiState.listings.isEmpty()) {
-                Text(
-                    text = "Couldn't find any add-ons right now.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 16.dp),
+            items(uiState.listings, key = { it.transportUrl }) { listing ->
+                AddonListingRow(
+                    listing = listing,
+                    isInstalled = listing.transportUrl in uiState.installedUrls,
+                    isInstalling = uiState.installingUrl == listing.transportUrl,
+                    canInstall = uiState.installingUrl == null,
+                    onInstall = { viewModel.install(listing) },
                 )
-            }
-
-            LazyColumn(modifier = Modifier.padding(top = 16.dp)) {
-                items(uiState.listings, key = { it.transportUrl }) { listing ->
-                    AddonListingRow(
-                        listing = listing,
-                        isInstalled = listing.transportUrl in uiState.installedUrls,
-                        isInstalling = uiState.installingUrl == listing.transportUrl,
-                        canInstall = uiState.installingUrl == null,
-                        onInstall = { viewModel.install(listing) },
-                    )
-                }
             }
         }
     }

@@ -41,7 +41,11 @@ object MagnetLinks {
         if (query.isEmpty()) return null
 
         var infoHash: String? = null
-        val trackers = mutableListOf<String>()
+        // A set, and capped as it fills: `distinct().take(n)` afterwards still builds the whole
+        // list first, so a magnet with thousands of `tr` parameters does all that work before the
+        // bound applies. LinkedHashSet keeps announce order, which trackers are listed in for a
+        // reason.
+        val trackers = LinkedHashSet<String>()
         var displayName: String? = null
 
         query.split('&').forEach { pair ->
@@ -50,6 +54,9 @@ object MagnetLinks {
             val separator = pair.indexOf('=')
             if (separator <= 0 || separator == pair.length - 1) return@forEach
             val key = pair.substring(0, separator).lowercase()
+            // Checked before decoding, not after: a magnet with thousands of `tr` parameters would
+            // otherwise pay for decoding and allocating every one of them just to discard it.
+            if (key == "tr" && trackers.size >= MAX_TRACKERS) return@forEach
             val value = decode(pair.substring(separator + 1)) ?: return@forEach
 
             when (key) {
@@ -57,14 +64,46 @@ object MagnetLinks {
                 // Take the first btih and ignore the rest: v2 hashes are not supported, and picking
                 // one up here would build a url that parses but can never resolve.
                 "xt" -> if (infoHash == null) infoHash = normalizeHash(value)
-                "tr" -> trackers += value
+                // A control character has no business in an announce URL — it is either a broken
+                // link or an attempt to smuggle a delimiter through something that later splits on
+                // one. Nothing in this app persists trackers delimited today, so this is hygiene
+                // rather than a fix for a live bug, but the value goes to libtorrent verbatim.
+                "tr" -> if (value.none { it.isISOControl() }) trackers += value
                 "dn" -> displayName = value.ifBlank { null }
             }
         }
 
         val hash = infoHash ?: return null
-        return MagnetLink(infoHash = hash, trackers = trackers.distinct(), displayName = displayName)
+        return MagnetLink(
+            infoHash = hash,
+            // Bounded during the scan above rather than at each call site, because every one of
+            // them feeds a link that arrived from outside the app — pasted, or shared in by another
+            // app. A crafted magnet can carry thousands of `tr` parameters, and each one becomes a
+            // host the session announces to and a string persisted with the torrent.
+            trackers = trackers.toList(),
+            displayName = displayName?.let(::sanitizeDisplayName),
+        )
     }
+
+    // `dn` is attacker-supplied text that ends up in watch history and on screen. Control characters
+    // (including the newlines that would break a single-line row) are dropped, runs of whitespace
+    // collapsed, and the result bounded — a megabyte-long name is not a title, it is a payload.
+    private fun sanitizeDisplayName(raw: String): String? = raw
+        // Bounded before the scans below, not after: filter/replace/trim each walk the whole string
+        // and allocate a copy, so a megabyte-long `dn` paid for all of that before `take` applied.
+        // Generous headroom over the final limit so collapsing whitespace still has room to work.
+        .take(MAX_DISPLAY_NAME_LENGTH * SANITIZE_INPUT_HEADROOM)
+        // Bidi overrides and isolates are not ISO controls, and they reorder the text around them —
+        // enough to make a magnet's name read as something else entirely in the confirmation prompt
+        // that exists precisely so the user can see what they are about to fetch.
+        .filter { it == ' ' || !(it.isISOControl() || it in BIDI_CONTROLS) }
+        .replace(WHITESPACE_RUN, " ")
+        .trim()
+        .take(MAX_DISPLAY_NAME_LENGTH)
+        // take() counts UTF-16 code units, so a cut can land between the halves of a surrogate pair
+        // and leave a lone high surrogate — malformed text for both the UI and the database. Drop it.
+        .let { if (it.lastOrNull()?.isHighSurrogate() == true) it.dropLast(1) else it }
+        .ifBlank { null }
 
     // Magnet → the app's own stable playback identity. fileIdx 0 because a magnet says nothing about
     // which file inside the torrent is meant; for the single-file torrents these links overwhelmingly
@@ -114,4 +153,26 @@ object MagnetLinks {
         // 32 base32 characters carry exactly 160 bits, so a correct hash leaves nothing over.
         return out.toString().takeIf { it.length == HEX_HASH_LENGTH }
     }
+
+    // Generous next to what a real magnet carries (a handful to a few dozen) and small enough that a
+    // crafted one cannot turn a single paste into a swarm of announce targets.
+    private const val MAX_TRACKERS = 64
+
+    // Long enough for a full release name, short enough that history rows stay rows.
+    private const val MAX_DISPLAY_NAME_LENGTH = 200
+
+    // \s in Java regex is ASCII-only, so it misses the separators that actually break a single-line
+    // row: U+2028 LINE SEPARATOR, U+2029 PARAGRAPH SEPARATOR, and the non-breaking spaces in
+    // \p{Z}. None of those are ISO controls either, so the filter above does not catch them.
+    private val WHITESPACE_RUN = Regex("[\\s\\p{Z}\\u2028\\u2029]+")
+
+    // How much raw input to keep before sanitising, as a multiple of the final limit.
+    private const val SANITIZE_INPUT_HEADROOM = 4
+
+    // LRM/RLM/ALM, the LRE..RLO embedding/override set, PDF, and the U+2066..U+2069 isolates.
+    private val BIDI_CONTROLS = setOf(
+        '\u200E', '\u200F', '\u061C',
+        '\u202A', '\u202B', '\u202C', '\u202D', '\u202E',
+        '\u2066', '\u2067', '\u2068', '\u2069',
+    )
 }

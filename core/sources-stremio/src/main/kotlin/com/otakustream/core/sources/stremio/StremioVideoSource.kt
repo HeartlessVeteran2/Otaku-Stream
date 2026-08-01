@@ -1,5 +1,6 @@
 package com.otakustream.core.sources.stremio
 
+import com.otakustream.core.common.InFlightCache
 import com.otakustream.core.database.stremio.StremioRepository
 import com.otakustream.core.sources.api.CatalogPage
 import com.otakustream.core.sources.api.Episode
@@ -10,23 +11,27 @@ import com.otakustream.core.sources.api.SourceFilter
 import com.otakustream.core.sources.api.SubtitleTrack
 import com.otakustream.core.sources.api.Video
 import com.otakustream.core.sources.api.VideoSource
-import com.otakustream.core.torrent.TorrentUri
 import com.otakustream.core.sources.stremio.model.StremioCatalog
+import com.otakustream.core.sources.stremio.model.StremioMeta
 import com.otakustream.core.sources.stremio.model.StremioStream
 import com.otakustream.core.sources.stremio.model.parseCatalogResponse
 import com.otakustream.core.sources.stremio.model.parseMetaResponse
 import com.otakustream.core.sources.stremio.model.parseStreamResponse
 import com.otakustream.core.sources.stremio.model.parseSubtitlesResponse
+import com.otakustream.core.torrent.TorrentUri
+import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.net.URLEncoder
-import java.util.concurrent.TimeUnit
 
 // One instance per (addon, catalog) pair — Stremio addons can declare multiple catalogs, and
 // VideoSource models a single browsable catalog, so installing an addon registers one
@@ -48,6 +53,28 @@ class StremioVideoSource(
 ) : VideoSource {
 
     private val baseUrl: String = manifestUrl.removeSuffix("/manifest.json")
+
+    // getMediaDetails and getEpisodeList both derive from the same /meta response, and the details
+    // screen calls them one after the other — so opening any title fetched the identical URL twice,
+    // sequentially, before anything appeared on screen. InFlightCache covers both halves of that: a
+    // caller arriving while the request is open joins it, and one arriving shortly after it finished
+    // reuses the result until the TTL expires, measured from when the response landed.
+    //
+    // The scope is the source's own, not any caller's: a StremioVideoSource lives for the whole
+    // process, and a job parented to whoever happened to ask first would die when they navigated
+    // away. SupervisorJob so one add-on's failed meta fetch cannot take its siblings down.
+    private val metaScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val metaCache = InFlightCache<String, StremioMeta>(
+        scope = metaScope,
+        maxEntries = META_CACHE_MAX,
+        ttlMs = META_CACHE_TTL_MS,
+    ) { key ->
+        val (type, id) = key.split('|', limit = 2)
+        parseMetaResponse(get("$baseUrl/meta/$type/$id.json"))
+    }
+
+    private suspend fun metaFor(type: String, id: String): StremioMeta = metaCache.get("$type|$id")
 
     override suspend fun getPopular(page: Int): CatalogPage = fetchCatalog(pagingExtra(page))
 
@@ -91,7 +118,7 @@ class StremioVideoSource(
 
     override suspend fun getMediaDetails(media: MediaItem): MediaDetails = withContext(Dispatchers.IO) {
         val (type, id) = splitTypeId(media.url)
-        val meta = parseMetaResponse(get("$baseUrl/meta/$type/$id.json"))
+        val meta = metaFor(type, id)
         MediaDetails(
             media = media,
             description = meta.description,
@@ -109,7 +136,7 @@ class StremioVideoSource(
 
     override suspend fun getEpisodeList(media: MediaItem): List<Episode> = withContext(Dispatchers.IO) {
         val (type, id) = splitTypeId(media.url)
-        val meta = parseMetaResponse(get("$baseUrl/meta/$type/$id.json"))
+        val meta = metaFor(type, id)
         if (meta.videos.isEmpty()) {
             listOf(Episode(url = "$type|${meta.id}", name = meta.name, episodeNumber = 1f))
         } else {
@@ -277,5 +304,16 @@ class StremioVideoSource(
         // Cap every Stremio request so a single slow endpoint (e.g. an overloaded torrent
         // indexer) can't hold up catalog/detail/stream resolution.
         const val REQUEST_TIMEOUT_MS = 12_000L
+
+        // Titles to keep /meta responses for. Small on purpose: the value it exists to capture is
+        // the two calls one details screen makes, and there is one of these caches per registered
+        // catalog, not one for the app.
+        const val META_CACHE_MAX = 20
+
+        // How long a cached /meta response stays usable, measured from when it arrived. Long enough
+        // to cover the pair of calls one details screen makes and a user flicking back and forth
+        // between titles; short enough that a show which aired an episode while the app sat in the
+        // background is picked up on the next open rather than at the next cold start.
+        val META_CACHE_TTL_MS = TimeUnit.MINUTES.toMillis(5)
     }
 }

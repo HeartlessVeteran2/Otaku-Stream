@@ -2,11 +2,12 @@ package com.otakustream.feature.sources.ui
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
@@ -43,66 +44,71 @@ fun MangayomiExtensionsScreen(
         modifier = modifier.fillMaxSize(),
         topBar = { BackTopBar(title = "Extensions", onBack = onBack) },
     ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
-            Text(
-                text = "Install AnymeX/Mangayomi anime extensions from a repository. Paste a repo's " +
-                    "anime index URL, or use the built-in example. The app ships no sources itself.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp),
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedTextField(
-                    value = uiState.repoUrl,
-                    onValueChange = viewModel::onRepoUrlChange,
-                    label = { Text("Extension repo URL") },
-                    supportingText = { Text("Paste an extension repository link, or leave blank for the built-in sample.") },
-                    modifier = Modifier.weight(1f),
-                )
-                Button(onClick = viewModel::saveRepoUrl, enabled = !uiState.isLoading) { Text("Load") }
-            }
-
-            if (uiState.isLoading) {
-                CircularProgressIndicator(modifier = Modifier.padding(top = 16.dp))
-            }
-
-            uiState.error?.let { error ->
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        LazyColumn(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
+            // The header is one item rather than several: it is a fixed run of content always
+            // composed together, so splitting it would buy no laziness.
+            item {
+                Column {
                     Text(
-                        text = error,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f),
+                        text = "Install AnymeX/Mangayomi anime extensions from a repository. Paste a repo's " +
+                            "anime index URL, or use the built-in example. The app ships no sources itself.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp),
                     )
-                    TextButton(onClick = viewModel::load) { Text("Retry") }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        OutlinedTextField(
+                            value = uiState.repoUrl,
+                            onValueChange = viewModel::onRepoUrlChange,
+                            label = { Text("Extension repo URL") },
+                            supportingText = { Text("Paste an extension repository link, or leave blank for the built-in sample.") },
+                            modifier = Modifier.weight(1f),
+                        )
+                        Button(onClick = viewModel::saveRepoUrl, enabled = !uiState.isLoading) { Text("Load") }
+                    }
+
+                    if (uiState.isLoading) {
+                        CircularProgressIndicator(modifier = Modifier.padding(top = 16.dp))
+                    }
+
+                    uiState.error?.let { error ->
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                            Text(
+                                text = error,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = viewModel::load) { Text("Retry") }
+                        }
+                    }
+
+                    if (!uiState.isLoading && uiState.error == null && uiState.listings.isEmpty()) {
+                        Text(
+                            text = "No extensions listed in this repository.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 16.dp),
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
             }
 
-            if (!uiState.isLoading && uiState.error == null && uiState.listings.isEmpty()) {
-                Text(
-                    text = "No extensions listed in this repository.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 16.dp),
+            items(uiState.listings, key = { it.id }) { listing ->
+                MangayomiExtensionRow(
+                    listing = listing,
+                    isInstalled = listing.id in uiState.installedIds,
+                    isInstalling = uiState.installingId == listing.id,
+                    canInstall = uiState.installingId == null,
+                    onInstall = { viewModel.install(listing) },
+                    onUninstall = { viewModel.uninstall(listing) },
+                    onConfigure = { onConfigure(listing.id) },
                 )
-            }
-
-            LazyColumn(modifier = Modifier.padding(top = 16.dp)) {
-                items(uiState.listings, key = { it.id }) { listing ->
-                    MangayomiExtensionRow(
-                        listing = listing,
-                        isInstalled = listing.id in uiState.installedIds,
-                        isInstalling = uiState.installingId == listing.id,
-                        canInstall = uiState.installingId == null,
-                        onInstall = { viewModel.install(listing) },
-                        onUninstall = { viewModel.uninstall(listing) },
-                        onConfigure = { onConfigure(listing.id) },
-                    )
-                }
             }
         }
     }

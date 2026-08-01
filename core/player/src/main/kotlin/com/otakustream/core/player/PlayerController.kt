@@ -474,7 +474,7 @@ class PlayerController @Inject constructor(
         // an earlier catalog session so finishing this video can't chain into a stale episode.
         if (stashed == null || !stashed.historyHandled) {
             PlaybackQueue.clear()
-            recordDirectPlay(url)
+            recordDirectPlay(url, stashed?.directPlayTitle)
         }
 
         // Read *after* the clear above, not before. Reading first meant a direct play that had just
@@ -619,13 +619,28 @@ class PlayerController @Inject constructor(
     // A play that arrived outside the catalog flow (local file, pasted URL, "Open with") still
     // belongs in watch history / continue watching — recorded here since play() is the one
     // choke point every path funnels through.
-    private fun recordDirectPlay(url: String) {
+    // Title resolution, best first:
+    //
+    //  1. what the caller told us — it knows things the URL doesn't, like a magnet's `dn`;
+    //  2. for a torrent:// url only, what this media was called last time — replaying from Continue
+    //     Watching then keeps the name it already had rather than degrading to whatever the URL
+    //     yields;
+    //  3. derived from the URL, which is right for a file and useless for an identity — a
+    //     torrent://<hash>/0 has no name in it, and its last path segment is "0".
+    //
+    // Step 2 is what makes step 1 stick: without it the first play of a magnet was titled correctly
+    // and every replay afterwards overwrote that with "0". It is restricted to torrent:// because
+    // for a file the derived name is authoritative — a content:// file that has since been renamed
+    // should pick up its new display name, not stay pinned to whatever history remembers.
+    private fun recordDirectPlay(url: String, title: String?) {
         scope.launch {
             libraryRepository.recordWatch(
                 WatchHistoryEntry(
                     sourceId = DIRECT_PLAY_SOURCE_ID,
                     mediaUrl = url,
-                    mediaTitle = deriveDisplayTitle(url),
+                    mediaTitle = title?.trim()?.takeIf { it.isNotEmpty() }
+                        ?: rememberedTitleFor(url)
+                        ?: deriveDisplayTitle(url),
                     episodeUrl = url,
                     episodeName = "",
                     episodeNumber = 0f,
@@ -634,6 +649,13 @@ class PlayerController @Inject constructor(
             )
         }
     }
+
+    private suspend fun rememberedTitleFor(url: String): String? =
+        if (TorrentUri.isTorrentUrl(url)) {
+            libraryRepository.lastTitleFor(url)?.takeIf { it.isNotBlank() }
+        } else {
+            null
+        }
 
     // Best human-readable name available without any caller plumbing: content:// resolves its
     // provider display name (covers SAF picks and MediaStore items alike); other schemes fall

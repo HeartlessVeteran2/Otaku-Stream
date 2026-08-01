@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -29,11 +30,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,6 +42,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.otakustream.app.R
+import com.otakustream.app.prepareMagnetPlayback
+import com.otakustream.core.torrent.MagnetLinks
 import com.otakustream.feature.sources.ui.HomeContent
 
 // The app's "front door": a content-forward home in the Stremio mold. Quick actions up top
@@ -133,7 +136,21 @@ fun PlayScreen(
             onDismiss = { showUrlDialog = false },
             onPlay = { url ->
                 showUrlDialog = false
-                onPlayVideo(url)
+                // A magnet has to become a torrent:// url before the player sees it; anything else
+                // goes straight through. The dialog only enables Play for a magnet that parses, so
+                // the null branch is unreachable in practice — kept because the shared helper's
+                // contract allows it, not because a path here is expected to hit it.
+                //
+                // No confirmation prompt, unlike the same conversion behind an ACTION_VIEW intent.
+                // That prompt exists because any web page can fire a magnet at the app and joining a
+                // swarm publishes the user's IP; a link they pasted into this dialog is already
+                // their deliberate choice, and asking twice for one action is noise.
+                val playable = if (url.startsWith("magnet:", ignoreCase = true)) {
+                    prepareMagnetPlayback(url)
+                } else {
+                    url
+                }
+                playable?.let(onPlayVideo)
             },
         )
     }
@@ -141,10 +158,21 @@ fun PlayScreen(
 
 @Composable
 private fun PasteUrlDialog(onDismiss: () -> Unit, onPlay: (String) -> Unit) {
-    var url by remember { mutableStateOf("") }
+    var url by rememberSaveable { mutableStateOf("") }
     val trimmed = url.trim()
     // Only allow schemes the player can actually open, so a typo can't navigate into a dead player.
-    val isPlayable = listOf("http://", "https://", "content://", "file://").any { trimmed.startsWith(it, ignoreCase = true) }
+    //
+    // magnet: is one of them. The manifest already accepts magnet links from other apps, and the
+    // torrent player handles them — but this dialog rejected the one thing a user is most likely to
+    // have on their clipboard, so pasting a magnet left Play greyed out with nothing explaining why.
+    //
+    // Parsed, not prefix-matched. A magnet with no infohash — a truncated paste, the most likely way
+    // one arrives broken — starts with "magnet:" all the same, so a prefix check enables Play for a
+    // link the conversion below then refuses, and the tap does nothing at all with no explanation.
+    // Greyed out is at least honest about it.
+    val isValidMagnet = remember(trimmed) { MagnetLinks.parse(trimmed) != null }
+    val isPlayable = isValidMagnet ||
+        listOf("http://", "https://", "content://", "file://").any { trimmed.startsWith(it, ignoreCase = true) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Play from a link") },
@@ -153,7 +181,7 @@ private fun PasteUrlDialog(onDismiss: () -> Unit, onPlay: (String) -> Unit) {
                 value = url,
                 onValueChange = { url = it },
                 label = { Text("Paste a video link") },
-                supportingText = { Text("Works with direct video or stream links.") },
+                supportingText = { Text("Works with a direct video, a stream link, or a magnet link.") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -164,3 +192,4 @@ private fun PasteUrlDialog(onDismiss: () -> Unit, onPlay: (String) -> Unit) {
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
+

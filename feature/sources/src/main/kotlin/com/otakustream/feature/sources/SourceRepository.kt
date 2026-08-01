@@ -13,6 +13,30 @@ interface SourceRepository {
     fun getSources(): List<VideoSource>
     fun getSource(id: Long): VideoSource?
     fun registerDynamic(source: VideoSource)
+
+    // Swap whatever is registered under `source.id` for `source`, atomically.
+    //
+    // Not unregister-then-register: those are two compareAndSet loops, and any registration landing
+    // between them wins — after which registerDynamic sees a duplicate, closes the caller's freshly
+    // built instance and returns, leaving the caller believing it swapped. The reload-after-editing
+    // preferences path then reported success while the registry kept serving the old preferences.
+    //
+    // The target id comes from the source rather than a separate parameter, so there is no way to
+    // ask for a swap that removes one id and installs another.
+    //
+    // `expected` is the instance the caller believes is registered, matched by identity. Returns
+    // false, having registered nothing, when that exact instance is no longer there.
+    //
+    // Identity rather than id, because an id-only check cannot tell "still the one I set out to
+    // replace" from "uninstalled and reinstalled while I was working". Both leave the id present;
+    // only the second means the caller's replacement is stale, built from a record that has since
+    // been replaced — and swapping it in would close a live runtime that someone else just
+    // installed. Refusing also covers plain uninstall, where the id is gone entirely and appending
+    // would resurrect a source whose record is deleted.
+    //
+    // The caller owns the instance it built and is expected to close it when this returns false.
+    fun replaceDynamic(expected: VideoSource, source: VideoSource): Boolean
+
     fun unregisterDynamic(id: Long)
     fun observeSources(): Flow<List<VideoSource>>
 }
@@ -62,6 +86,32 @@ class SourceRegistry @Inject constructor(
                 return
             }
             if (_dynamicSources.compareAndSet(current, current + source)) return
+        }
+    }
+
+    // One compareAndSet, so there is no moment where the id is unregistered and something else can
+    // claim it. The displaced instances are closed once the swap has actually taken — closing before
+    // would kill a live source if the loop had to retry.
+    //
+    // In place, not remove-and-append: this list is the source picker's order and the priority the
+    // home rails interleave by, so appending would silently reorder the UI every time an extension's
+    // preferences were saved.
+    override fun replaceDynamic(expected: VideoSource, source: VideoSource): Boolean {
+        while (true) {
+            val current = _dynamicSources.value
+            // By identity, and re-checked on every attempt: a lost CAS means the list changed under
+            // us, and what changed may be exactly this id being uninstalled and installed afresh.
+            // Both conditions: identity answers "still the registration I meant", and the id check
+            // makes the documented invariant real rather than merely asserted — a replacement with a
+            // different id would otherwise drop `expected`'s id and install a second entry for its
+            // own.
+            val index = current.indexOfFirst { it === expected && it.id == source.id }
+            if (index < 0) return false
+            val next = current.toMutableList().apply { this[index] = source }
+            if (_dynamicSources.compareAndSet(current, next)) {
+                if (expected !== source) closeQuietly(expected)
+                return true
+            }
         }
     }
 

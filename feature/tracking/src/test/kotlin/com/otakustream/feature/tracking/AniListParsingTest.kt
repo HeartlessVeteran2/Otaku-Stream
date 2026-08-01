@@ -35,7 +35,10 @@ class AniListParsingTest {
         assertEquals(12, media.episodes)
         assertEquals("English Name", media.displayTitle)
         assertEquals("Romaji Name", media.romajiTitle)
-        assertEquals("https://x/xl.jpg", media.coverImageUrl)
+        // `large`, not `extraLarge`. AniList's extraLarge is around 1000 px wide and the biggest
+        // thing the app draws a cover into is a 280 dp hero, so the larger asset was bandwidth and
+        // decode time spent on pixels the scaler discarded.
+        assertEquals("https://x/l.jpg", media.coverImageUrl)
         assertEquals("https://x/banner.jpg", media.bannerImageUrl)
         assertEquals(listOf("Action", "Comedy"), media.genres)
         assertEquals(84, media.averageScore)
@@ -44,6 +47,17 @@ class AniListParsingTest {
         assertEquals(2024, media.seasonYear)
         assertEquals(5, media.nextAiringEpisode)
         assertEquals(1700000000L, media.nextAiringAtSeconds)
+    }
+
+    // The other half of the size preference. Without this, "prefer large" could be implemented as
+    // "only ever read large" and the test above would still pass — while every entry AniList
+    // happens to serve without a large asset would silently lose its cover.
+    @Test
+    fun `parseMedia falls back to extraLarge when large is missing`() {
+        val json = """
+            {"id": 9, "title": {"romaji": "R"}, "coverImage": {"extraLarge": "https://x/xl.jpg"}}
+        """.trimIndent()
+        assertEquals("https://x/xl.jpg", parseMedia(JSONObject(json)).coverImageUrl)
     }
 
     @Test

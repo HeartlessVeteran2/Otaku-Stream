@@ -42,11 +42,17 @@ object PendingPlayback {
     // records the play as a direct play.
     // skipLookup, when present, resolves AniSkip intro/outro segments once the real duration is
     // known — a suspend closure so core:player stays ignorant of AniList/AniSkip.
+    // directPlayTitle names the thing being played for watch history, and only matters when
+    // historyHandled is false. The player otherwise derives a name from the URL, which works for a
+    // file but not for an identity-shaped one: torrent://<hash>/0 yields its last path segment, so
+    // every magnet landed in Continue Watching called "0". A magnet carries a `dn`; this is how it
+    // reaches the row the user actually reads.
     data class Stashed(
         val video: Video,
         val historyHandled: Boolean,
         val skipLookup: (suspend (durationMs: Long) -> List<SkipMark>)? = null,
         val provenance: Provenance = Provenance.SOURCE,
+        val directPlayTitle: String? = null,
     )
 
     @Volatile
@@ -59,8 +65,9 @@ object PendingPlayback {
         historyHandled: Boolean = true,
         skipLookup: (suspend (durationMs: Long) -> List<SkipMark>)? = null,
         provenance: Provenance = Provenance.SOURCE,
+        directPlayTitle: String? = null,
     ) {
-        pending = Stashed(video, historyHandled, skipLookup, provenance)
+        pending = Stashed(video, historyHandled, skipLookup, provenance, directPlayTitle)
     }
 
     // Reads the pending video without clearing it, so a caller can decide whether to accept the

@@ -90,8 +90,12 @@ internal fun parseMedia(media: JSONObject): AniListMedia {
         romajiTitle = romaji,
         englishTitle = english,
         nativeTitle = native,
-        coverImageUrl = coverImage?.stringOrNull("extraLarge")
-            ?: coverImage?.stringOrNull("large"),
+        // `large` first, `extraLarge` only as the fallback. This URL is drawn into the AniList
+        // rails and search results — tiles of roughly 110–120 dp — and extraLarge is around 1000 px
+        // wide, so the extra pixels were downloaded and decoded on a phone connection purely to be
+        // thrown away by the scaler. `large` is ~460 px, comfortably above what those tiles need.
+        coverImageUrl = coverImage?.stringOrNull("large")
+            ?: coverImage?.stringOrNull("extraLarge"),
         bannerImageUrl = media.stringOrNull("bannerImage"),
         description = media.stringOrNull("description"),
         genres = media.optJSONArray("genres")?.let { array ->

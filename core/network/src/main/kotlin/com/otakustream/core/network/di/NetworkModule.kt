@@ -88,6 +88,22 @@ object NetworkModule {
             .build()
     }
 
+    // The client Coil loads images with — see ImageHttpClient for why it is neither of the above.
+    //
+    // Same newBuilder() sharing as the account client, so this is one more interceptor list rather
+    // than a third thread pool. No OkHttp response cache: Coil keeps its own disk cache for decoded
+    // images, and a second copy of every cover on disk is exactly the kind of duplication a cache
+    // is meant to avoid.
+    @Provides
+    @Singleton
+    @ImageHttpClient
+    fun provideImageOkHttpClient(sourceClient: OkHttpClient): OkHttpClient =
+        sourceClient.newBuilder()
+            .apply { interceptors().clear() }
+            .cache(null)
+            .addInterceptor(UserAgentInterceptor(DESKTOP_USER_AGENT))
+            .build()
+
     // Adds a desktop-Chrome User-Agent only when the caller hasn't already set one, so a
     // scripted source / Stremio add-on that specifies its own UA still wins.
     private class UserAgentInterceptor(private val userAgent: String) : Interceptor {
