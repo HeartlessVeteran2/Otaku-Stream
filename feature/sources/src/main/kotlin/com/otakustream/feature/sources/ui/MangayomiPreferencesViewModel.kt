@@ -11,6 +11,8 @@ import com.otakustream.feature.sources.SourceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -110,8 +112,18 @@ class MangayomiPreferencesViewModel @Inject constructor(
         (it as? PrefItem.EditTextPref)?.copy(value = value) ?: it
     }
 
+    // Serialised, and the "Saved" tick is tied to the values it actually saved.
+    //
+    // Bringing the JS engine up takes long enough for a second Save — or an edit — to land while the
+    // first is still running. Without the lock, two saves could commit out of order and leave the
+    // registry holding the older values; without the version check, a save completing after the user
+    // had already changed something would tick "Saved" next to values that were never written.
+    private val saveLock = Mutex()
+
     fun save() {
         viewModelScope.launch {
+            saveLock.withLock {
+            val editsAtStart = editVersion
             runCatching {
                 val resolved = JSONObject()
                 _uiState.value.items.forEach { item ->
@@ -140,8 +152,10 @@ class MangayomiPreferencesViewModel @Inject constructor(
                 try {
                     withContext(NonCancellable) {
                         mangayomiRepository.updatePrefs(sourceId, prefsJson)
-                        sourceRepository.unregisterDynamic(sourceId)
-                        sourceRepository.registerDynamic(replacement)
+                        // Atomic: unregister-then-register left a window where a concurrent
+                        // registration could claim the id, after which our replacement would be
+                        // silently closed and discarded while this reported success.
+                        sourceRepository.replaceDynamic(sourceId, replacement)
                     }
                 } catch (t: Throwable) {
                     // Never registered, so nothing else will ever close it — and it owns a QuickJS
@@ -149,15 +163,23 @@ class MangayomiPreferencesViewModel @Inject constructor(
                     runCatching { replacement.close() }
                     throw t
                 }
-                _uiState.value = _uiState.value.copy(saved = true)
+                if (editVersion == editsAtStart) {
+                    _uiState.value = _uiState.value.copy(saved = true)
+                }
             }.onFailure { failure ->
                 if (failure is CancellationException) throw failure
                 _uiState.value = _uiState.value.copy(error = failure.message ?: "Failed to save preferences")
             }
+            }
         }
     }
 
+    // Bumped on every edit so an in-flight save can tell whether the values it captured are still
+    // the ones on screen.
+    private var editVersion = 0
+
     private fun updateItem(key: String, transform: (PrefItem) -> PrefItem) {
+        editVersion++
         _uiState.value = _uiState.value.copy(
             items = _uiState.value.items.map { if (it.key == key) transform(it) else it },
             saved = false,

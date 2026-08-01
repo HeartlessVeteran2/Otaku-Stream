@@ -619,15 +619,25 @@ class PlayerController @Inject constructor(
     // A play that arrived outside the catalog flow (local file, pasted URL, "Open with") still
     // belongs in watch history / continue watching — recorded here since play() is the one
     // choke point every path funnels through.
-    // title, when the caller knows one, wins over deriving it from the URL — a URL that is an
-    // identity rather than a path has no name in it to find.
+    // Title resolution, best first:
+    //
+    //  1. what the caller told us — it knows things the URL doesn't, like a magnet's `dn`;
+    //  2. what this media was called last time, so replaying from Continue Watching keeps the name
+    //     it already had rather than degrading to whatever the URL yields;
+    //  3. derived from the URL, which is right for a file and useless for an identity — a
+    //     torrent://<hash>/0 has no name in it, and its last path segment is "0".
+    //
+    // Step 2 is what makes step 1 stick: without it the first play of a magnet was titled correctly
+    // and every replay afterwards overwrote that with "0".
     private fun recordDirectPlay(url: String, title: String?) {
         scope.launch {
             libraryRepository.recordWatch(
                 WatchHistoryEntry(
                     sourceId = DIRECT_PLAY_SOURCE_ID,
                     mediaUrl = url,
-                    mediaTitle = title?.takeIf { it.isNotBlank() } ?: deriveDisplayTitle(url),
+                    mediaTitle = title?.takeIf { it.isNotBlank() }
+                        ?: libraryRepository.lastTitleFor(url)?.takeIf { it.isNotBlank() }
+                        ?: deriveDisplayTitle(url),
                     episodeUrl = url,
                     episodeName = "",
                     episodeNumber = 0f,

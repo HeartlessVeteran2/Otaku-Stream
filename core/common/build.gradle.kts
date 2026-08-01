@@ -22,7 +22,10 @@ android {
 }
 
 dependencies {
+    implementation(libs.kotlinx.coroutines.android)
+
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
     // Real org.json for JVM unit tests — the stub android.jar throws "not mocked", which would make
     // the JSON helpers in this module untestable.
     testImplementation(libs.json)

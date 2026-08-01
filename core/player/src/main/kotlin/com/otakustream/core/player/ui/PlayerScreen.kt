@@ -112,11 +112,14 @@ fun PlayerScreen(
     // Null until a baseline is known. It used to start at a fabricated 0.5f, which meant the first
     // swipe did not *adjust* brightness, it jumped — so watching in a dark room at 5%, the smallest
     // nudge upward flooded the screen. Null instead leaves the system's own brightness alone until
-    // something real is known: the measured value below, or failing that a read taken at the moment
-    // of the first drag.
+    // the asynchronous read below lands, or its documented fallback applies.
     var brightnessFraction by remember { mutableStateOf<Float?>(null) }
-    // Drag distance that arrived before the baseline did. A drag in that window can't be applied
-    // yet and mustn't block on the read, so it is banked here and settled below.
+    // Drag distance that arrived before the baseline did. A drag in that window cannot be applied
+    // yet and must not block on the read, so it is banked here and settled below.
+    //
+    // Net movement, not a replay of each step in order. Those differ only when a drag crosses a
+    // bound and comes back within this window — a few frames at most — and net movement is the more
+    // predictable of the two: the screen ends up where the finger ended up.
     var bankedBrightnessDelta by remember { mutableFloatStateOf(0f) }
     // Read off the main thread: this reaches a ContentProvider, and doing that during composition
     // put a provider round-trip on the frame the user is waiting for video on — the same mistake
@@ -126,12 +129,21 @@ fun PlayerScreen(
         // Only if the user hasn't already established a baseline — a slow read must never land on
         // top of a value they set themselves.
         if (brightnessFraction == null) {
-            // UNKNOWN_BRIGHTNESS only if the device reports nothing at all; otherwise this is a real
-            // measurement. Any drag that happened while the read was in flight is applied on top of
-            // it now, so the gesture is honoured rather than swallowed.
-            val seed = measured ?: UNKNOWN_BRIGHTNESS
+            val seed = when {
+                measured == null -> UNKNOWN_BRIGHTNESS
+                // Under adaptive brightness the reading is the manual slider, and the ambient
+                // adjustment sits on top of it unread — in a dark room the screen can be far dimmer
+                // than the slider says. Seeding from a bright slider would let the first swipe jump
+                // *up*, which is the same flood this whole path exists to prevent, just arrived at
+                // differently. Capping at the midpoint bounds that worst case while still using the
+                // real value whenever it is already dim, which is exactly the dark-room case.
+                measured.approximate -> minOf(measured.fraction, UNKNOWN_BRIGHTNESS)
+                else -> measured.fraction
+            }
             val settled = (seed + bankedBrightnessDelta).coerceIn(MIN_BRIGHTNESS, 1f)
             brightnessFraction = settled
+            // Only touch the window if the user actually dragged; otherwise leave the system's own
+            // brightness in charge and keep this purely as the starting point for a later gesture.
             if (bankedBrightnessDelta != 0f) {
                 bankedBrightnessDelta = 0f
                 activity?.setScreenBrightness(settled)
@@ -282,7 +294,12 @@ fun PlayerScreen(
                 // Read the flow's current value so the HUD ring tracks the drag without waiting
                 // on a recomposition of the collected uiState.
                 volumeLevel = { viewModel.uiState.value.volume },
-                brightnessLevel = { brightnessFraction ?: UNKNOWN_BRIGHTNESS },
+                // Includes the banked movement, so the ring still tracks the finger during the
+                // window before the baseline lands rather than sitting frozen at the fallback.
+                brightnessLevel = {
+                    brightnessFraction
+                        ?: (UNKNOWN_BRIGHTNESS + bankedBrightnessDelta).coerceIn(MIN_BRIGHTNESS, 1f)
+                },
                 doubleTapSeekMs = uiState.seekDurationMs,
                 onTap = { controlsVisible = !controlsVisible },
                 onLongPressSpeedStart = viewModel::beginSpeedBoost,
@@ -498,31 +515,42 @@ internal tailrec fun Context.findActivity(): Activity? = when (this) {
 }
 
 // What the screen is currently showing, as a 0..1 fraction, so a brightness gesture starts from
-// there instead of from a guess. Approximate under adaptive brightness (see below). Null only when
-// the setting cannot be read at all.
+// there instead of from a guess.
 //
 // Touches a ContentProvider, so it must not run during composition — see how PlayerScreen calls it.
-private fun Activity.currentScreenBrightness(): Float? {
+// `approximate` marks a reading that the ambient-light adjustment sits on top of, so the caller
+// knows not to trust it as the value actually on screen.
+private class MeasuredBrightness(val fraction: Float, val approximate: Boolean)
+
+// Null only when the setting cannot be read at all.
+private fun Activity.currentScreenBrightness(): MeasuredBrightness? {
     // An override this window has already set — the user used the gesture earlier in this playback.
+    // Exact, because it is what this window is rendering at right now.
     val override = window.attributes.screenBrightness
-    if (override >= 0f) return override.coerceIn(MIN_BRIGHTNESS, 1f)
+    if (override >= 0f) {
+        return MeasuredBrightness(override.coerceIn(MIN_BRIGHTNESS, 1f), approximate = false)
+    }
     // Otherwise the window follows the system, and SCREEN_BRIGHTNESS is the manual slider value.
     //
-    // Read even when adaptive brightness is on, where it is only an approximation of what is
-    // actually on screen — the ambient-light adjustment is applied on top of it and is not readable
-    // from here. Refusing it was worse: the caller's only remaining option was the fabricated 0.5f
-    // this whole path exists to eliminate, so on a dark screen with adaptive on — the exact case
-    // where a jump hurts most — the first swipe still flooded it. An approximate baseline is off by
-    // the ambient adjustment; a constant is off by however far the user is from the middle.
+    // Read even under adaptive brightness, but flagged: there the slider is only one input, and the
+    // ambient adjustment on top of it is not readable from here. Refusing to read at all was worse
+    // — the caller's only remaining option was the fabricated middle this path exists to eliminate.
+    // Flagging lets the caller use the number where it helps and distrust it where it doesn't.
     //
     // Settings.System reports 0..255. Not universally true — a few devices use a different maximum
     // — but it is far closer than a constant, and the next swipe corrects it.
+    val adaptive = runCatching {
+        android.provider.Settings.System.getInt(
+            contentResolver,
+            android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE,
+        ) == android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC
+    }.getOrDefault(false)
     return runCatching {
         val value = android.provider.Settings.System.getInt(
             contentResolver,
             android.provider.Settings.System.SCREEN_BRIGHTNESS,
         )
-        (value / 255f).coerceIn(MIN_BRIGHTNESS, 1f)
+        MeasuredBrightness((value / 255f).coerceIn(MIN_BRIGHTNESS, 1f), approximate = adaptive)
     }.getOrNull()
 }
 

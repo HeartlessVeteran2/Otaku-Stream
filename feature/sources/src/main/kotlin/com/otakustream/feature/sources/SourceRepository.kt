@@ -13,6 +13,15 @@ interface SourceRepository {
     fun getSources(): List<VideoSource>
     fun getSource(id: Long): VideoSource?
     fun registerDynamic(source: VideoSource)
+
+    // Swap whatever is registered under `id` for `source`, atomically.
+    //
+    // Not unregister-then-register: those are two compareAndSet loops, and any registration landing
+    // between them wins — after which registerDynamic sees a duplicate, closes the caller's freshly
+    // built instance and returns, leaving the caller believing it swapped. The reload-after-editing
+    // preferences path then reported success while the registry kept serving the old preferences.
+    fun replaceDynamic(id: Long, source: VideoSource)
+
     fun unregisterDynamic(id: Long)
     fun observeSources(): Flow<List<VideoSource>>
 }
@@ -62,6 +71,20 @@ class SourceRegistry @Inject constructor(
                 return
             }
             if (_dynamicSources.compareAndSet(current, current + source)) return
+        }
+    }
+
+    // One compareAndSet, so there is no moment where the id is unregistered and something else can
+    // claim it. The displaced instances are closed once the swap has actually taken — closing before
+    // would kill a live source if the loop had to retry.
+    override fun replaceDynamic(id: Long, source: VideoSource) {
+        while (true) {
+            val current = _dynamicSources.value
+            val next = current.filterNot { it.id == id } + source
+            if (_dynamicSources.compareAndSet(current, next)) {
+                current.forEach { if (it.id == id && it !== source) closeQuietly(it) }
+                return
+            }
         }
     }
 

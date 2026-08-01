@@ -1,6 +1,6 @@
 package com.otakustream.core.sources.stremio
 
-import android.os.SystemClock
+import com.otakustream.core.common.InFlightCache
 import com.otakustream.core.database.stremio.StremioRepository
 import com.otakustream.core.sources.api.CatalogPage
 import com.otakustream.core.sources.api.Episode
@@ -23,7 +23,6 @@ import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -57,106 +56,24 @@ class StremioVideoSource(
 
     // getMediaDetails and getEpisodeList both derive from the same /meta response, and the details
     // screen calls them one after the other — so opening any title fetched the identical URL twice,
-    // sequentially, before anything appeared on screen. The in-flight job is cached rather than the
-    // parsed result, so a second caller arriving while the first request is still open joins it
-    // instead of starting another.
+    // sequentially, before anything appeared on screen. InFlightCache shares the request rather than
+    // the result, so a second caller arriving while the first is still open joins it.
     //
-    // Bounded and access-ordered, matching AniListClient's detail cache. A StremioVideoSource lives
-    // for the whole process, so an unbounded map would hold every title the user ever opened.
-    //
-    // Evicted entries are dropped, not cancelled. Cancelling would be free work saved in the common
-    // case and a broken screen in the rare one — a caller can still be awaiting the entry being
-    // evicted — and an in-flight request is bounded by REQUEST_TIMEOUT_MS regardless.
-    private val metaCache = object : LinkedHashMap<String, CachedMeta>(META_CACHE_MAX, 0.75f, true) {
-        override fun removeEldestEntry(eldest: Map.Entry<String, CachedMeta>): Boolean =
-            size > META_CACHE_MAX
-    }
-
-    // Size alone is not enough to keep this fresh. Access ordering means a title the user keeps
-    // opening is the *last* thing evicted, so the one show they are actively following — the one
-    // most likely to have gained an episode — is exactly the one that would keep serving a stale
-    // list. A timestamp bounds that regardless of how often it is read.
-    //
-    // The age of a *result*, so the clock starts when the job completes, not when it was created.
-    // Timed from creation, a request that took four minutes would be handed to its first reader
-    // already four minutes into a five-minute life. Zero until then, which also means an in-flight
-    // job is never too old to join — expiring one would start a duplicate request alongside a
-    // perfectly good one still running, which is the exact opposite of what this cache is for.
-    //
-    // elapsedRealtime, not currentTimeMillis or nanoTime. Wall clock lets an NTP correction or a
-    // manual change expire everything at once, or push an entry so far into the future it never
-    // expires. nanoTime is monotonic but stops while the device is suspended, so a phone asleep in a
-    // pocket overnight would wake with entries that had not aged a second — and catching a show that
-    // aired while the app sat in the background is precisely what this TTL is for. elapsedRealtime
-    // is monotonic *and* counts sleep.
-    private class CachedMeta(val job: Deferred<StremioMeta>) {
-        @Volatile
-        var completedAtElapsedMs: Long = 0L
-    }
-
-    // Guards metaCache: an access-ordered LinkedHashMap reorders itself on a *read*, so even
-    // lookups mutate it and none of it is thread-safe.
-    private val metaCacheLock = Any()
-
-    // The shared jobs belong to the source, not to whichever caller happened to create one.
-    //
-    // Built from the calling coroutine's scope instead, a cached job is a child of that caller — so
-    // the user backing out of a details screen cancels the request the *next* caller was meant to
-    // join, and the cache becomes a way to fail rather than a way to share. SupervisorJob so one
-    // add-on's failed meta fetch cannot take the others down with it.
+    // The scope is the source's own, not any caller's: a StremioVideoSource lives for the whole
+    // process, and a job parented to whoever happened to ask first would die when they navigated
+    // away. SupervisorJob so one add-on's failed meta fetch cannot take its siblings down.
     private val metaScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    private suspend fun metaFor(type: String, id: String): StremioMeta {
-        val key = "$type|$id"
-        val entry = synchronized(metaCacheLock) {
-            val existing = metaCache[key]
-            if (existing != null && existing.isUsable()) existing else newMetaEntry(key, type, id).also { metaCache[key] = it }
-        }
-        // Started outside the lock. The job is LAZY, so nothing runs until here — which keeps the
-        // network call off the critical section and, more importantly, guarantees the entry is
-        // already installed in the map before invokeOnCompletion can fire.
-        entry.job.start()
-        // No try/catch around this. A throw here can mean the shared job failed *or* that this
-        // particular awaiter was cancelled because the user left — and evicting on the second would
-        // throw away a request that is still running perfectly well for everyone else. Eviction is
-        // the job's own business, below.
-        return entry.job.await()
+    private val metaCache = InFlightCache<String, StremioMeta>(
+        scope = metaScope,
+        maxEntries = META_CACHE_MAX,
+        ttlMs = META_CACHE_TTL_MS,
+    ) { key ->
+        val (type, id) = key.split('|', limit = 2)
+        parseMetaResponse(get("$baseUrl/meta/$type/$id.json"))
     }
 
-    // Still worth joining: either the request has not finished — in which case a second caller
-    // should wait on it rather than fire its own — or it finished recently enough for the result to
-    // still be current.
-    //
-    // A completed job whose timestamp is not yet set (`0L`) is treated as stale. That is a
-    // nanosecond-wide window between the job finishing and its completion handler running, and
-    // refetching is the safe side of it: the alternative is serving a result with no known age.
-    private fun CachedMeta.isUsable(): Boolean {
-        if (!job.isCompleted) return true
-        val completedAt = completedAtElapsedMs
-        return completedAt != 0L && SystemClock.elapsedRealtime() - completedAt < META_CACHE_TTL_MS
-    }
-
-    // Caller must hold `metaCacheLock`.
-    private fun newMetaEntry(key: String, type: String, id: String): CachedMeta {
-        // LAZY, so the job cannot complete before it has been stored. Started eagerly, a request
-        // that fails immediately — an unreachable host, a rejected URL — can run its completion
-        // handler *before* `metaCache[key] = entry` executes, so the eviction below finds nothing to
-        // remove and the failure then sits in the cache for the full TTL, making the title
-        // unopenable. The caller starts it once the entry is installed.
-        val job = metaScope.async(start = CoroutineStart.LAZY) {
-            parseMetaResponse(get("$baseUrl/meta/$type/$id.json"))
-        }
-        val entry = CachedMeta(job)
-        job.invokeOnCompletion { cause ->
-            entry.completedAtElapsedMs = SystemClock.elapsedRealtime()
-            // Only a job that actually failed is evicted, and only if it is still the installed one.
-            // A cached failure would otherwise make the title unopenable for the rest of the session.
-            if (cause != null) {
-                synchronized(metaCacheLock) { if (metaCache[key] === entry) metaCache.remove(key) }
-            }
-        }
-        return entry
-    }
+    private suspend fun metaFor(type: String, id: String): StremioMeta = metaCache.get("$type|$id")
 
     override suspend fun getPopular(page: Int): CatalogPage = fetchCatalog(pagingExtra(page))
 

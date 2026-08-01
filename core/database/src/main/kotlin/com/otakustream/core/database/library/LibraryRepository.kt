@@ -16,6 +16,7 @@ interface LibraryRepository {
     fun observeHistory(): Flow<List<WatchHistoryEntry>>
     fun observeWatchedEpisodeUrls(mediaUrl: String): Flow<List<String>>
     suspend fun recordWatch(entry: WatchHistoryEntry)
+    suspend fun lastTitleFor(mediaUrl: String): String?
     suspend fun clearHistory()
 }
 
@@ -50,6 +51,8 @@ class LibraryRepositoryImpl @Inject constructor(
             libraryDao.setStatus(entry.mediaUrl, LIBRARY_STATUS_WATCHING)
         }
     }
+
+    override suspend fun lastTitleFor(mediaUrl: String): String? = historyDao.lastTitleFor(mediaUrl)
 
     override suspend fun clearHistory() = historyDao.clear()
 }

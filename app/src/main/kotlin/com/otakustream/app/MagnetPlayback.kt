@@ -30,11 +30,19 @@ import com.otakustream.core.torrent.MagnetLinks
 internal fun magnetToPlayableUrl(magnet: String): String? {
     val link = MagnetLinks.parse(magnet) ?: return null
     val url = MagnetLinks.toTorrentUrl(link) ?: return null
+    // `dn` is optional in a magnet, and plenty of real ones omit it. Falling through to the player's
+    // URL-derived name would file those as "0" — the last path segment of torrent://<hash>/0 — so
+    // every unnamed torrent would look like the same entry in Continue Watching. A short prefix of
+    // the info hash is not pretty, but it is stable and distinct, which is what the row needs to be.
+    val title = link.displayName ?: "Torrent ${link.infoHash.take(SHORT_HASH_LENGTH).uppercase()}"
     PendingPlayback.stash(
         video = Video(url = url, quality = link.displayName ?: "torrent", trackers = link.trackers),
         historyHandled = false,
         provenance = PendingPlayback.Provenance.USER,
-        directPlayTitle = link.displayName,
+        directPlayTitle = title,
     )
     return url
 }
+
+// Enough hex to tell two torrents apart at a glance without filling the row with the full 40.
+private const val SHORT_HASH_LENGTH = 8

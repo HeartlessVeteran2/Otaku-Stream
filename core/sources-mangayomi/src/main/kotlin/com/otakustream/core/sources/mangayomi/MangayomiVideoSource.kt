@@ -1,6 +1,6 @@
 package com.otakustream.core.sources.mangayomi
 
-import android.os.SystemClock
+import com.otakustream.core.common.InFlightCache
 import com.otakustream.core.sources.api.CatalogPage
 import com.otakustream.core.sources.api.Episode
 import com.otakustream.core.sources.api.MediaDetails
@@ -13,7 +13,6 @@ import com.otakustream.core.sources.api.VideoSource
 import com.otakustream.core.sources.mangayomi.runtime.MangayomiRuntime
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,41 +38,25 @@ class MangayomiVideoSource(
     override val name: String = metadata.name
     override val lang: String = metadata.lang
 
-    // getMediaDetails and getEpisodeList both derive from the same getDetail(url) call — cache the
-    // in-flight job (not the raw string) per media url so concurrent opens (details screen fires
-    // both) share one getDetail call rather than racing two.
+    // getMediaDetails and getEpisodeList both derive from the same getDetail(url) call, and the
+    // details screen fires both — InFlightCache shares the request so concurrent opens make one call
+    // into the extension rather than racing two.
     //
-    // Bounded and access-ordered rather than a plain ConcurrentHashMap. This lives as long as the
-    // installed extension does, so unbounded it holds the full JSON of every title the user has
-    // opened since the app started.
-    private val detailCache = object : LinkedHashMap<String, CachedDetail>(DETAIL_CACHE_MAX, 0.75f, true) {
-        override fun removeEldestEntry(eldest: Map.Entry<String, CachedDetail>): Boolean =
-            size > DETAIL_CACHE_MAX
-    }
-
-    // Bounding by size does not bound staleness. Access ordering makes the title the user keeps
-    // reopening the *last* one evicted — so the show they are actively following, the one most
-    // likely to have gained an episode, is precisely the one that would keep serving an old episode
-    // list for the rest of the session. A timestamp bounds that however often the entry is read.
-    //
-    // Timed from completion, not creation — same reasoning as StremioVideoSource.CachedMeta, which
-    // this deliberately mirrors: a slow getDetail would otherwise hand its first reader a result
-    // that had already spent most of its life waiting to exist, and an in-flight job could be judged
-    // too old to join, starting a duplicate call into the same extension. elapsedRealtime because it
-    // is monotonic *and* keeps counting while the device sleeps.
-    private class CachedDetail(val job: Deferred<String>) {
-        @Volatile
-        var completedAtElapsedMs: Long = 0L
-    }
-
-    // An access-ordered LinkedHashMap reorders itself on a read, so lookups mutate it too.
-    private val detailCacheLock = Any()
-
-    // The shared jobs belong to the source, not to whichever caller created one. Parented to the
-    // caller — which is what `coroutineScope { async { } }` did — a cached job dies when that caller
-    // does, so backing out of a details screen cancelled the request the next caller was meant to
-    // join. SupervisorJob so one failed getDetail cannot cancel the rest.
+    // The scope is the source's own. Parented to a caller — which is what `coroutineScope { async }`
+    // did — a cached job dies when that caller does, so backing out of a details screen cancelled
+    // the request the next caller was meant to join. SupervisorJob so one failed getDetail cannot
+    // cancel the rest.
     private val detailScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val detailCache = InFlightCache<String, String>(
+        scope = detailScope,
+        maxEntries = DETAIL_CACHE_MAX,
+        ttlMs = DETAIL_CACHE_TTL_MS,
+    ) { url ->
+        runtime.invoke("getDetail", listOf(url)) ?: "{}"
+    }
+
+    private suspend fun detailFor(url: String): String = detailCache.get(url)
 
     // Releases the runtime's engine thread + native QuickJS context. VideoSource has no lifecycle
     // hook, so the host closes this when the source is uninstalled/reloaded.
@@ -160,51 +143,6 @@ class MangayomiVideoSource(
         ) == "true"
         if (!hasMethod) return "[]"
         return runtime.invoke("getSourcePreferences", emptyList()) ?: "[]"
-    }
-
-    private suspend fun detailFor(url: String): String {
-        val entry = synchronized(detailCacheLock) {
-            val existing = detailCache[url]
-            if (existing != null && existing.isUsable()) existing else newDetailEntry(url).also { detailCache[url] = it }
-        }
-        // Started outside the lock: keeps the JS call off the critical section, and guarantees the
-        // entry is installed in the map before its completion handler can run.
-        entry.job.start()
-        // Deliberately unguarded: a throw here can mean the shared job failed *or* that this awaiter
-        // was cancelled because the user left the screen, and evicting on the second would discard a
-        // request still running for everyone else. Eviction is the job's own business.
-        return entry.job.await()
-    }
-
-    // Either the call has not finished — a second caller should join it rather than start its own
-    // into the same extension — or it finished recently enough to still be current. A completed job
-    // whose timestamp is not yet set is treated as stale; that window is nanoseconds wide, and
-    // refetching is the safe side of it.
-    private fun CachedDetail.isUsable(): Boolean {
-        if (!job.isCompleted) return true
-        val completedAt = completedAtElapsedMs
-        return completedAt != 0L && SystemClock.elapsedRealtime() - completedAt < DETAIL_CACHE_TTL_MS
-    }
-
-    // Caller must hold `detailCacheLock`.
-    private fun newDetailEntry(url: String): CachedDetail {
-        // LAZY, so the job cannot complete before it has been stored. Started eagerly, a getDetail
-        // that fails immediately — a closed runtime, an extension throwing on entry — can run its
-        // completion handler before `detailCache[url] = entry` executes, so the eviction below finds
-        // nothing to remove and the failure then sits in the cache, making the title unopenable.
-        val job = detailScope.async(start = CoroutineStart.LAZY) {
-            runtime.invoke("getDetail", listOf(url)) ?: "{}"
-        }
-        val entry = CachedDetail(job)
-        // A failed job is evicted so a transient error isn't cached and doesn't block every later
-        // open of the title. By identity, so a fresh attempt someone else installed survives.
-        job.invokeOnCompletion { cause ->
-            entry.completedAtElapsedMs = SystemClock.elapsedRealtime()
-            if (cause != null) {
-                synchronized(detailCacheLock) { if (detailCache[url] === entry) detailCache.remove(url) }
-            }
-        }
-        return entry
     }
 
     private fun parseCatalog(raw: String?): CatalogPage {
