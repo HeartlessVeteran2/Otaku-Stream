@@ -74,7 +74,7 @@ fun AniListSearchScreen(
                 // every failure here is a dropped connection, so offer the one action that fixes it.
                 uiState.error != null -> Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
                     modifier = Modifier.fillMaxSize().padding(32.dp),
                 ) {
                     Text(uiState.error!!, color = MaterialTheme.colorScheme.error)

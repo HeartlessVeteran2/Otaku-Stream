@@ -8,12 +8,13 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 
 data class AniListSearchUiState(
@@ -36,14 +37,15 @@ class AniListSearchViewModel @Inject constructor(
 
     private val queryFlow = MutableStateFlow("")
 
-    // Bumped by retry(). queryFlow is a StateFlow and will not re-emit an unchanged value, so
-    // running the *same* search again — which is exactly what retrying a failed one means — needs
-    // something else to change.
-    private val retryTick = MutableStateFlow(0)
+    // Retries go around the debounce rather than through it. A StateFlow will not re-emit an
+    // unchanged value, so running the *same* search again — which is exactly what retrying a failed
+    // one means — needs its own channel; and a tap on "Try again" is not typing, so making it wait
+    // out the typing debounce just leaves the button looking broken for a third of a second.
+    private val retries = MutableSharedFlow<String>(extraBufferCapacity = 1)
 
     init {
         viewModelScope.launch {
-            combine(queryFlow, retryTick) { query, _ -> query }.debounce(SEARCH_DEBOUNCE_MS).collectLatest { query ->
+            merge(queryFlow.debounce(SEARCH_DEBOUNCE_MS), retries).collectLatest { query ->
                 if (query.isBlank()) {
                     _uiState.value = _uiState.value.copy(results = emptyList(), isSearching = false, error = null)
                     return@collectLatest
@@ -73,7 +75,13 @@ class AniListSearchViewModel @Inject constructor(
     // the only way to trigger another attempt was to change the query — which is not the thing the
     // user wants to change.
     fun retry() {
-        retryTick.value++
+        val query = _uiState.value.query
+        if (query.isBlank()) return
+        // Spinner on the same frame as the tap. The collector sets this too, but only once the
+        // request is actually under way — and the gap between the two is where the button reads as
+        // unresponsive, since the error message it replaces is still sitting there.
+        _uiState.value = _uiState.value.copy(isSearching = true, error = null)
+        retries.tryEmit(query)
     }
 
     private companion object {

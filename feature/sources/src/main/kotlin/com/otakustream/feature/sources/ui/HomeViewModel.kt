@@ -14,12 +14,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -31,8 +31,9 @@ private const val CONTINUE_WATCHING_CAP = 10
 // Soft cap per source per rail so one slow source can't hold up the whole home fan-out.
 private const val RAIL_FETCH_TIMEOUT_MS = 15_000L
 
-// How long registrations must stay quiet before the rails are rebuilt. Long enough to swallow the
-// bootstrap burst, short enough that installing a single add-on still feels immediate.
+// How long registrations must stay quiet before the rails are rebuilt. Applies to changes after the
+// first snapshot only — long enough to swallow the burst of a multi-catalog add-on registering, short
+// enough that installing a single add-on still feels immediate.
 private const val SOURCE_SETTLE_MS = 300L
 
 data class HomeUiState(
@@ -73,15 +74,23 @@ class HomeViewModel @Inject constructor(
             sourceBootstrapper.ensureStarted()
             // React to every registration change (bootstrap above, addon install/removal later)
             // so a newly installed add-on populates the home without a restart.
+            // Every emission but the first waits for the registry to settle. A change *after*
+            // bootstrap can still arrive in a burst — installing a Stremio add-on that declares
+            // several catalogs registers one source per catalog — and without the wait each one
+            // cancels the rail fan-out and restarts requests to every source registered so far.
+            //
+            // Not a `debounce()` on the flow, which would delay the first emission too. The first
+            // one is not a burst: ensureStarted() above has already awaited bootstrap, so by the
+            // time collection begins the persisted sources are registered and observeSources()
+            // replays them as a single snapshot. Debouncing that just held the home screen empty
+            // for another 300 ms on every launch, buying nothing. collectLatest cancels the delay
+            // below when a newer emission arrives, which is what makes it settle the burst.
+            var seenFirst = false
             sourceRepository.observeSources()
-                // Bootstrap registers persisted sources one at a time, so a user with six add-ons
-                // produced six emissions in a burst — and each one cancelled the rail fan-out and
-                // started a fresh round of requests to every source registered so far. Letting the
-                // burst settle turns that into a single fan-out. The wait is a fraction of the
-                // network round-trips it saves.
-                .debounce(SOURCE_SETTLE_MS)
                 .distinctUntilChanged()
                 .collectLatest { sources ->
+                    if (seenFirst) delay(SOURCE_SETTLE_MS)
+                    seenFirst = true
                     _uiState.value = _uiState.value.copy(hasAnySources = sources.isNotEmpty())
                     refreshRails(sources)
                 }

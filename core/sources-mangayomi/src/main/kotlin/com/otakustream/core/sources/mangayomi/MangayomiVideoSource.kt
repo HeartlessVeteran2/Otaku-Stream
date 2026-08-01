@@ -10,7 +10,9 @@ import com.otakustream.core.sources.api.SubtitleTrack
 import com.otakustream.core.sources.api.Video
 import com.otakustream.core.sources.api.VideoSource
 import com.otakustream.core.sources.mangayomi.runtime.MangayomiRuntime
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -42,11 +44,20 @@ class MangayomiVideoSource(
     //
     // Bounded and access-ordered rather than a plain ConcurrentHashMap. This lives as long as the
     // installed extension does, so unbounded it holds the full JSON of every title the user has
-    // opened since the app started, and never notices a show gaining an episode.
-    private val detailCache = object : LinkedHashMap<String, Deferred<String>>(DETAIL_CACHE_MAX, 0.75f, true) {
-        override fun removeEldestEntry(eldest: Map.Entry<String, Deferred<String>>): Boolean =
+    // opened since the app started.
+    private val detailCache = object : LinkedHashMap<String, CachedDetail>(DETAIL_CACHE_MAX, 0.75f, true) {
+        override fun removeEldestEntry(eldest: Map.Entry<String, CachedDetail>): Boolean =
             size > DETAIL_CACHE_MAX
     }
+
+    // Bounding by size does not bound staleness. Access ordering makes the title the user keeps
+    // reopening the *last* one evicted — so the show they are actively following, the one most
+    // likely to have gained an episode, is precisely the one that would keep serving an old episode
+    // list for the rest of the session. A timestamp bounds that however often the entry is read.
+    //
+    // Monotonic, not wall clock: a device clock correction would otherwise expire every entry at
+    // once or push one into the future where it never expires at all.
+    private class CachedDetail(val job: Deferred<String>, val startedAtNanos: Long)
 
     // An access-ordered LinkedHashMap reorders itself on a read, so lookups mutate it too.
     private val detailCacheLock = Any()
@@ -145,24 +156,44 @@ class MangayomiVideoSource(
     }
 
     private suspend fun detailFor(url: String): String {
-        val deferred = synchronized(detailCacheLock) { detailCache.getOrPut(url) { newDetailJob(url) } }
+        val now = System.nanoTime()
+        val entry = synchronized(detailCacheLock) {
+            val existing = detailCache[url]
+            // Age runs from when the request *started*, not when it finished, so a slow response
+            // can't arrive already most of the way through its own lifetime.
+            if (existing != null && now - existing.startedAtNanos < DETAIL_CACHE_TTL_NANOS) {
+                existing
+            } else {
+                newDetailEntry(url, now).also { detailCache[url] = it }
+            }
+        }
+        // Started outside the lock: keeps the JS call off the critical section, and guarantees the
+        // entry is installed in the map before its completion handler can run.
+        entry.job.start()
         // Deliberately unguarded: a throw here can mean the shared job failed *or* that this awaiter
         // was cancelled because the user left the screen, and evicting on the second would discard a
         // request still running for everyone else. Eviction is the job's own business.
-        return deferred.await()
+        return entry.job.await()
     }
 
     // Caller must hold `detailCacheLock`.
-    private fun newDetailJob(url: String): Deferred<String> {
-        val job = detailScope.async { runtime.invoke("getDetail", listOf(url)) ?: "{}" }
+    private fun newDetailEntry(url: String, startedAtNanos: Long): CachedDetail {
+        // LAZY, so the job cannot complete before it has been stored. Started eagerly, a getDetail
+        // that fails immediately — a closed runtime, an extension throwing on entry — can run its
+        // completion handler before `detailCache[url] = entry` executes, so the eviction below finds
+        // nothing to remove and the failure then sits in the cache, making the title unopenable.
+        val job = detailScope.async(start = CoroutineStart.LAZY) {
+            runtime.invoke("getDetail", listOf(url)) ?: "{}"
+        }
+        val entry = CachedDetail(job, startedAtNanos)
         // A failed job is evicted so a transient error isn't cached and doesn't block every later
         // open of the title. By identity, so a fresh attempt someone else installed survives.
         job.invokeOnCompletion { cause ->
             if (cause != null) {
-                synchronized(detailCacheLock) { if (detailCache[url] === job) detailCache.remove(url) }
+                synchronized(detailCacheLock) { if (detailCache[url] === entry) detailCache.remove(url) }
             }
         }
-        return job
+        return entry
     }
 
     private fun parseCatalog(raw: String?): CatalogPage {
@@ -210,5 +241,11 @@ class MangayomiVideoSource(
         // Titles to keep getDetail JSON for. Small on purpose: what this exists to capture is the
         // two calls one details screen makes, and there is one of these per installed extension.
         const val DETAIL_CACHE_MAX = 20
+
+        // How long a cached getDetail response stays usable. Long enough to cover the pair of calls
+        // one details screen makes and a user flicking between titles; short enough that a show
+        // which aired an episode while the app sat in the background is picked up on the next open
+        // rather than at the next cold start.
+        val DETAIL_CACHE_TTL_NANOS = TimeUnit.MINUTES.toNanos(5)
     }
 }

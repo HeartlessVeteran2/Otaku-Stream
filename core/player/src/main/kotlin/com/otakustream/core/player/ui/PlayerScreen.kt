@@ -110,9 +110,9 @@ fun PlayerScreen(
     //
     // Null until a baseline is known. It used to start at a fabricated 0.5f, which meant the first
     // swipe did not *adjust* brightness, it jumped — so watching in a dark room at 5%, the smallest
-    // nudge upward flooded the screen. Null instead leaves the system's own brightness alone and
-    // lets the first gesture establish the baseline, which is also the honest answer when adaptive
-    // brightness makes the real value unknowable.
+    // nudge upward flooded the screen. Null instead leaves the system's own brightness alone until
+    // something real is known: the measured value below, or failing that a read taken at the moment
+    // of the first drag.
     var brightnessFraction by remember { mutableStateOf<Float?>(null) }
     // Read off the main thread: this reaches a ContentProvider, and doing that during composition
     // put a provider round-trip on the frame the user is waiting for video on — the same mistake
@@ -250,11 +250,15 @@ fun PlayerScreen(
                 onSeekBy = viewModel::seekBy,
                 onVolumeDeltaChange = viewModel::adjustVolume,
                 onBrightnessDeltaChange = { delta ->
-                    // With no baseline — adaptive brightness, or the read has not landed — the
-                    // first gesture starts from the middle. That is a guess, but it is a guess the
-                    // user has just asked for by swiping, rather than one applied to a screen they
-                    // were happy with.
-                    val base = brightnessFraction ?: 0.5f
+                    // If the off-thread read has not landed yet, take it here rather than starting
+                    // from a fabricated middle. That is a ContentProvider hit on the main thread,
+                    // which is why it is not how the baseline is normally obtained — but by the
+                    // time a drag arrives the first frame is long since rendered, and it can happen
+                    // at most once per playback. UNKNOWN_BRIGHTNESS remains only for a device that
+                    // will not report the setting at all.
+                    val base = brightnessFraction
+                        ?: activity?.currentScreenBrightness()
+                        ?: UNKNOWN_BRIGHTNESS
                     val next = (base + delta).coerceIn(MIN_BRIGHTNESS, 1f)
                     brightnessFraction = next
                     activity?.setScreenBrightness(next)
@@ -262,7 +266,7 @@ fun PlayerScreen(
                 // Read the flow's current value so the HUD ring tracks the drag without waiting
                 // on a recomposition of the collected uiState.
                 volumeLevel = { viewModel.uiState.value.volume },
-                brightnessLevel = { brightnessFraction ?: 0.5f },
+                brightnessLevel = { brightnessFraction ?: UNKNOWN_BRIGHTNESS },
                 doubleTapSeekMs = uiState.seekDurationMs,
                 onTap = { controlsVisible = !controlsVisible },
                 onLongPressSpeedStart = viewModel::beginSpeedBoost,
@@ -478,7 +482,8 @@ internal tailrec fun Context.findActivity(): Activity? = when (this) {
 }
 
 // What the screen is currently showing, as a 0..1 fraction, so a brightness gesture starts from
-// there instead of from a guess. Null when it cannot be established.
+// there instead of from a guess. Approximate under adaptive brightness (see below). Null only when
+// the setting cannot be read at all.
 //
 // Touches a ContentProvider, so it must not run during composition — see how PlayerScreen calls it.
 private fun Activity.currentScreenBrightness(): Float? {
@@ -486,17 +491,14 @@ private fun Activity.currentScreenBrightness(): Float? {
     val override = window.attributes.screenBrightness
     if (override >= 0f) return override.coerceIn(MIN_BRIGHTNESS, 1f)
     // Otherwise the window follows the system, and SCREEN_BRIGHTNESS is the manual slider value.
-    // With adaptive brightness on that is not what is actually on screen, so it is refused rather
-    // than used: a wrong baseline is what the fabricated 0.5f already was, and half the point of
-    // reading anything here is to stop the first swipe jumping. Callers keep the system's own
-    // brightness until the user establishes a baseline by gesturing.
-    val adaptive = runCatching {
-        android.provider.Settings.System.getInt(
-            contentResolver,
-            android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE,
-        ) == android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC
-    }.getOrDefault(false)
-    if (adaptive) return null
+    //
+    // Read even when adaptive brightness is on, where it is only an approximation of what is
+    // actually on screen — the ambient-light adjustment is applied on top of it and is not readable
+    // from here. Refusing it was worse: the caller's only remaining option was the fabricated 0.5f
+    // this whole path exists to eliminate, so on a dark screen with adaptive on — the exact case
+    // where a jump hurts most — the first swipe still flooded it. An approximate baseline is off by
+    // the ambient adjustment; a constant is off by however far the user is from the middle.
+    //
     // Settings.System reports 0..255. Not universally true — a few devices use a different maximum
     // — but it is far closer than a constant, and the next swipe corrects it.
     return runCatching {
@@ -511,6 +513,12 @@ private fun Activity.currentScreenBrightness(): Float? {
 // The window's own floor. Shared by everything on the brightness path so the bounds cannot drift
 // apart: the gesture, the setter and the initial read all clamp to the same value.
 private const val MIN_BRIGHTNESS = 0.01f
+
+// Last resort when the device reports no brightness at all — neither a window override nor a
+// readable setting. Not a default: every path that can establish a real value is tried first,
+// because starting a *relative* gesture from a fabricated middle is what makes the first swipe jump
+// rather than adjust.
+private const val UNKNOWN_BRIGHTNESS = 0.5f
 
 private fun Activity.setScreenBrightness(fraction: Float) {
     val params = window.attributes

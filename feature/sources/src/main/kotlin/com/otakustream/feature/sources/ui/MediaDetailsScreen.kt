@@ -430,31 +430,21 @@ private fun LibraryStatusRow(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun StreamPickerSheet(choices: List<Video>, onSelect: (Video) -> Unit, onDismiss: () -> Unit) {
-    // Which row the user has tapped. The radios were hardcoded `selected = false`, so tapping one
-    // dismissed the sheet with nothing ever appearing chosen — on a slow source the sheet could sit
-    // there for a moment looking as though the tap had not registered. This is a picker, not a
-    // persisted setting: the selection lasts only as long as the sheet.
-    var selectedIndex by remember { mutableStateOf<Int?>(null) }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         LazyColumn(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             item {
                 Text(text = "Pick a quality", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
             }
+            // ListItem rows, not radio buttons. The radios were hardcoded `selected = false`, and
+            // there was no way to make them ever look selected: selectVideo clears
+            // pendingVideoChoices in the same state update, so the sheet is gone before a selection
+            // could render. A radio group promises a persistent choice this sheet does not have —
+            // each row is a one-shot action, so it looks like one now.
             itemsIndexed(choices) { index, video ->
-                val select = {
-                    selectedIndex = index
-                    onSelect(video)
-                }
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable(onClick = select)
-                        .padding(vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    RadioButton(selected = selectedIndex == index, onClick = select)
-                    Text(text = prettyQuality(video.quality, index))
-                }
+                ListItem(
+                    headlineContent = { Text(text = prettyQuality(video.quality, index)) },
+                    modifier = Modifier.fillMaxWidth().clickable { onSelect(video) },
+                )
             }
         }
     }

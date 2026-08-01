@@ -22,6 +22,7 @@ import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -74,7 +75,11 @@ class StremioVideoSource(
     // opening is the *last* thing evicted, so the one show they are actively following — the one
     // most likely to have gained an episode — is exactly the one that would keep serving a stale
     // list. A timestamp bounds that regardless of how often it is read.
-    private class CachedMeta(val job: Deferred<StremioMeta>, val startedAtMs: Long)
+    //
+    // Monotonic, not wall clock: a device clock correction (NTP sync, a manual change, a timezone
+    // shift that moves the clock) would otherwise either expire every entry at once or push one an
+    // arbitrary distance into the future, where it never expires at all.
+    private class CachedMeta(val job: Deferred<StremioMeta>, val startedAtNanos: Long)
 
     // Guards metaCache: an access-ordered LinkedHashMap reorders itself on a *read*, so even
     // lookups mutate it and none of it is thread-safe.
@@ -90,17 +95,21 @@ class StremioVideoSource(
 
     private suspend fun metaFor(type: String, id: String): StremioMeta {
         val key = "$type|$id"
-        val now = System.currentTimeMillis()
+        val now = System.nanoTime()
         val entry = synchronized(metaCacheLock) {
             val existing = metaCache[key]
             // Age is measured from when the request *started*, not when it finished, so a slow
             // response cannot arrive already most of the way through its own lifetime.
-            if (existing != null && now - existing.startedAtMs < META_CACHE_TTL_MS) {
+            if (existing != null && now - existing.startedAtNanos < META_CACHE_TTL_NANOS) {
                 existing
             } else {
                 newMetaEntry(key, type, id, now).also { metaCache[key] = it }
             }
         }
+        // Started outside the lock. The job is LAZY, so nothing runs until here — which keeps the
+        // network call off the critical section and, more importantly, guarantees the entry is
+        // already installed in the map before invokeOnCompletion can fire.
+        entry.job.start()
         // No try/catch around this. A throw here can mean the shared job failed *or* that this
         // particular awaiter was cancelled because the user left — and evicting on the second would
         // throw away a request that is still running perfectly well for everyone else. Eviction is
@@ -109,9 +118,16 @@ class StremioVideoSource(
     }
 
     // Caller must hold `metaCacheLock`.
-    private fun newMetaEntry(key: String, type: String, id: String, startedAtMs: Long): CachedMeta {
-        val job = metaScope.async { parseMetaResponse(get("$baseUrl/meta/$type/$id.json")) }
-        val entry = CachedMeta(job, startedAtMs)
+    private fun newMetaEntry(key: String, type: String, id: String, startedAtNanos: Long): CachedMeta {
+        // LAZY, so the job cannot complete before it has been stored. Started eagerly, a request
+        // that fails immediately — an unreachable host, a rejected URL — can run its completion
+        // handler *before* `metaCache[key] = entry` executes, so the eviction below finds nothing to
+        // remove and the failure then sits in the cache for the full TTL, making the title
+        // unopenable. The caller starts it once the entry is installed.
+        val job = metaScope.async(start = CoroutineStart.LAZY) {
+            parseMetaResponse(get("$baseUrl/meta/$type/$id.json"))
+        }
+        val entry = CachedMeta(job, startedAtNanos)
         job.invokeOnCompletion { cause ->
             // Only a job that actually failed is evicted, and only if it is still the installed one.
             // A cached failure would otherwise make the title unopenable for the rest of the session.
@@ -360,6 +376,6 @@ class StremioVideoSource(
         // details screen makes and a user flicking back and forth between titles; short enough that
         // a show which aired an episode while the app sat in the background is picked up on the next
         // open rather than at the next cold start.
-        const val META_CACHE_TTL_MS = 5 * 60 * 1000L
+        val META_CACHE_TTL_NANOS = TimeUnit.MINUTES.toNanos(5)
     }
 }

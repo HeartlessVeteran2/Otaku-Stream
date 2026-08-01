@@ -42,8 +42,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import com.otakustream.app.R
-import com.otakustream.core.sources.api.PendingPlayback
-import com.otakustream.core.sources.api.Video
+import com.otakustream.app.magnetToPlayableUrl
 import com.otakustream.core.torrent.MagnetLinks
 import com.otakustream.feature.sources.ui.HomeContent
 
@@ -138,8 +137,14 @@ fun PlayScreen(
             onPlay = { url ->
                 showUrlDialog = false
                 // A magnet has to become a torrent:// url before the player sees it; anything else
-                // goes straight through. An unparseable magnet yields null and simply does nothing,
-                // which is the same outcome the disabled button gave before.
+                // goes straight through. The dialog only enables Play for a magnet that parses, so
+                // the null branch is unreachable in practice — kept because the shared helper's
+                // contract allows it, not because a path here is expected to hit it.
+                //
+                // No confirmation prompt, unlike the same conversion behind an ACTION_VIEW intent.
+                // That prompt exists because any web page can fire a magnet at the app and joining a
+                // swarm publishes the user's IP; a link they pasted into this dialog is already
+                // their deliberate choice, and asking twice for one action is noise.
                 val playable = if (url.startsWith("magnet:", ignoreCase = true)) {
                     magnetToPlayableUrl(url)
                 } else {
@@ -160,7 +165,12 @@ private fun PasteUrlDialog(onDismiss: () -> Unit, onPlay: (String) -> Unit) {
     // magnet: is one of them. The manifest already accepts magnet links from other apps, and the
     // torrent player handles them — but this dialog rejected the one thing a user is most likely to
     // have on their clipboard, so pasting a magnet left Play greyed out with nothing explaining why.
-    val isMagnet = trimmed.startsWith("magnet:", ignoreCase = true)
+    //
+    // Parsed, not prefix-matched. A magnet with no infohash — a truncated paste, the most likely way
+    // one arrives broken — starts with "magnet:" all the same, so a prefix check enables Play for a
+    // link the conversion below then refuses, and the tap does nothing at all with no explanation.
+    // Greyed out is at least honest about it.
+    val isMagnet = remember(trimmed) { MagnetLinks.parse(trimmed) != null }
     val isPlayable = isMagnet ||
         listOf("http://", "https://", "content://", "file://").any { trimmed.startsWith(it, ignoreCase = true) }
     AlertDialog(
@@ -183,22 +193,3 @@ private fun PasteUrlDialog(onDismiss: () -> Unit, onPlay: (String) -> Unit) {
     )
 }
 
-// A magnet link the user pasted themselves, turned into the torrent:// url the player understands
-// plus the tracker stash that has to travel out of band — the url is the identity that resume
-// position and watch history are keyed on, so it must not vary with how the link was written.
-//
-// No confirmation prompt, unlike the same conversion in MainActivity. That prompt exists because any
-// web page can fire a magnet intent at the app and joining a swarm publishes the user's IP; a link
-// they pasted into this dialog is already their deliberate choice, and asking twice for one action
-// is noise. Provenance says so explicitly rather than leaning on the scheme being allowed anyway.
-private fun magnetToPlayableUrl(magnet: String): String? {
-    val link = MagnetLinks.parse(magnet) ?: return null
-    val url = MagnetLinks.toTorrentUrl(link) ?: return null
-    PendingPlayback.stash(
-        video = Video(url = url, quality = link.displayName ?: "torrent", trackers = link.trackers),
-        // Nothing upstream recorded this play, so the player records it itself.
-        historyHandled = false,
-        provenance = PendingPlayback.Provenance.USER,
-    )
-    return url
-}
