@@ -206,6 +206,46 @@ class InFlightCacheTest {
         assertEquals("the resident key was not", afterRefetch, started.get())
     }
 
+    // The bug: eviction that can only consider the single eldest entry stalls completely when that
+    // entry is a request still running, so completed results pile up behind it without bound.
+    @Test
+    fun `a long-running request does not stop the bound being enforced`() = runTest {
+        val started = AtomicInteger()
+        val gate = CompletableDeferred<Unit>()
+        val cache = InFlightCache<Int, Int>(
+            scope = cacheScope(),
+            maxEntries = 2,
+            ttlMs = 60_000,
+            nowMs = { clock },
+        ) { key ->
+            started.incrementAndGet()
+            // Key 0 is the eldest and never finishes while the rest come and go.
+            if (key == 0) gate.await()
+            key
+        }
+
+        val stuck = async { cache.get(0) }
+        advanceUntilIdle()
+
+        // Well past the bound, all completing while key 0 is still running.
+        for (key in 1..6) cache.get(key)
+        val afterFilling = started.get()
+
+        // The earliest completed keys must have been dropped despite the stuck entry ahead of them.
+        cache.get(1)
+        assertNotEquals("an old completed entry was evicted", afterFilling, started.get())
+
+        // And the stuck request itself was never dropped — it is still the one a new caller joins.
+        val beforeJoining = started.get()
+        val joiner = async { cache.get(0) }
+        advanceUntilIdle()
+        assertEquals("the running request was joined, not restarted", beforeJoining, started.get())
+
+        gate.complete(Unit)
+        assertEquals(0, stuck.await())
+        assertEquals(0, joiner.await())
+    }
+
     @Test
     fun `clear drops cached results`() = runTest {
         val started = AtomicInteger()

@@ -123,68 +123,71 @@ class MangayomiPreferencesViewModel @Inject constructor(
     fun save() {
         viewModelScope.launch {
             saveLock.withLock {
-            val editsAtStart = editVersion
-            runCatching {
-                val resolved = JSONObject()
-                _uiState.value.items.forEach { item ->
-                    when (item) {
-                        is PrefItem.ListPref -> resolved.put(item.key, item.entryValues.getOrNull(item.selectedIndex) ?: "")
-                        is PrefItem.SwitchPref -> resolved.put(item.key, item.checked)
-                        is PrefItem.EditTextPref -> resolved.put(item.key, item.value)
+                val editsAtStart = editVersion
+                runCatching {
+                    val resolved = JSONObject()
+                    _uiState.value.items.forEach { item ->
+                        when (item) {
+                            is PrefItem.ListPref ->
+                                resolved.put(item.key, item.entryValues.getOrNull(item.selectedIndex) ?: "")
+                            is PrefItem.SwitchPref -> resolved.put(item.key, item.checked)
+                            is PrefItem.EditTextPref -> resolved.put(item.key, item.value)
+                        }
+                    }
+                    val prefsJson = resolved.toString()
+
+                    // Build the replacement first, and only commit once it exists.
+                    //
+                    // createFromRecord brings the JS engine up with these values, which is the whole
+                    // point — it is what makes "Saved" mean the extension accepted them. But that
+                    // means it can throw on a value the extension rejects, and in the old order the
+                    // throw landed after the write and the unregister: the rejected value was
+                    // persisted, the working source was gone, and the user was left with an error
+                    // and no extension. Constructing first makes a rejection a no-op.
+                    val current = mangayomiRepository.getAll().firstOrNull { it.id == sourceId }
+                        ?: error("Extension is no longer installed")
+                    val replacement = factory.createFromRecord(current.copy(prefsJson = prefsJson))
+
+                    try {
+                        // NonCancellable covers the commit alone, so leaving the screen cannot
+                        // strand the registry half-swapped.
+                        withContext(NonCancellable) {
+                            // The registry decides whether this extension still exists, rather than
+                            // a check beforehand. Bringing QuickJS up takes long enough for the user
+                            // to uninstall meanwhile, and re-reading the record only narrows that
+                            // window — the delete can still land between the check and the swap.
+                            // replaceDynamic refuses once the id is gone, which is the same instant
+                            // uninstall removes it, so no ordering can resurrect a removed source.
+                            if (!sourceRepository.replaceDynamic(replacement)) {
+                                error("Extension is no longer installed")
+                            }
+                            mangayomiRepository.updatePrefs(sourceId, prefsJson)
+                        }
+                    } catch (t: Throwable) {
+                        // Never registered, so nothing else will ever close it — and it owns a
+                        // QuickJS thread and native context.
+                        runCatching { replacement.close() }
+                        throw t
+                    }
+
+                    // Reported only if the values on screen are still the ones this save captured;
+                    // otherwise a save finishing after the user moved on would tick "Saved" next to
+                    // values it knows nothing about. Clearing the error for the same reason: one
+                    // left visible beside "Saved" describes two different attempts at once.
+                    if (editVersion == editsAtStart) {
+                        _uiState.value = _uiState.value.copy(saved = true, error = null)
+                    }
+                }.onFailure { failure ->
+                    if (failure is CancellationException) throw failure
+                    if (editVersion == editsAtStart) {
+                        // saved = false too: a failed retry after an earlier success would otherwise
+                        // show "Saved" and an error side by side.
+                        _uiState.value = _uiState.value.copy(
+                            saved = false,
+                            error = failure.message ?: "Failed to save preferences",
+                        )
                     }
                 }
-                val prefsJson = resolved.toString()
-                // Build the replacement first, and only commit once it exists.
-                //
-                // createFromRecord brings the JS engine up with these values, which is the whole
-                // point — it is what makes "Saved" mean the extension accepted them. But that means
-                // it can throw on a value the extension rejects, and in that order the throw landed
-                // after the write and the unregister: the rejected value was persisted, the working
-                // source was gone from the registry, and the user was left with an error message and
-                // no extension. Constructing first makes the failure a no-op — nothing is written and
-                // nothing is unregistered, so the previously working source keeps running.
-                //
-                // NonCancellable covers the commit alone, so leaving the screen can't strand the
-                // registry half-swapped.
-                val current = mangayomiRepository.getAll().firstOrNull { it.id == sourceId }
-                    ?: error("Extension is no longer installed")
-                val replacement = factory.createFromRecord(current.copy(prefsJson = prefsJson))
-                try {
-                    withContext(NonCancellable) {
-                        // Re-read rather than trusting the record fetched before the engine came up:
-                        // bringing QuickJS up takes long enough for the extension to be uninstalled
-                        // in the meantime, and committing then would write preferences for a deleted
-                        // record and register a source with nothing behind it.
-                        val stillInstalled = mangayomiRepository.getAll().any { it.id == sourceId }
-                        if (!stillInstalled) error("Extension is no longer installed")
-                        mangayomiRepository.updatePrefs(sourceId, prefsJson)
-                        // Atomic: unregister-then-register left a window where a concurrent
-                        // registration could claim the id, after which our replacement would be
-                        // silently closed and discarded while this reported success.
-                        sourceRepository.replaceDynamic(replacement)
-                    }
-                } catch (t: Throwable) {
-                    // Never registered, so nothing else will ever close it — and it owns a QuickJS
-                    // thread and native context.
-                    runCatching { replacement.close() }
-                    throw t
-                }
-                // Both outcomes are reported only if the values on screen are still the ones this
-                // save captured. Otherwise a save that finished after the user moved on would tick
-                // "Saved" — or show a rejection — next to values it knows nothing about. Success
-                // clears any earlier error for the same reason: leaving one visible beside "Saved"
-                // describes two different attempts at once.
-                if (editVersion == editsAtStart) {
-                    _uiState.value = _uiState.value.copy(saved = true, error = null)
-                }
-            }.onFailure { failure ->
-                if (failure is CancellationException) throw failure
-                if (editVersion == editsAtStart) {
-                    _uiState.value = _uiState.value.copy(
-                        error = failure.message ?: "Failed to save preferences",
-                    )
-                }
-            }
             }
         }
     }
@@ -198,6 +201,9 @@ class MangayomiPreferencesViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(
             items = _uiState.value.items.map { if (it.key == key) transform(it) else it },
             saved = false,
+            // The values on screen are no longer the ones that were rejected, so the rejection no
+            // longer describes anything the user can see.
+            error = null,
         )
     }
 

@@ -1,6 +1,7 @@
 package com.otakustream.core.common
 
 import android.os.SystemClock
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
@@ -53,24 +54,24 @@ class InFlightCache<K : Any, V>(
         require(maxEntries > 0) { "maxEntries must be positive, was $maxEntries" }
     }
 
-    private class Entry<V>(val job: Deferred<V>) {
-        @Volatile
-        var completedAtMs: Long = NEVER
+    // completedAtMs is written by the job body itself, before the value is returned, so it is
+    // visible to anyone who can see the job as completed. Written from invokeOnCompletion instead,
+    // there is a window where `isCompleted` is already true but the timestamp is not yet set — a
+    // caller landing there reads NEVER, judges the entry stale, and starts a duplicate request.
+    private class Entry<V>(val job: Deferred<V>, private val completedAt: AtomicLong) {
+        val completedAtMs: Long get() = completedAt.get()
     }
 
     // Access-ordered, so the bound evicts what has gone longest untouched rather than what was
     // added longest ago. Bounding alone does not bound staleness, which is what `ttlMs` is for:
     // access ordering makes the most-used key the *last* one evicted, so without a TTL the entry
     // most likely to have changed is exactly the one that would never be refreshed.
-    private val entries = object : LinkedHashMap<K, Entry<V>>(maxEntries, 0.75f, true) {
-        // Only completed entries are evictable. Dropping a running one does not cancel it — it just
-        // hides it, so the next caller for that key starts a second identical production alongside
-        // the first, which is precisely what this class exists to prevent. The map can therefore
-        // exceed `maxEntries` while many distinct requests are in flight; that excess is bounded by
-        // how many the callers actually have outstanding, and it drains as they complete.
-        override fun removeEldestEntry(eldest: Map.Entry<K, Entry<V>>): Boolean =
-            size > maxEntries && eldest.value.job.isCompleted
-    }
+    // Trimming is done by `trimLocked` rather than removeEldestEntry, which can only ever consider
+    // the single eldest entry — and that one may be a request still running, which must not be
+    // dropped (dropping does not cancel it, it just hides it, so the next caller for that key starts
+    // a duplicate). With removeEldestEntry alone, one long-running request at the head blocks all
+    // eviction behind it and completed results pile up without bound.
+    private val entries = LinkedHashMap<K, Entry<V>>(maxEntries, 0.75f, true)
 
     // Guards `entries`. An access-ordered LinkedHashMap reorders itself on a *read*, so even a
     // lookup mutates it and none of it is thread-safe.
@@ -78,7 +79,11 @@ class InFlightCache<K : Any, V>(
 
     suspend fun get(key: K): V {
         val entry = synchronized(lock) {
-            entries[key]?.takeIf { it.isUsable() } ?: newEntry(key).also { entries[key] = it }
+            val existing = entries[key]?.takeIf { it.isUsable() }
+            existing ?: newEntry(key).also {
+                entries[key] = it
+                trimLocked()
+            }
         }
         // Outside the lock: keeps the work off the critical section, and guarantees the entry is
         // installed before its completion handler can run. Starting an already-started job is a
@@ -97,6 +102,21 @@ class InFlightCache<K : Any, V>(
         synchronized(lock) { entries.clear() }
     }
 
+    // Drops completed entries, oldest-accessed first, until the bound is met. In-flight entries are
+    // skipped rather than stopping the scan, so a slow request cannot pin the cache above its bound.
+    // Caller must hold `lock`.
+    private fun trimLocked() {
+        if (entries.size <= maxEntries) return
+        val iterator = entries.entries.iterator()
+        var over = entries.size - maxEntries
+        while (iterator.hasNext() && over > 0) {
+            if (iterator.next().value.job.isCompleted) {
+                iterator.remove()
+                over--
+            }
+        }
+    }
+
     private fun Entry<V>.isUsable(): Boolean {
         if (!job.isCompleted) return true
         val completedAt = completedAtMs
@@ -105,16 +125,21 @@ class InFlightCache<K : Any, V>(
 
     // Caller must hold `lock`.
     private fun newEntry(key: K): Entry<V> {
-        val job = scope.async(start = CoroutineStart.LAZY) { produce(key) }
-        val entry = Entry(job)
+        val completedAt = AtomicLong(NEVER)
+        // The timestamp is stamped by the body, so it is set before the job reports completion. Only
+        // a successful body reaches it: a throw leaves it at NEVER, which is what keeps a failure
+        // from ever being judged fresh — including by a caller arriving before the eviction below.
+        val job = scope.async(start = CoroutineStart.LAZY) {
+            produce(key).also { completedAt.set(nowMs()) }
+        }
+        val entry = Entry(job, completedAt)
         job.invokeOnCompletion { cause ->
-            if (cause == null) {
-                entry.completedAtMs = nowMs()
-            } else {
-                // A failure or cancellation is never cached: it stays without a completion time, so
-                // it can't be judged fresh even by a caller that arrives before this eviction runs.
+            if (cause != null) {
                 // Removed by identity, so a fresh attempt someone else already installed survives.
                 synchronized(lock) { if (entries[key] === entry) entries.remove(key) }
+            } else {
+                // A completion frees an entry that trimLocked may have had to skip while it ran.
+                synchronized(lock) { trimLocked() }
             }
         }
         return entry

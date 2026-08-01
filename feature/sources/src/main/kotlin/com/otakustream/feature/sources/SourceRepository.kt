@@ -23,7 +23,12 @@ interface SourceRepository {
     //
     // The target id comes from the source rather than a separate parameter, so there is no way to
     // ask for a swap that removes one id and installs another.
-    fun replaceDynamic(source: VideoSource)
+    //
+    // Returns false, having registered nothing, when no source with that id is registered. That is
+    // the uninstall race: a reload can be built while the extension is being removed, and appending
+    // it would resurrect a source whose record is already deleted — alive, with its JS engine, and
+    // backed by nothing. The caller is expected to close the instance it built.
+    fun replaceDynamic(source: VideoSource): Boolean
 
     fun unregisterDynamic(id: Long)
     fun observeSources(): Flow<List<VideoSource>>
@@ -84,18 +89,18 @@ class SourceRegistry @Inject constructor(
     // In place, not remove-and-append: this list is the source picker's order and the priority the
     // home rails interleave by, so appending would silently reorder the UI every time an extension's
     // preferences were saved.
-    override fun replaceDynamic(source: VideoSource) {
+    override fun replaceDynamic(source: VideoSource): Boolean {
         while (true) {
             val current = _dynamicSources.value
             val index = current.indexOfFirst { it.id == source.id }
-            val next = if (index < 0) {
-                current + source
-            } else {
-                current.toMutableList().apply { this[index] = source }
-            }
+            // Nothing to replace. Refusing rather than appending is what closes the uninstall race:
+            // the id left the registry while this replacement was being built, so installing it now
+            // would bring back a source the user has removed.
+            if (index < 0) return false
+            val next = current.toMutableList().apply { this[index] = source }
             if (_dynamicSources.compareAndSet(current, next)) {
                 current.forEach { if (it.id == source.id && it !== source) closeQuietly(it) }
-                return
+                return true
             }
         }
     }

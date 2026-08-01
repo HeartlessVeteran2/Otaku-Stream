@@ -638,7 +638,7 @@ class PlayerController @Inject constructor(
                 WatchHistoryEntry(
                     sourceId = DIRECT_PLAY_SOURCE_ID,
                     mediaUrl = url,
-                    mediaTitle = title?.takeIf { it.isNotBlank() }
+                    mediaTitle = title?.trim()?.takeIf { it.isNotEmpty() }
                         ?: rememberedTitleFor(url)
                         ?: deriveDisplayTitle(url),
                     episodeUrl = url,
