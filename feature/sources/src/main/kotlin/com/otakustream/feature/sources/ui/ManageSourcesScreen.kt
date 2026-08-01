@@ -44,7 +44,7 @@ fun ManageSourcesScreen(
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
             // The header is one item rather than several: it is a fixed run of content always
             // composed together, so splitting it would buy no laziness.
-            item(key = "header") {
+            item {
                 Column {
                     Button(onClick = onBrowseCatalogClick, modifier = Modifier.fillMaxWidth()) {
                         Text("Browse the source directory")

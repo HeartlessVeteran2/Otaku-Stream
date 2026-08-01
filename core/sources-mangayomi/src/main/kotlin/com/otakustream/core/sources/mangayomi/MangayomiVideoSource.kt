@@ -10,12 +10,15 @@ import com.otakustream.core.sources.api.SubtitleTrack
 import com.otakustream.core.sources.api.Video
 import com.otakustream.core.sources.api.VideoSource
 import com.otakustream.core.sources.mangayomi.runtime.MangayomiRuntime
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.coroutineScope
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.concurrent.ConcurrentHashMap
 
 // Adapts one Mangayomi/AnymeX JS extension (running in a MangayomiRuntime) to the app's
 // VideoSource contract. Mapping of Mangayomi shapes → Models.kt:
@@ -36,11 +39,32 @@ class MangayomiVideoSource(
     // getMediaDetails and getEpisodeList both derive from the same getDetail(url) call — cache the
     // in-flight job (not the raw string) per media url so concurrent opens (details screen fires
     // both) share one getDetail call rather than racing two.
-    private val detailCache = ConcurrentHashMap<String, Deferred<String>>()
+    //
+    // Bounded and access-ordered rather than a plain ConcurrentHashMap. This lives as long as the
+    // installed extension does, so unbounded it holds the full JSON of every title the user has
+    // opened since the app started, and never notices a show gaining an episode.
+    private val detailCache = object : LinkedHashMap<String, Deferred<String>>(DETAIL_CACHE_MAX, 0.75f, true) {
+        override fun removeEldestEntry(eldest: Map.Entry<String, Deferred<String>>): Boolean =
+            size > DETAIL_CACHE_MAX
+    }
+
+    // An access-ordered LinkedHashMap reorders itself on a read, so lookups mutate it too.
+    private val detailCacheLock = Any()
+
+    // The shared jobs belong to the source, not to whichever caller created one. Parented to the
+    // caller — which is what `coroutineScope { async { } }` did — a cached job dies when that caller
+    // does, so backing out of a details screen cancelled the request the next caller was meant to
+    // join. SupervisorJob so one failed getDetail cannot cancel the rest.
+    private val detailScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // Releases the runtime's engine thread + native QuickJS context. VideoSource has no lifecycle
-    // hook, so the host closes this when the source is uninstalled/reloaded (wired in a later PR).
-    override fun close() = runtime.close()
+    // hook, so the host closes this when the source is uninstalled/reloaded.
+    override fun close() {
+        // Before the runtime: an in-flight getDetail would otherwise call into a closed QuickJS
+        // context.
+        detailScope.cancel()
+        runtime.close()
+    }
 
     override suspend fun getPopular(page: Int): CatalogPage =
         parseCatalog(runtime.invoke("getPopular", listOf(page)))
@@ -120,18 +144,25 @@ class MangayomiVideoSource(
         return runtime.invoke("getSourcePreferences", emptyList()) ?: "[]"
     }
 
-    private suspend fun detailFor(url: String): String = coroutineScope {
-        // computeIfAbsent is atomic, so concurrent callers share one getDetail job. A failed job
-        // is evicted so a transient error doesn't get cached and block every later open.
-        val deferred = detailCache.computeIfAbsent(url) {
-            async { runtime.invoke("getDetail", listOf(url)) ?: "{}" }
+    private suspend fun detailFor(url: String): String {
+        val deferred = synchronized(detailCacheLock) { detailCache.getOrPut(url) { newDetailJob(url) } }
+        // Deliberately unguarded: a throw here can mean the shared job failed *or* that this awaiter
+        // was cancelled because the user left the screen, and evicting on the second would discard a
+        // request still running for everyone else. Eviction is the job's own business.
+        return deferred.await()
+    }
+
+    // Caller must hold `detailCacheLock`.
+    private fun newDetailJob(url: String): Deferred<String> {
+        val job = detailScope.async { runtime.invoke("getDetail", listOf(url)) ?: "{}" }
+        // A failed job is evicted so a transient error isn't cached and doesn't block every later
+        // open of the title. By identity, so a fresh attempt someone else installed survives.
+        job.invokeOnCompletion { cause ->
+            if (cause != null) {
+                synchronized(detailCacheLock) { if (detailCache[url] === job) detailCache.remove(url) }
+            }
         }
-        try {
-            deferred.await()
-        } catch (t: Throwable) {
-            detailCache.remove(url, deferred)
-            throw t
-        }
+        return job
     }
 
     private fun parseCatalog(raw: String?): CatalogPage {
@@ -173,5 +204,11 @@ class MangayomiVideoSource(
             val label = entry.optString("label").ifEmpty { entry.optString("language").ifEmpty { "Subtitle" } }
             SubtitleTrack(url = url, lang = label, label = label)
         }
+    }
+
+    private companion object {
+        // Titles to keep getDetail JSON for. Small on purpose: what this exists to capture is the
+        // two calls one details screen makes, and there is one of these per installed extension.
+        const val DETAIL_CACHE_MAX = 20
     }
 }

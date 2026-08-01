@@ -66,6 +66,7 @@ import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -305,6 +306,11 @@ private fun OnDeviceTab(
     // navigate. Still alive at that point: this composable only leaves composition once the
     // navigation it triggers actually happens.
     val scope = rememberCoroutineScope()
+    // One launch at a time. The scan is now asynchronous, so tapping two rows quickly used to start
+    // two of them — and whichever finished second would overwrite PendingPlayback and navigate on
+    // top of the first, so the player could open the file the user tapped *first* carrying the
+    // subtitles of the one they tapped second. The newest tap wins, which is what a tap means.
+    var launchJob by remember { mutableStateOf<Job?>(null) }
 
     LaunchedEffect(Unit) { viewModel.refresh() }
 
@@ -348,7 +354,8 @@ private fun OnDeviceTab(
                         },
                         modifier = Modifier.clickable {
                             val url = video.uri.toString()
-                            scope.launch {
+                            launchJob?.cancel()
+                            launchJob = scope.launch {
                                 // VLC-style sidecar subtitles: hand any same-basename
                                 // .srt/.ass/.ssa/.vtt next to the file to the player.
                                 //

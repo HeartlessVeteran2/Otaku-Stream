@@ -48,7 +48,9 @@ import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.util.UnstableApi
@@ -106,10 +108,20 @@ fun PlayerScreen(
     var showSubtitleStyleSheet by remember { mutableStateOf(false) }
     // Window brightness as a 0..1 fraction, tracked here so the gesture HUD can show a level ring.
     //
-    // Seeded from what the screen is actually showing, not from a made-up 0.5f. Starting at half
-    // meant the first swipe did not adjust brightness, it *jumped* to roughly half — so watching in
-    // a dark room at 5%, the smallest nudge upward flooded the screen at full brightness.
-    var brightnessFraction by remember { mutableStateOf(activity?.currentScreenBrightness() ?: 0.5f) }
+    // Null until a baseline is known. It used to start at a fabricated 0.5f, which meant the first
+    // swipe did not *adjust* brightness, it jumped — so watching in a dark room at 5%, the smallest
+    // nudge upward flooded the screen. Null instead leaves the system's own brightness alone and
+    // lets the first gesture establish the baseline, which is also the honest answer when adaptive
+    // brightness makes the real value unknowable.
+    var brightnessFraction by remember { mutableStateOf<Float?>(null) }
+    // Read off the main thread: this reaches a ContentProvider, and doing that during composition
+    // put a provider round-trip on the frame the user is waiting for video on — the same mistake
+    // this pass is removing elsewhere. Skipped once the user has gestured, so a slow read can never
+    // land on top of a baseline they have already set.
+    LaunchedEffect(activity) {
+        val measured = withContext(Dispatchers.IO) { activity?.currentScreenBrightness() }
+        if (brightnessFraction == null) brightnessFraction = measured
+    }
     var resizeModeOsd by remember { mutableStateOf<String?>(null) }
     var lastResizeMode by remember { mutableStateOf(uiState.resizeMode) }
 
@@ -130,7 +142,14 @@ fun PlayerScreen(
         }
     }
 
-    var showGestureCoach by remember { mutableStateOf(!viewModel.hasSeenGestureCoach) }
+    // Driven by the flow rather than a one-shot read, because the answer arrives from disk a moment
+    // after this composes. Read once into remembered state, a first-time user would never see the
+    // coach at all: the "not seen" value would land after this had already decided not to show it.
+    // Null means still loading, which shows nothing — better than a flash of an overlay for someone
+    // who has dismissed it before.
+    val hasSeenGestureCoach by viewModel.hasSeenGestureCoach.collectAsState()
+    var coachDismissed by remember { mutableStateOf(false) }
+    val showGestureCoach = hasSeenGestureCoach == false && !coachDismissed
 
     // Android 13+ needs a runtime grant before the media-playback notification can show. Ask once
     // when playback first starts; playback itself never waits on the result.
@@ -231,13 +250,19 @@ fun PlayerScreen(
                 onSeekBy = viewModel::seekBy,
                 onVolumeDeltaChange = viewModel::adjustVolume,
                 onBrightnessDeltaChange = { delta ->
-                    brightnessFraction = (brightnessFraction + delta).coerceIn(0.01f, 1f)
-                    activity?.setScreenBrightness(brightnessFraction)
+                    // With no baseline — adaptive brightness, or the read has not landed — the
+                    // first gesture starts from the middle. That is a guess, but it is a guess the
+                    // user has just asked for by swiping, rather than one applied to a screen they
+                    // were happy with.
+                    val base = brightnessFraction ?: 0.5f
+                    val next = (base + delta).coerceIn(MIN_BRIGHTNESS, 1f)
+                    brightnessFraction = next
+                    activity?.setScreenBrightness(next)
                 },
                 // Read the flow's current value so the HUD ring tracks the drag without waiting
                 // on a recomposition of the collected uiState.
                 volumeLevel = { viewModel.uiState.value.volume },
-                brightnessLevel = { brightnessFraction },
+                brightnessLevel = { brightnessFraction ?: 0.5f },
                 doubleTapSeekMs = uiState.seekDurationMs,
                 onTap = { controlsVisible = !controlsVisible },
                 onLongPressSpeedStart = viewModel::beginSpeedBoost,
@@ -371,7 +396,7 @@ fun PlayerScreen(
                 GestureCoachOverlay(
                     onDismiss = {
                         viewModel.markGestureCoachSeen()
-                        showGestureCoach = false
+                        coachDismissed = true
                     },
                     modifier = Modifier.align(Alignment.Center),
                 )
@@ -453,29 +478,43 @@ internal tailrec fun Context.findActivity(): Activity? = when (this) {
 }
 
 // What the screen is currently showing, as a 0..1 fraction, so a brightness gesture starts from
-// there instead of from a guess.
-private fun Activity.currentScreenBrightness(): Float {
+// there instead of from a guess. Null when it cannot be established.
+//
+// Touches a ContentProvider, so it must not run during composition — see how PlayerScreen calls it.
+private fun Activity.currentScreenBrightness(): Float? {
     // An override this window has already set — the user used the gesture earlier in this playback.
     val override = window.attributes.screenBrightness
     if (override >= 0f) return override.coerceIn(MIN_BRIGHTNESS, 1f)
-    // Otherwise the window is following the system setting, which is what the user is looking at.
-    // Settings.System reports 0..255. Not universally true — a few devices use a different maximum,
-    // and with auto-brightness on this is the manual value rather than the adapted one — but it is
-    // far closer than a constant, and the very next swipe corrects it anyway.
+    // Otherwise the window follows the system, and SCREEN_BRIGHTNESS is the manual slider value.
+    // With adaptive brightness on that is not what is actually on screen, so it is refused rather
+    // than used: a wrong baseline is what the fabricated 0.5f already was, and half the point of
+    // reading anything here is to stop the first swipe jumping. Callers keep the system's own
+    // brightness until the user establishes a baseline by gesturing.
+    val adaptive = runCatching {
+        android.provider.Settings.System.getInt(
+            contentResolver,
+            android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE,
+        ) == android.provider.Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC
+    }.getOrDefault(false)
+    if (adaptive) return null
+    // Settings.System reports 0..255. Not universally true — a few devices use a different maximum
+    // — but it is far closer than a constant, and the next swipe corrects it.
     return runCatching {
         val value = android.provider.Settings.System.getInt(
             contentResolver,
             android.provider.Settings.System.SCREEN_BRIGHTNESS,
         )
         (value / 255f).coerceIn(MIN_BRIGHTNESS, 1f)
-    }.getOrDefault(0.5f)
+    }.getOrNull()
 }
 
+// The window's own floor. Shared by everything on the brightness path so the bounds cannot drift
+// apart: the gesture, the setter and the initial read all clamp to the same value.
 private const val MIN_BRIGHTNESS = 0.01f
 
 private fun Activity.setScreenBrightness(fraction: Float) {
     val params = window.attributes
-    params.screenBrightness = fraction.coerceIn(0.01f, 1f)
+    params.screenBrightness = fraction.coerceIn(MIN_BRIGHTNESS, 1f)
     window.attributes = params
 }
 

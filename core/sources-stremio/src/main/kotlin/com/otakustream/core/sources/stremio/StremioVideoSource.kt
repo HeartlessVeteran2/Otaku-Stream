@@ -10,7 +10,6 @@ import com.otakustream.core.sources.api.SourceFilter
 import com.otakustream.core.sources.api.SubtitleTrack
 import com.otakustream.core.sources.api.Video
 import com.otakustream.core.sources.api.VideoSource
-import com.otakustream.core.torrent.TorrentUri
 import com.otakustream.core.sources.stremio.model.StremioCatalog
 import com.otakustream.core.sources.stremio.model.StremioMeta
 import com.otakustream.core.sources.stremio.model.StremioStream
@@ -18,17 +17,20 @@ import com.otakustream.core.sources.stremio.model.parseCatalogResponse
 import com.otakustream.core.sources.stremio.model.parseMetaResponse
 import com.otakustream.core.sources.stremio.model.parseStreamResponse
 import com.otakustream.core.sources.stremio.model.parseSubtitlesResponse
+import com.otakustream.core.torrent.TorrentUri
+import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.net.URLEncoder
-import java.util.concurrent.TimeUnit
 
 // One instance per (addon, catalog) pair — Stremio addons can declare multiple catalogs, and
 // VideoSource models a single browsable catalog, so installing an addon registers one
@@ -58,32 +60,66 @@ class StremioVideoSource(
     // instead of starting another.
     //
     // Bounded and access-ordered, matching AniListClient's detail cache. A StremioVideoSource lives
-    // for the whole process, so an unbounded map would hold every title the user ever opened — and
-    // evicting is also what stops a long session from serving an episode list that a currently
-    // airing show has since added to.
-    private val metaCache = object : LinkedHashMap<String, Deferred<StremioMeta>>(META_CACHE_MAX, 0.75f, true) {
-        override fun removeEldestEntry(eldest: Map.Entry<String, Deferred<StremioMeta>>): Boolean =
+    // for the whole process, so an unbounded map would hold every title the user ever opened.
+    //
+    // Evicted entries are dropped, not cancelled. Cancelling would be free work saved in the common
+    // case and a broken screen in the rare one — a caller can still be awaiting the entry being
+    // evicted — and an in-flight request is bounded by REQUEST_TIMEOUT_MS regardless.
+    private val metaCache = object : LinkedHashMap<String, CachedMeta>(META_CACHE_MAX, 0.75f, true) {
+        override fun removeEldestEntry(eldest: Map.Entry<String, CachedMeta>): Boolean =
             size > META_CACHE_MAX
     }
+
+    // Size alone is not enough to keep this fresh. Access ordering means a title the user keeps
+    // opening is the *last* thing evicted, so the one show they are actively following — the one
+    // most likely to have gained an episode — is exactly the one that would keep serving a stale
+    // list. A timestamp bounds that regardless of how often it is read.
+    private class CachedMeta(val job: Deferred<StremioMeta>, val startedAtMs: Long)
 
     // Guards metaCache: an access-ordered LinkedHashMap reorders itself on a *read*, so even
     // lookups mutate it and none of it is thread-safe.
     private val metaCacheLock = Any()
 
-    private suspend fun metaFor(type: String, id: String): StremioMeta = coroutineScope {
+    // The shared jobs belong to the source, not to whichever caller happened to create one.
+    //
+    // Built from the calling coroutine's scope instead, a cached job is a child of that caller — so
+    // the user backing out of a details screen cancels the request the *next* caller was meant to
+    // join, and the cache becomes a way to fail rather than a way to share. SupervisorJob so one
+    // add-on's failed meta fetch cannot take the others down with it.
+    private val metaScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private suspend fun metaFor(type: String, id: String): StremioMeta {
         val key = "$type|$id"
-        val deferred = synchronized(metaCacheLock) {
-            metaCache.getOrPut(key) { async { parseMetaResponse(get("$baseUrl/meta/$type/$id.json")) } }
+        val now = System.currentTimeMillis()
+        val entry = synchronized(metaCacheLock) {
+            val existing = metaCache[key]
+            // Age is measured from when the request *started*, not when it finished, so a slow
+            // response cannot arrive already most of the way through its own lifetime.
+            if (existing != null && now - existing.startedAtMs < META_CACHE_TTL_MS) {
+                existing
+            } else {
+                newMetaEntry(key, type, id, now).also { metaCache[key] = it }
+            }
         }
-        try {
-            deferred.await()
-        } catch (t: Throwable) {
-            // A failed or cancelled job must not stay cached, or one dropped connection would make
-            // the title permanently unopenable for the rest of the session. Removed by identity, so
-            // this cannot evict a fresh attempt someone else has already installed.
-            synchronized(metaCacheLock) { if (metaCache[key] === deferred) metaCache.remove(key) }
-            throw t
+        // No try/catch around this. A throw here can mean the shared job failed *or* that this
+        // particular awaiter was cancelled because the user left — and evicting on the second would
+        // throw away a request that is still running perfectly well for everyone else. Eviction is
+        // the job's own business, below.
+        return entry.job.await()
+    }
+
+    // Caller must hold `metaCacheLock`.
+    private fun newMetaEntry(key: String, type: String, id: String, startedAtMs: Long): CachedMeta {
+        val job = metaScope.async { parseMetaResponse(get("$baseUrl/meta/$type/$id.json")) }
+        val entry = CachedMeta(job, startedAtMs)
+        job.invokeOnCompletion { cause ->
+            // Only a job that actually failed is evicted, and only if it is still the installed one.
+            // A cached failure would otherwise make the title unopenable for the rest of the session.
+            if (cause != null) {
+                synchronized(metaCacheLock) { if (metaCache[key] === entry) metaCache.remove(key) }
+            }
         }
+        return entry
     }
 
     override suspend fun getPopular(page: Int): CatalogPage = fetchCatalog(pagingExtra(page))
@@ -319,5 +355,11 @@ class StremioVideoSource(
         // the two calls one details screen makes, and there is one of these caches per registered
         // catalog, not one for the app.
         const val META_CACHE_MAX = 20
+
+        // How long a cached /meta response stays usable. Long enough to cover the pair of calls one
+        // details screen makes and a user flicking back and forth between titles; short enough that
+        // a show which aired an episode while the app sat in the background is picked up on the next
+        // open rather than at the next cold start.
+        const val META_CACHE_TTL_MS = 5 * 60 * 1000L
     }
 }

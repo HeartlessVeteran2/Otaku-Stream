@@ -47,7 +47,7 @@ fun MangayomiExtensionsScreen(
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
             // The header is one item rather than several: it is a fixed run of content always
             // composed together, so splitting it would buy no laziness.
-            item(key = "header") {
+            item {
                 Column {
                     Text(
                         text = "Install AnymeX/Mangayomi anime extensions from a repository. Paste a repo's " +

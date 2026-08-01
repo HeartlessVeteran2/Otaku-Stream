@@ -37,22 +37,31 @@ class PlayerViewModel @Inject constructor(
     val subtitleStyle: StateFlow<SubtitleStyle> = _subtitleStyle.asStateFlow()
     private var saveStyleJob: Job? = null
 
-    // Same reasoning, and it has to be readable synchronously by the composable that decides whether
-    // to show the gesture coach — so it is read once, off-thread, rather than on every access.
-    private var hasSeenGestureCoachCached = true
+    // Whether the user has already edited the style in this session. The load below must not
+    // overwrite an edit: opening the subtitle sheet and dragging a slider immediately can easily
+    // beat a slow disk read, and the saved value landing afterwards would visibly snap the text
+    // back to what it was.
+    private var styleEdited = false
+
+    // Null while unknown, so the overlay can tell "not loaded yet" from "genuinely not seen".
+    // A StateFlow rather than a plain field: the screen reads this into remembered state, so a value
+    // that arrives later has to be observable or a first-time user would simply never see the coach.
+    private val _hasSeenGestureCoach = MutableStateFlow<Boolean?>(null)
+    val hasSeenGestureCoach: StateFlow<Boolean?> = _hasSeenGestureCoach.asStateFlow()
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
             val style = subtitleStylePrefs.load()
             val seenCoach = onboardingPrefs.hasSeenGestureCoach
-            _subtitleStyle.value = style
-            hasSeenGestureCoachCached = seenCoach
+            if (!styleEdited) _subtitleStyle.value = style
+            _hasSeenGestureCoach.value = seenCoach
         }
     }
 
     fun setSubtitleStyle(style: SubtitleStyle) {
         // Slider drags emit many updates: keep the live preview/apply instant but debounce the
         // disk write so we don't flood QueuedWork with SharedPreferences commits.
+        styleEdited = true
         _subtitleStyle.value = style
         saveStyleJob?.cancel()
         saveStyleJob = viewModelScope.launch {
@@ -70,14 +79,14 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    // Defaults to true — "already seen" — until the real value is read. Erring that way on purpose:
-    // if the read has not landed yet, not showing the coach is a missing hint, whereas showing it is
-    // an overlay on top of a video the user is trying to watch, every single time.
-    val hasSeenGestureCoach: Boolean get() = hasSeenGestureCoachCached
-
     fun markGestureCoachSeen() {
-        hasSeenGestureCoachCached = true
-        viewModelScope.launch(Dispatchers.IO) { onboardingPrefs.hasSeenGestureCoach = true }
+        _hasSeenGestureCoach.value = true
+        // Synchronous, deliberately. The setter is backed by SharedPreferences.apply(), which
+        // already returns immediately and flushes on its own thread — so putting it on
+        // viewModelScope bought nothing and added a way to lose it: dismissing the coach and
+        // leaving the player straight away cancels the scope before the write runs, and the coach
+        // comes back next time.
+        onboardingPrefs.hasSeenGestureCoach = true
     }
 
     fun play(url: String, fromSource: Boolean = false) = controller.play(url, fromSource = fromSource)

@@ -133,7 +133,7 @@ fun MediaDetailsScreen(
             // The header is one item rather than a dozen. It is a fixed run of content that is
             // always composed together, so splitting it would buy no laziness and would make the
             // conditional sections awkward to key.
-            item(key = "header") {
+            item {
                 Column {
                     Box(modifier = Modifier.fillMaxWidth().height(280.dp).clip(MaterialTheme.shapes.large)) {
                         CoverImage(

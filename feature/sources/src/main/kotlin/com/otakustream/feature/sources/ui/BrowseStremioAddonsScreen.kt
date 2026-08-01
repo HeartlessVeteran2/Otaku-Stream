@@ -57,7 +57,7 @@ fun BrowseStremioAddonsScreen(
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
             // The header is one item rather than several: it is a fixed run of content always
             // composed together, so splitting it would buy no laziness.
-            item(key = "header") {
+            item {
                 Column {
                     Text(
                         text = "Browse official and community add-ons and tap Install to add them to your catalog.",
