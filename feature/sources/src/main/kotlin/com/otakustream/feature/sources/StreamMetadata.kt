@@ -54,7 +54,12 @@ private val SEEDERS_EMOJI_REGEX = Regex("""👤\s*(\d+)""")
 private val SEEDERS_WORD_REGEX = Regex("""(?:seeds?|seeders?)\s*[:=]?\s*(\d+)|(\d+)\s*(?:seeds?|seeders?)""", RegexOption.IGNORE_CASE)
 
 // Torrentio writes "⚙️ Nyaa"; fansub releases lead with "[SubsPlease]".
-private val GEAR_GROUP_REGEX = Regex("""⚙️?\s*([^\n|]+)""")
+//
+// The capture stops at the next field marker, not just at a newline or a pipe. Torrentio's fields
+// are emoji-delimited on one line and the indexer is not always last — "⚙️ Nyaa 🌐 English" is an
+// ordinary shape — so running to end-of-line put "Nyaa 🌐 English" in the picker as a release group.
+private const val FIELD_MARKERS = "👤💾⚙🌐🎬📺🎥🔗📅⭐"
+private val GEAR_GROUP_REGEX = Regex("""⚙️?\s*([^\n|$FIELD_MARKERS]+)""")
 private val BRACKET_GROUP_REGEX = Regex("""^\s*\[([^\]]{1,24})\]""")
 
 private const val KIB = 1024.0

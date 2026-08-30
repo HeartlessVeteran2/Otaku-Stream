@@ -80,6 +80,17 @@ class StreamMetadataTest {
         assertEquals(1, parseStreamMetadata(null, "👤 1 💾 300 MB").seeders)
     }
 
+    // Torrentio's fields are emoji-delimited on one line, and the indexer is not always the last of
+    // them. Running the capture to end-of-line put the language in the picker as part of the
+    // release group.
+    @Test
+    fun `stops the release group at the next field marker`() {
+        assertEquals("Nyaa", parseStreamMetadata(null, "👤 243 💾 1.4 GB ⚙️ Nyaa 🌐 English").releaseGroup)
+        assertEquals("AnimeTosho", parseStreamMetadata(null, "⚙️ AnimeTosho 🌐 Japanese/English").releaseGroup)
+        // Last field on the line still reads to the end.
+        assertEquals("Nyaa", parseStreamMetadata(null, "👤 243 💾 1.4 GB ⚙️ Nyaa").releaseGroup)
+    }
+
     // A leading "[SubsPlease]" is the release group by convention; a bracket further in is a tag.
     @Test
     fun `takes a release group from a leading bracket only`() {
