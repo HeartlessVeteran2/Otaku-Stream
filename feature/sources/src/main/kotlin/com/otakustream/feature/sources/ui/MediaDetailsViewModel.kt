@@ -508,7 +508,11 @@ class MediaDetailsViewModel @Inject constructor(
             }
         } catch (error: CancellationException) {
             throw error
-        } catch (error: Throwable) {
+        } catch (error: Exception) {
+            // Exception, not Throwable. An OutOfMemoryError or a LinkageError is not a source
+            // failure, and labelling one "AnimeKai — failed for an unknown reason" and carrying on
+            // to the next source would hide a broken process behind a plausible message — while the
+            // other gathers, running in the same process, go on to hit the same wall.
             if (error is NoSuchEpisodeException) {
                 FailureReason.NoSuchEpisode(error.episodeNumber)
             } else {
@@ -987,8 +991,15 @@ private suspend fun resolveAutoPlayVideo(
     mediaTitle: String,
     next: Episode,
 ): Video? {
-    runCatchingCancellable { streamOptionsFrom(primary, next) }
-        .getOrElse { emptyList() }
+    // Bounded, like the peer fan-out below it. A source that accepts the request and then says
+    // nothing would otherwise stall auto-play forever — and forever, here, is between two episodes
+    // with the credits over and nothing on screen. Worse, it would do so *instead of* reaching the
+    // fallback, which is the one case the fallback exists for: the primary source failing to
+    // produce a stream. Bounding it costs one budget in the pathological case and nothing at all in
+    // every other.
+    withTimeoutOrNull(STREAM_FETCH_TIMEOUT_MS) {
+        runCatchingCancellable { streamOptionsFrom(primary, next) }.getOrElse { emptyList() }
+    }.orEmpty()
         .sortedBestFirst()
         .firstOrNull()
         ?.let { return it.video }
