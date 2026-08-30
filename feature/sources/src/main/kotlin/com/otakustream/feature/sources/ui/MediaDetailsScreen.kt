@@ -214,7 +214,14 @@ fun MediaDetailsScreen(
                     AniListListControls(
                         status = aniListEntry.status,
                         progress = aniListEntry.progress,
-                        episodeCount = uiState.episodes.size.takeIf { it > 0 },
+                        // Counted against whatever the resolved link actually covers. AniList models
+                        // each season as its own media entry, so a season link's progress is
+                        // season-relative and the series total would render "3 / 87" for episode 3
+                        // of a 12-episode season. The whole-series fallback is the opposite case and
+                        // genuinely does want the total. With no season data the two are the same
+                        // list, so this changes nothing for single-season titles.
+                        episodeCount = (if (isFallback) uiState.episodes.size else visibleEpisodes.size)
+                            .takeIf { it > 0 },
                         score = aniListEntry.score,
                         isSaving = aniListEntry.isSaving,
                         saveError = aniListEntry.saveError,
