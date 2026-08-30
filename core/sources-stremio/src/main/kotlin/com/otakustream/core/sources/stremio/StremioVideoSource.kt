@@ -260,11 +260,13 @@ class StremioVideoSource(
             quality = name ?: "default",
             isM3U8 = url.contains(".m3u8", ignoreCase = true),
             subtitleTracks = subtitleTracks,
+            description = description,
         )
         !infoHash.isNullOrBlank() && !serverBaseUrl.isNullOrBlank() -> Video(
             url = "${serverBaseUrl.trimEnd('/')}/$infoHash/${fileIdx ?: 0}",
             quality = name ?: "torrent",
             subtitleTracks = subtitleTracks,
+            description = description,
             // Carried even on the streaming-server path: harmless there (the server does its own
             // peer discovery), and it keeps the field populated from one place rather than only on
             // the on-device path added later.
@@ -279,6 +281,7 @@ class StremioVideoSource(
                     url = torrentUrl,
                     quality = name ?: "torrent",
                     subtitleTracks = subtitleTracks,
+                    description = description,
                     trackers = trackers,
                 )
             }
