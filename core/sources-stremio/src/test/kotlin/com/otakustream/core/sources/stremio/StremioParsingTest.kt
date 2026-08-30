@@ -34,6 +34,37 @@ class StremioParsingTest {
         )
     }
 
+    // Torrentio — the add-on that matters most for anime — writes its release line into the
+    // protocol's older `title` field rather than `description`. Reading only `description` dropped
+    // the size, seeder count and indexer for every stream it returned, which is everything the
+    // picker uses to tell two 1080p entries apart.
+    @Test
+    fun `reads a release line from title when description is absent`() {
+        val releaseLine = "Show - 12.mkv\n👤 243 💾 1.4 GB ⚙️ Nyaa"
+        val json = """
+            {"streams":[{
+              "name":"Torrentio\n1080p",
+              "infoHash":"8c9c2f1e4a5b6d7e8f9a0b1c2d3e4f5a6b7c8d9e",
+              "title":"Show - 12.mkv\n👤 243 💾 1.4 GB ⚙️ Nyaa"
+            }]}
+        """.trimIndent()
+        assertEquals(releaseLine, parseStreamResponse(json).streams.single().description)
+    }
+
+    // `description` replaced `title`, so an add-on that sets both is setting `title` for old
+    // clients and means the newer field.
+    @Test
+    fun `description wins over title when both are present`() {
+        val json = """{"streams":[{"url":"https://example.test/a.mp4","title":"old","description":"new"}]}"""
+        assertEquals("new", parseStreamResponse(json).streams.single().description)
+    }
+
+    @Test
+    fun `a stream with neither has no description`() {
+        val json = """{"streams":[{"url":"https://example.test/a.mp4"}]}"""
+        assertNull(parseStreamResponse(json).streams.single().description)
+    }
+
     @Test
     fun `a stream without sources has no trackers`() {
         val json = """{"streams":[{"infoHash":"8c9c2f1e4a5b6d7e8f9a0b1c2d3e4f5a6b7c8d9e"}]}"""

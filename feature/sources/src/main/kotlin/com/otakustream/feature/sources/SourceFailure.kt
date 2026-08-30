@@ -35,6 +35,15 @@ sealed interface FailureReason {
     // certificate rather than anything the user can retry away.
     data object Tls : FailureReason
 
+    // The source answered fine and simply does not list this episode.
+    //
+    // Not a failure in any technical sense, and carried here anyway, because the question the user
+    // is asking of this list is "why did nothing come from X" — and a source that is installed,
+    // linked, and silently contributed nothing is indistinguishable from one that was never asked.
+    // Only reachable through pooled stream resolution, where several sources are queried for one
+    // episode and their numbering does not always agree.
+    data class NoSuchEpisode(val episodeNumber: Float) : FailureReason
+
     // Anything else: a parse failure, a JS extension throwing, a malformed response. The message
     // is the only thing that distinguishes these, so it is carried verbatim.
     data class Unknown(val message: String?) : FailureReason
@@ -73,8 +82,14 @@ fun FailureReason.describe(): String = when (this) {
         if (afterMs > 0) "timed out after ${afterMs / 1000}s" else "timed out"
     FailureReason.Offline -> "could not be reached — check your connection"
     FailureReason.Tls -> "failed a secure connection check"
+    is FailureReason.NoSuchEpisode -> "has no episode ${formatEpisodeNumber(episodeNumber)}"
     is FailureReason.Unknown -> message ?: "failed for an unknown reason"
 }
+
+// Episode numbers are Float so that specials can be .5, but almost all of them are whole — and
+// "has no episode 12.0" reads like a bug report rather than a sentence.
+private fun formatEpisodeNumber(value: Float): String =
+    if (value == value.toInt().toFloat()) value.toInt().toString() else value.toString()
 
 // "AnimeKai — timed out after 15s"
 fun SourceFailure.describe(): String = "$sourceName — ${reason.describe()}"
@@ -85,6 +100,18 @@ fun List<SourceFailure>.headline(): String = when (size) {
     0 -> ""
     1 -> "${first().sourceName} couldn't load"
     else -> "$size sources couldn't load"
+}
+
+// The named detail under a headline: up to `limit` sources with their reasons, then a count.
+//
+// Capped because the list is read at a glance and an eight-source pool can have eight things to say
+// about one episode. The first few are the ones the user recognises; past that, the count is the
+// only part still carrying information.
+fun List<SourceFailure>.detail(limit: Int = 3): String {
+    if (isEmpty()) return ""
+    val named = take(limit).joinToString("; ") { it.describe() }
+    val remaining = size - minOf(size, limit)
+    return if (remaining == 0) named else "$named; and $remaining more"
 }
 
 // True when every failure shares a cause that is about the device rather than the sources — worth

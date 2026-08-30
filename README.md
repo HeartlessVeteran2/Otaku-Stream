@@ -89,6 +89,23 @@ Everything installable lives under one roof: **Settings → Sources**.
 - **Content-forward home** — the Play tab opens to Continue Watching plus discovery rails, and
   Browse searches every installed source in parallel; one failing source degrades instead of
   blanking the screen.
+- **One pooled stream list** — pressing play asks *every* source linked to the same AniList entry,
+  not just the one whose page is open, and merges the answers into a single picker labelled by
+  provider, resolution, size and seeders, sorted best first. Sources are queried concurrently and
+  the list fills in as they answer, so a slow torrent indexer never holds up a fast add-on. A source
+  that fails, times out, or simply doesn't have the episode says so under the list instead of
+  silently contributing nothing.
+
+  The join is the **AniList link**: linking a title records which source and url it came from, so
+  linking the same show in two sources is what tells the app they are the same show. Titles are not
+  matched by name — sources romanise differently and disagree about where a season starts, and
+  guessing there pools the wrong show. Nothing is linked, or linked from only one source? Then the
+  behaviour is exactly what it was: that source alone.
+
+  Auto-play works the same way with one deliberate difference — the source already playing is asked
+  first and its best stream used as soon as it answers, and the other sources are a fallback for
+  when it has nothing. There is no one at the screen to wait for a fan-out between two episodes,
+  and this is the one place the app picks a stream on your behalf.
 
 ### 📚 Library & tracking
 - **Watchlist with status buckets** — Watching / Plan to watch / Completed, set from a title's

@@ -36,6 +36,15 @@ data class Video(
     val headers: Map<String, String> = emptyMap(),
     val subtitleTracks: List<SubtitleTrack> = emptyList(),
     val isM3U8: Boolean = false,
+    // The source's own free-form second line about this stream, when it has one: Stremio add-ons
+    // put the release filename, size, seeder count and indexer here. Carried verbatim rather than
+    // parsed at the source, because what a given add-on writes into it is convention, not protocol
+    // — the parsing belongs somewhere it can be changed and tested without touching every source.
+    //
+    // Discarded entirely before pooling existed, which is why the stream picker could only ever
+    // show a quality string: everything that distinguishes one 1080p release from another was in
+    // here and thrown away.
+    val description: String? = null,
     // Tracker announce URLs, for a `torrent://` url. Carried alongside the url rather than inside it
     // on purpose: the tracker list varies between responses for the same torrent, so folding it into
     // the url would make the url unstable — and the url is what resume position, skip markers, and
