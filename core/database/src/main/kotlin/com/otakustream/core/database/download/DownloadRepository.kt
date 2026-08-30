@@ -8,7 +8,7 @@ import javax.inject.Singleton
 interface DownloadRepository {
     fun observeAll(): Flow<List<DownloadEntry>>
     fun observeForMedia(mediaUrl: String): Flow<List<DownloadEntry>>
-    suspend fun entryForEpisode(episodeUrl: String): DownloadEntry?
+    suspend fun entriesForEpisode(episodeUrl: String): List<DownloadEntry>
     suspend fun remember(entry: DownloadEntry)
     suspend fun forget(videoUrl: String)
 }
@@ -19,7 +19,8 @@ class DownloadRepositoryImpl @Inject constructor(
 ) : DownloadRepository {
     override fun observeAll(): Flow<List<DownloadEntry>> = dao.observeAll()
     override fun observeForMedia(mediaUrl: String): Flow<List<DownloadEntry>> = dao.observeForMedia(mediaUrl)
-    override suspend fun entryForEpisode(episodeUrl: String): DownloadEntry? = dao.entryForEpisode(episodeUrl)
+    override suspend fun entriesForEpisode(episodeUrl: String): List<DownloadEntry> =
+        dao.entriesForEpisode(episodeUrl)
     override suspend fun remember(entry: DownloadEntry) = dao.upsert(entry)
     override suspend fun forget(videoUrl: String) = dao.delete(videoUrl)
 }

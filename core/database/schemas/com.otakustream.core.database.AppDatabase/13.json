@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 13,
-    "identityHash": "a2ee75cf38ac92b07f94445379186a19",
+    "identityHash": "bc5f3fa9174178564671ea820abd2a3f",
     "entities": [
       {
         "tableName": "playback_progress",
@@ -539,7 +539,7 @@
       },
       {
         "tableName": "downloads",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`videoUrl` TEXT NOT NULL, `mediaUrl` TEXT NOT NULL, `episodeUrl` TEXT NOT NULL, `sourceId` INTEGER NOT NULL, `mediaTitle` TEXT NOT NULL, `episodeName` TEXT, `episodeNumber` REAL, `coverUrl` TEXT, `requestedAtEpochMs` INTEGER NOT NULL, PRIMARY KEY(`videoUrl`))",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`videoUrl` TEXT NOT NULL, `mediaUrl` TEXT NOT NULL, `episodeUrl` TEXT NOT NULL, `sourceId` INTEGER NOT NULL, `mediaTitle` TEXT NOT NULL, `episodeName` TEXT, `episodeNumber` REAL, `coverUrl` TEXT, `requestedAtEpochMs` INTEGER NOT NULL, `headersJson` TEXT, `isM3U8` INTEGER NOT NULL, PRIMARY KEY(`videoUrl`))",
         "fields": [
           {
             "fieldPath": "videoUrl",
@@ -591,6 +591,17 @@
             "columnName": "requestedAtEpochMs",
             "affinity": "INTEGER",
             "notNull": true
+          },
+          {
+            "fieldPath": "headersJson",
+            "columnName": "headersJson",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "isM3U8",
+            "columnName": "isM3U8",
+            "affinity": "INTEGER",
+            "notNull": true
           }
         ],
         "primaryKey": {
@@ -632,7 +643,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'a2ee75cf38ac92b07f94445379186a19')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'bc5f3fa9174178564671ea820abd2a3f')"
     ]
   }
 }

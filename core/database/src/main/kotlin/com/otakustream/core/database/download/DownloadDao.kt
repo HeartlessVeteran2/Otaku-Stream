@@ -17,8 +17,18 @@ interface DownloadDao {
     @Query("SELECT * FROM downloads WHERE mediaUrl = :mediaUrl")
     fun observeForMedia(mediaUrl: String): Flow<List<DownloadEntry>>
 
-    @Query("SELECT * FROM downloads WHERE episodeUrl = :episodeUrl LIMIT 1")
-    suspend fun entryForEpisode(episodeUrl: String): DownloadEntry?
+    // A list, not LIMIT 1. episodeUrl is not unique and cannot be: many sources hand back a signed
+    // or rotating stream url, so downloading the same episode twice legitimately produces two rows
+    // with different videoUrls. Taking the first would cancel one and leave the other running, with
+    // the episode still showing as downloaded.
+    @Query("SELECT * FROM downloads WHERE episodeUrl = :episodeUrl")
+    suspend fun entriesForEpisode(episodeUrl: String): List<DownloadEntry>
+
+    // Blocking on purpose. This is read by the downloader's data source factory, which Media3 calls
+    // on its own executor — there is no coroutine to suspend in, and Room refuses main-thread
+    // queries anyway, so a call from the wrong thread fails loudly rather than silently.
+    @Query("SELECT headersJson FROM downloads WHERE videoUrl = :videoUrl LIMIT 1")
+    fun headersJsonForBlocking(videoUrl: String): String?
 
     // REPLACE rather than IGNORE: re-downloading an episode after removing it should pick up the
     // current title and cover, not silently keep whatever was stored the first time.

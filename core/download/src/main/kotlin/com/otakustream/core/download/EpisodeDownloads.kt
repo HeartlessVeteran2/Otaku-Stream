@@ -1,6 +1,7 @@
 package com.otakustream.core.download
 
 import android.content.Context
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.offline.Download
 import androidx.media3.exoplayer.offline.DownloadManager
@@ -41,12 +42,23 @@ data class DownloadProgress(
 class EpisodeDownloads @Inject constructor(
     @ApplicationContext private val context: Context,
     private val downloadManager: DownloadManager,
+    private val downloadHeaders: DownloadHeaders,
 ) {
 
-    // The url doubles as the download id, so the same episode cannot be queued twice and every
+    // The url doubles as the download id, so the same stream cannot be queued twice and every
     // other part of the app can ask about a download using the identity it already holds.
-    fun start(url: String) {
-        val request = DownloadRequest.Builder(url, android.net.Uri.parse(url)).build()
+    //
+    // isM3U8 and headers are the two things the player is given per-video that a bare url does not
+    // carry, and both decide whether the download works at all — see DownloadEntry.
+    fun start(url: String, isM3U8: Boolean = false, headers: Map<String, String> = emptyMap()) {
+        // Registered before the request, so the first segment fetch already has them.
+        if (headers.isNotEmpty()) downloadHeaders.remember(url, headers)
+        val request = DownloadRequest.Builder(url, android.net.Uri.parse(url))
+            // Without this, an HLS url whose path has no .m3u8 extension is treated as a
+            // progressive file: Media3 downloads the playlist text, a few kilobytes, and reports
+            // success. The result is an episode marked "Saved" with nothing playable behind it.
+            .apply { if (isM3U8) setMimeType(MimeTypes.APPLICATION_M3U8) }
+            .build()
         DownloadService.sendAddDownload(
             context,
             EpisodeDownloadService::class.java,
@@ -56,6 +68,7 @@ class EpisodeDownloads @Inject constructor(
     }
 
     fun remove(url: String) {
+        downloadHeaders.forget(url)
         DownloadService.sendRemoveDownload(
             context,
             EpisodeDownloadService::class.java,

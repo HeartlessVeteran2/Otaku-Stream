@@ -11,9 +11,11 @@ import com.otakustream.core.database.library.LibraryRepository
 import com.otakustream.core.database.library.WatchHistoryEntry
 import com.otakustream.feature.tracking.TrackingManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -68,7 +70,12 @@ class LibraryViewModel @Inject constructor(
                 DownloadRow(entry, byUrl[entry.videoUrl] ?: finished[entry.videoUrl])
             },
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState())
+    }
+        // The combine body walks Media3's download index, which is a synchronous SQLite read, and it
+        // runs on every progress callback — several a second during a download. On the collector's
+        // default dispatcher that is a database read on the main thread, once per tick.
+        .flowOn(Dispatchers.IO)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState())
 
     fun removeDownload(row: DownloadRow) {
         viewModelScope.launch {

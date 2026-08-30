@@ -112,6 +112,8 @@ val MIGRATION_12_13 = object : Migration(12, 13) {
                 `episodeNumber` REAL,
                 `coverUrl` TEXT,
                 `requestedAtEpochMs` INTEGER NOT NULL,
+                `headersJson` TEXT,
+                `isM3U8` INTEGER NOT NULL,
                 PRIMARY KEY(`videoUrl`)
             )
             """.trimIndent(),

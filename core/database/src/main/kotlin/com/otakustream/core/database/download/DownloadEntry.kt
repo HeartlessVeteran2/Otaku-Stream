@@ -36,4 +36,17 @@ data class DownloadEntry(
     val episodeNumber: Float?,
     val coverUrl: String?,
     val requestedAtEpochMs: Long,
+    // The two things the player is handed per-video that the download used to drop on the floor.
+    //
+    // PlayerController builds a fresh data source factory for every playback precisely because
+    // headers are per-video — a Referer or an auth header the host requires. The downloader ran off
+    // one shared factory with none of them, so any source that needs them would 403, and the failure
+    // would look like the source being broken.
+    //
+    // isM3U8 matters for a different reason: plenty of extension-resolved HLS urls carry no .m3u8
+    // extension, and without the hint Media3 treats one as a progressive file. That does not error
+    // — it downloads the playlist *text*, a few kilobytes, and reports success. "Saved", with
+    // nothing playable behind it, is the worst shape this feature could fail in.
+    val headersJson: String?,
+    val isM3U8: Boolean = false,
 )

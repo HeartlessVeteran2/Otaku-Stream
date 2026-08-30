@@ -21,6 +21,7 @@ import com.otakustream.core.sources.api.SkipMark
 import com.otakustream.core.sources.api.Video
 import com.otakustream.core.database.download.DownloadEntry
 import com.otakustream.core.database.download.DownloadRepository
+import com.otakustream.core.download.DownloadHeaders
 import com.otakustream.core.download.EpisodeDownloads
 import com.otakustream.feature.sources.SourceRepository
 import com.otakustream.feature.tracking.AniListClient
@@ -286,9 +287,17 @@ class MediaDetailsViewModel @Inject constructor(
     fun downloadEpisode(sourceId: Long, episode: Episode) =
         resolveEpisode(sourceId, episode, StreamAction.DOWNLOAD)
 
+    // Every row for the episode, not the first one.
+    //
+    // Sources routinely hand back signed or rotating stream urls, so downloading an episode twice
+    // produces two rows with different videoUrls. Cancelling only one left the other downloading,
+    // with the episode still showing as saved and no way to reach the leftover.
     fun cancelDownload(episode: Episode) {
-        viewModelScope.launch {
-            val entry = downloadRepository.entryForEpisode(episode.url) ?: return@launch
+        viewModelScope.launch { clearDownloadsFor(episode.url) }
+    }
+
+    private suspend fun clearDownloadsFor(episodeUrl: String) {
+        downloadRepository.entriesForEpisode(episodeUrl).forEach { entry ->
             episodeDownloads.remove(entry.videoUrl)
             downloadRepository.forget(entry.videoUrl)
         }
@@ -362,6 +371,9 @@ class MediaDetailsViewModel @Inject constructor(
         val title = _uiState.value.details?.media?.title ?: return
         _uiState.value = _uiState.value.copy(resolvingEpisodeUrl = null)
         viewModelScope.launch {
+            // One download per episode. Re-downloading after the source rotated its stream url
+            // would otherwise leave the previous attempt on disk with nothing pointing at it.
+            clearDownloadsFor(episode.url)
             downloadRepository.remember(
                 DownloadEntry(
                     videoUrl = video.url,
@@ -373,9 +385,11 @@ class MediaDetailsViewModel @Inject constructor(
                     episodeNumber = episode.episodeNumber,
                     coverUrl = _uiState.value.details?.media?.coverUrl,
                     requestedAtEpochMs = System.currentTimeMillis(),
+                    headersJson = DownloadHeaders.encode(video.headers),
+                    isM3U8 = video.isM3U8,
                 ),
             )
-            episodeDownloads.start(video.url)
+            episodeDownloads.start(video.url, isM3U8 = video.isM3U8, headers = video.headers)
         }
     }
 

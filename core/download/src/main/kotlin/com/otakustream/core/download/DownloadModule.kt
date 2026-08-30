@@ -3,6 +3,7 @@ package com.otakustream.core.download
 import android.content.Context
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.exoplayer.offline.DefaultDownloadIndex
 import androidx.media3.exoplayer.offline.DownloadManager
@@ -26,6 +27,7 @@ object DownloadModule {
     fun provideDownloadManager(
         @ApplicationContext context: Context,
         store: DownloadStore,
+        headers: DownloadHeaders,
     ): DownloadManager {
         // The desktop User-Agent, for the same reason the image client carries it: the hosts these
         // streams come from answer the stock OkHttp/ExoPlayer agent with a 403. A download that
@@ -34,9 +36,17 @@ object DownloadModule {
             .setUserAgent(DOWNLOAD_USER_AGENT)
             .setAllowCrossProtocolRedirects(true)
 
+        // Headers are attached per request rather than baked into the factory. There is one
+        // factory for every download this app will ever make, and the headers differ per source —
+        // the shared factory was the reason a source needing a Referer would 403.
+        val withHeaders = ResolvingDataSource.Factory(httpDataSourceFactory) { dataSpec ->
+            val extra = headers.headersFor(dataSpec.uri.toString())
+            if (extra.isEmpty()) dataSpec else dataSpec.withRequestHeaders(extra)
+        }
+
         val cacheDataSourceFactory = CacheDataSource.Factory()
             .setCache(store.cache)
-            .setUpstreamDataSourceFactory(httpDataSourceFactory)
+            .setUpstreamDataSourceFactory(withHeaders)
 
         val downloaderFactory: DownloaderFactory =
             DefaultDownloaderFactory(cacheDataSourceFactory, Executors.newFixedThreadPool(DOWNLOAD_THREADS))
