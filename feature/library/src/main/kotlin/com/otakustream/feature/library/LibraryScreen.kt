@@ -7,6 +7,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -15,7 +16,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.History
@@ -23,8 +28,10 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Tab
@@ -57,6 +64,7 @@ import com.otakustream.core.database.library.LIBRARY_STATUS_COMPLETED
 import com.otakustream.core.database.library.LIBRARY_STATUS_PLANNED
 import com.otakustream.core.database.library.LIBRARY_STATUS_WATCHING
 import com.otakustream.core.database.library.WatchHistoryEntry
+import com.otakustream.core.download.DownloadProgress
 import com.otakustream.core.sources.api.PendingPlayback
 import com.otakustream.core.sources.api.Video
 import com.otakustream.core.ui.CoverImage
@@ -99,12 +107,14 @@ fun LibraryScreen(
         TabRow(selectedTabIndex = selectedTab) {
             Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Watchlist") })
             Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("History") })
-            Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("On device") })
+            Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("Downloads") })
+            Tab(selected = selectedTab == 3, onClick = { selectedTab = 3 }, text = { Text("On device") })
         }
 
         when (selectedTab) {
             0 -> WatchlistTab(uiState, viewModel, onEntryClick)
             1 -> HistoryTab(uiState, viewModel, onEntryClick)
+            2 -> DownloadsTab(uiState, viewModel, onPlayDirect)
             else -> OnDeviceTab(onPlayDirect)
         }
     }
@@ -392,6 +402,129 @@ private fun OnDeviceTab(
                     )
                 }
             }
+        }
+    }
+}
+
+
+// Saved episodes, and how far along the unfinished ones are.
+//
+// Tapping a finished row plays it by its stream url — the same url it was downloaded under, which
+// is what lets the player serve it from disk with no offline-specific path. A row that is still
+// downloading is not playable yet, so it offers pause/resume instead of pretending otherwise.
+@Composable
+private fun DownloadsTab(
+    uiState: LibraryUiState,
+    viewModel: LibraryViewModel,
+    onPlayDirect: (String) -> Unit,
+) {
+    if (uiState.downloads.isEmpty()) {
+        EmptyState(
+            icon = Icons.Filled.Download,
+            title = "No downloads",
+            message = "Tap the download icon beside an episode to save it for watching offline.",
+        )
+        return
+    }
+    LazyColumn(modifier = Modifier.fillMaxSize()) {
+        items(uiState.downloads, key = { it.entry.videoUrl }) { row ->
+            val progress = row.progress
+            val finished = progress?.isFinished == true
+            ListItem(
+                leadingContent = {
+                    CoverImage(
+                        url = row.entry.coverUrl,
+                        contentDescription = null,
+                        modifier = Modifier.size(width = 44.dp, height = 62.dp),
+                    )
+                },
+                headlineContent = { Text(row.entry.mediaTitle, maxLines = 1) },
+                supportingContent = {
+                    Column {
+                        Text(
+                            text = row.entry.episodeName ?: "Episode",
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                        )
+                        when {
+                            finished -> Text(
+                                text = "Saved",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            progress == null -> Text(
+                                // The metadata row is written before the download starts, so this
+                                // is what a start that never happened looks like. Saying so beats a
+                                // progress bar stuck at zero with no explanation.
+                                text = "Not started",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                            progress.state == DownloadProgress.State.FAILED -> Text(
+                                text = "Failed",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                            else -> {
+                                LinearProgressIndicator(
+                                    progress = { progress.percentDownloaded / 100f },
+                                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                                )
+                                Text(
+                                    text = when (progress.state) {
+                                        DownloadProgress.State.PAUSED -> "Paused"
+                                        DownloadProgress.State.QUEUED -> "Queued"
+                                        DownloadProgress.State.REMOVING -> "Removing"
+                                        else -> "${progress.percentDownloaded.toInt()}%"
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                },
+                trailingContent = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (row.isPending) {
+                            IconButton(
+                                onClick = {
+                                    if (progress?.state == DownloadProgress.State.PAUSED) {
+                                        viewModel.resumeDownload(row)
+                                    } else {
+                                        viewModel.pauseDownload(row)
+                                    }
+                                },
+                            ) {
+                                Icon(
+                                    imageVector = if (progress?.state == DownloadProgress.State.PAUSED) {
+                                        Icons.Filled.PlayArrow
+                                    } else {
+                                        Icons.Filled.Pause
+                                    },
+                                    contentDescription = if (progress?.state == DownloadProgress.State.PAUSED) {
+                                        "Resume download"
+                                    } else {
+                                        "Pause download"
+                                    },
+                                )
+                            }
+                        }
+                        IconButton(onClick = { viewModel.removeDownload(row) }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete download")
+                        }
+                    }
+                },
+                // Only a finished download is playable. Tapping an unfinished one would start a
+                // stream of the same url, which works but quietly uses the data the download was
+                // meant to save.
+                modifier = if (finished) {
+                    Modifier.clickable { onPlayDirect(row.entry.videoUrl) }
+                } else {
+                    Modifier
+                },
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
     }
 }

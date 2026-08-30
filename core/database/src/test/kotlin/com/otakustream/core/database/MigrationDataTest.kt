@@ -185,4 +185,61 @@ class MigrationDataTest {
             arrayOf<Any>(mediaUrl, trackerMediaId, trackerTitle, sourceId),
         )
     }
+
+    // 12 → 13 only adds a table, so the risk is not a dropped copy but a rebuild that takes
+    // everything else with it. This pins that the tables the user actually cares about are still
+    // there and still populated afterwards.
+    @Test
+    fun `12 to 13 adds downloads without disturbing existing data`() {
+        helper.createDatabase(dbName, 12).use { db ->
+            db.execSQL(
+                "INSERT INTO library_entries (mediaUrl, sourceId, title, coverUrl, addedAtEpochMs, status) " +
+                    "VALUES ('https://example.test/frieren', 7, 'Frieren', NULL, 1000, 'WATCHING')",
+            )
+            db.execSQL(
+                "INSERT INTO watch_history (mediaUrl, sourceId, mediaTitle, episodeUrl, episodeName, " +
+                    "episodeNumber, watchedAtEpochMs, coverUrl) VALUES " +
+                    "('https://example.test/frieren', 7, 'Frieren', " +
+                    "'https://example.test/ep1', 'Ep 1', 1.0, 2000, NULL)",
+            )
+        }
+
+        val db = helper.runMigrationsAndValidate(dbName, 13, true, MIGRATION_12_13)
+
+        // The new table exists and is empty, which is what a fresh feature should look like.
+        db.query("SELECT COUNT(*) FROM downloads").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(0, cursor.getInt(0))
+        }
+        // And nothing else was collateral.
+        db.query("SELECT title, status FROM library_entries").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("Frieren", cursor.getString(0))
+            assertEquals("WATCHING", cursor.getString(1))
+        }
+        db.query("SELECT episodeName FROM watch_history").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("Ep 1", cursor.getString(0))
+        }
+    }
+
+    // The index is not decoration: DownloadDao.observeAll orders the whole table by this column on
+    // every emission, and Room re-runs it on any write to the table. A migration that created the
+    // table but not the index would validate (Room checks indices too) — but only because
+    // validation is what catches it, so this asserts the name the entity declares.
+    @Test
+    fun `12 to 13 creates the index the downloads query orders by`() {
+        helper.createDatabase(dbName, 12).close()
+        val db = helper.runMigrationsAndValidate(dbName, 13, true, MIGRATION_12_13)
+
+        val indices = db.query("PRAGMA index_list(`downloads`)").use { cursor ->
+            generateSequence { if (cursor.moveToNext()) cursor else null }
+                .map { it.getString(it.getColumnIndexOrThrow("name")) }
+                .toList()
+        }
+        assertTrue(
+            "expected index_downloads_requestedAtEpochMs, got $indices",
+            "index_downloads_requestedAtEpochMs" in indices,
+        )
+    }
 }

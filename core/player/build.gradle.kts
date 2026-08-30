@@ -31,6 +31,7 @@ android {
 dependencies {
     implementation(project(":core:database"))
     implementation(project(":core:sources-api"))
+    implementation(project(":core:download"))
     implementation(project(":core:torrent"))
 
     implementation(libs.androidx.core.ktx)

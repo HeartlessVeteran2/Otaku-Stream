@@ -19,6 +19,10 @@ import com.otakustream.core.sources.api.PlaybackCompletion
 import com.otakustream.core.sources.api.PlaybackQueue
 import com.otakustream.core.sources.api.SkipMark
 import com.otakustream.core.sources.api.Video
+import com.otakustream.core.database.download.DownloadEntry
+import com.otakustream.core.database.download.DownloadRepository
+import com.otakustream.core.download.DownloadHeaders
+import com.otakustream.core.download.EpisodeDownloads
 import com.otakustream.feature.sources.SourceRepository
 import com.otakustream.feature.sources.describe
 import com.otakustream.feature.sources.toFailureReason
@@ -43,6 +47,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+enum class StreamAction { PLAY, DOWNLOAD }
+
 data class MediaDetailsUiState(
     val isLoading: Boolean = false,
     val details: MediaDetails? = null,
@@ -51,6 +57,10 @@ data class MediaDetailsUiState(
     val error: String? = null,
     val pendingVideoChoices: List<Video> = emptyList(),
     val pendingEpisode: Episode? = null,
+    // What the stream picker will do with the choice. The same sheet serves both, because picking a
+    // quality matters more for a download than for a stream — it is the one that occupies the
+    // device until the user deletes it.
+    val pendingAction: StreamAction = StreamAction.PLAY,
     // The episode whose stream is currently being resolved (getVideoList in flight) — drives the
     // per-row spinner so a tap gives immediate feedback instead of feeling dead for a few seconds.
     val resolvingEpisodeUrl: String? = null,
@@ -75,6 +85,8 @@ class MediaDetailsViewModel @Inject constructor(
     private val libraryRepository: LibraryRepository,
     private val trackingRepository: TrackingRepository,
     private val trackingManager: TrackingManager,
+    private val downloadRepository: DownloadRepository,
+    private val episodeDownloads: EpisodeDownloads,
     private val aniListClient: AniListClient,
     private val aniSkipClient: AniSkipClient,
 ) : ViewModel() {
@@ -105,6 +117,19 @@ class MediaDetailsViewModel @Inject constructor(
             if (url == null) flowOf(emptyList()) else libraryRepository.observeWatchedEpisodeUrls(url)
         }
         .map { it.toSet() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+
+    // Episodes with a download recorded, keyed by the episode's own url. Same shape and same
+    // reason as watchedEpisodeUrls above: a row has to render its state without resolving the
+    // stream, which would be a network round trip per row.
+    //
+    // Presence here means "the user asked for this", not "it finished" — the finished/failed
+    // distinction comes from Media3's index, which is the component that actually knows.
+    val downloadedEpisodeUrls: StateFlow<Set<String>> = currentMediaUrl
+        .flatMapLatest { url ->
+            if (url == null) flowOf(emptyList()) else downloadRepository.observeForMedia(url)
+        }
+        .map { entries -> entries.mapTo(mutableSetOf()) { it.episodeUrl } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
 
     // Which season the user is looking at. Hoisted out of the screen because it now decides more
@@ -258,12 +283,38 @@ class MediaDetailsViewModel @Inject constructor(
         }
     }
 
-    fun playEpisode(sourceId: Long, episode: Episode) {
+    fun playEpisode(sourceId: Long, episode: Episode) = resolveEpisode(sourceId, episode, StreamAction.PLAY)
+
+    // Same resolve as playing: a download needs the stream url, and only the source can produce it.
+    fun downloadEpisode(sourceId: Long, episode: Episode) =
+        resolveEpisode(sourceId, episode, StreamAction.DOWNLOAD)
+
+    // Every row for the episode, not the first one.
+    //
+    // Sources routinely hand back signed or rotating stream urls, so downloading an episode twice
+    // produces two rows with different videoUrls. Cancelling only one left the other downloading,
+    // with the episode still showing as saved and no way to reach the leftover.
+    fun cancelDownload(episode: Episode) {
+        viewModelScope.launch { clearDownloadsFor(episode.url) }
+    }
+
+    private suspend fun clearDownloadsFor(episodeUrl: String) {
+        downloadRepository.entriesForEpisode(episodeUrl).forEach { entry ->
+            episodeDownloads.remove(entry.videoUrl)
+            downloadRepository.forget(entry.videoUrl)
+        }
+    }
+
+    private fun resolveEpisode(sourceId: Long, episode: Episode, action: StreamAction) {
         val source = sourceRepository.getSource(sourceId) ?: return
         playJob?.cancel()
         // Immediate feedback: mark this episode as resolving so its row shows a spinner while the
         // (network) getVideoList runs, instead of looking like the tap did nothing.
-        _uiState.value = _uiState.value.copy(resolvingEpisodeUrl = episode.url, error = null)
+        _uiState.value = _uiState.value.copy(
+            resolvingEpisodeUrl = episode.url,
+            error = null,
+            pendingAction = action,
+        )
         playJob = viewModelScope.launch {
             runCatching { source.getVideoList(episode) }
                 .onSuccess { videos ->
@@ -276,7 +327,10 @@ class MediaDetailsViewModel @Inject constructor(
                                 error = "${source.name} has no playable stream for this episode.",
                                 resolvingEpisodeUrl = null,
                             )
-                        videos.size == 1 -> playVideo(sourceId, episode, videos.first())
+                        videos.size == 1 -> when (action) {
+                            StreamAction.PLAY -> playVideo(sourceId, episode, videos.first())
+                            StreamAction.DOWNLOAD -> enqueueDownload(sourceId, episode, videos.first())
+                        }
                         else -> _uiState.value = _uiState.value.copy(
                             pendingVideoChoices = videos,
                             pendingEpisode = episode,
@@ -300,14 +354,51 @@ class MediaDetailsViewModel @Inject constructor(
     // Called once the user picks a stream from the picker sheet (or immediately by playEpisode
     // when there's only one option, so there's nothing to choose).
     fun selectVideo(video: Video) {
-        val episode = _uiState.value.pendingEpisode ?: return
+        val state = _uiState.value
+        val episode = state.pendingEpisode ?: return
         val sourceId = currentSourceId
-        _uiState.value = _uiState.value.copy(pendingVideoChoices = emptyList(), pendingEpisode = null)
-        playVideo(sourceId, episode, video)
+        _uiState.value = state.copy(pendingVideoChoices = emptyList(), pendingEpisode = null)
+        when (state.pendingAction) {
+            StreamAction.PLAY -> playVideo(sourceId, episode, video)
+            StreamAction.DOWNLOAD -> enqueueDownload(sourceId, episode, video)
+        }
     }
 
     fun dismissVideoPicker() {
         _uiState.value = _uiState.value.copy(pendingVideoChoices = emptyList(), pendingEpisode = null)
+    }
+
+    // Records what the episode is called before handing the url to the downloader.
+    //
+    // Written first, and deliberately: Media3's index knows only a url, so if the app crashed
+    // between starting the download and storing the metadata, the Downloads list would show an
+    // entry it could not name. Writing first means the worst case is a named row for a download
+    // that never started, which the state join renders as failed — recoverable and legible.
+    private fun enqueueDownload(sourceId: Long, episode: Episode, video: Video) {
+        val mediaUrl = currentMediaUrl.value ?: return
+        val title = _uiState.value.details?.media?.title ?: return
+        _uiState.value = _uiState.value.copy(resolvingEpisodeUrl = null)
+        viewModelScope.launch {
+            // One download per episode. Re-downloading after the source rotated its stream url
+            // would otherwise leave the previous attempt on disk with nothing pointing at it.
+            clearDownloadsFor(episode.url)
+            downloadRepository.remember(
+                DownloadEntry(
+                    videoUrl = video.url,
+                    mediaUrl = mediaUrl,
+                    episodeUrl = episode.url,
+                    sourceId = sourceId,
+                    mediaTitle = title,
+                    episodeName = episode.name,
+                    episodeNumber = episode.episodeNumber,
+                    coverUrl = _uiState.value.details?.media?.coverUrl,
+                    requestedAtEpochMs = System.currentTimeMillis(),
+                    headersJson = DownloadHeaders.encode(video.headers),
+                    isM3U8 = video.isM3U8,
+                ),
+            )
+            episodeDownloads.start(video.url, isM3U8 = video.isM3U8, headers = video.headers)
+        }
     }
 
     private fun playVideo(sourceId: Long, episode: Episode, video: Video) {

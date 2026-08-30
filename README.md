@@ -39,6 +39,14 @@ player, one library, one watch history.
 - Broad format support: HLS, DASH, RTSP, progressive — plus `stremio://` deep links, `magnet:`
   links, and Android's "Open with" for local files.
 
+### 📥 Watch offline
+Save an episode with the download icon beside it and watch it with no connection. Downloads run in
+the background with a notification, one at a time, and can be paused, resumed or deleted from the
+Library's **Downloads** tab. A saved episode plays through the ordinary player — the same resume
+position, subtitle and skip behaviour as streaming it — because it is the same url either way.
+
+Nothing is ever evicted automatically: an episode you saved stays until you delete it.
+
 ### 🌐 Torrent streaming, on the device
 Torrent-backed streams play with **no streaming server to host**, via an embedded libtorrent engine.
 Pick a torrent stream and it plays; seek and the download re-aims at where you actually are.

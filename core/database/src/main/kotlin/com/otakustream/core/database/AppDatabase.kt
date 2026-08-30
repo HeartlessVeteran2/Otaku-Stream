@@ -2,6 +2,8 @@ package com.otakustream.core.database
 
 import androidx.room.Database
 import androidx.room.RoomDatabase
+import com.otakustream.core.database.download.DownloadDao
+import com.otakustream.core.database.download.DownloadEntry
 import com.otakustream.core.database.library.LibraryDao
 import com.otakustream.core.database.library.LibraryEntry
 import com.otakustream.core.database.library.WatchHistoryDao
@@ -35,8 +37,9 @@ import com.otakustream.core.database.tracking.TrackingDao
         StremioServerConfigEntity::class,
         StremioCatalogToggleEntity::class,
         MangayomiSourceEntity::class,
+        DownloadEntry::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -48,4 +51,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun trackingDao(): TrackingDao
     abstract fun stremioDao(): StremioDao
     abstract fun mangayomiSourceDao(): MangayomiSourceDao
+    abstract fun downloadDao(): DownloadDao
 }
