@@ -187,12 +187,30 @@ class StreamMetadataTest {
         assertNull(list.matchingEpisode(episode(3f, season = 2)))
     }
 
-    // One candidate and a season mismatch is not ambiguous — it is a source that numbers its one
-    // season differently, which is the ordinary case for a season-2-only page.
+    // A lone candidate naming a different season is refused, deliberately.
+    //
+    // It could be a source numbering its one season from 1 where the target numbers from the
+    // series — legitimate — or a source showing a genuinely different season, which is what a
+    // two-cour show split in two by one source and left whole by AniList produces. The two are
+    // indistinguishable here and only one is safe.
     @Test
-    fun `takes a lone candidate even when the season differs`() {
+    fun `refuses a lone candidate that names a different season`() {
         val list = listOf(episode(3f, season = 1))
-        assertEquals(1, list.matchingEpisode(episode(3f, season = 2))?.season)
+        assertNull(list.matchingEpisode(episode(3f, season = 2)))
+    }
+
+    // The target naming no season is the ordinary scripted-extension case: there is nothing for a
+    // candidate to contradict, so a unique match by number stands.
+    @Test
+    fun `takes a lone candidate when the target names no season`() {
+        val list = listOf(episode(3f, season = 4))
+        assertEquals(4, list.matchingEpisode(episode(3f, season = null))?.season)
+    }
+
+    @Test
+    fun `refuses when the target names no season and several seasons carry the number`() {
+        val list = listOf(episode(3f, season = 1), episode(3f, season = 2))
+        assertNull(list.matchingEpisode(episode(3f, season = null)))
     }
 
     @Test

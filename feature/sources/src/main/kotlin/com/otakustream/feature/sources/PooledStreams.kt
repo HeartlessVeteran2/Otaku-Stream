@@ -40,14 +40,22 @@ suspend fun findPeerSources(
         // link dialog. There is no source to ask, and guessing one from the url would ask a source
         // a question about a url it has never seen.
         .filter { it.sourceId != 0L }
-        .distinctBy { it.mediaUrl }
         .mapNotNull { peer ->
             sources.getSource(peer.sourceId)
                 ?.takeIf { it.id != primarySourceId }
                 ?.let { PeerSource(it, peer.mediaUrl) }
         }
-        // Two links can point at the same source with different urls (the show listed twice in one
-        // add-on). Asking that source twice is two round trips for one answer.
+        // Deduplicated by *source*, never by url.
+        //
+        // A url is a per-source string, and `tracker_links` is keyed on (mediaUrl, season) with
+        // sourceId outside the key — so two different extensions can both hold "/anime/one-piece"
+        // and both be right. Collapsing on the url first (which this did) dropped one of them
+        // silently: a linked, working add-on simply never appeared in the pool.
+        //
+        // The source id is what actually needs collapsing anyway. Two links *can* point at the same
+        // source with different urls — the show listed twice in one add-on — and asking it twice is
+        // two round trips for one answer. Rows arrive newest first, so the surviving url is the most
+        // recent link, which is the same one the rest of the app resolves to.
         .distinctBy { it.source.id }
 }
 

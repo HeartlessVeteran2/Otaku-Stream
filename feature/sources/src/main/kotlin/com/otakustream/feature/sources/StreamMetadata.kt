@@ -148,14 +148,41 @@ private const val EPISODE_NUMBER_TOLERANCE = 0.001f
 // page covers one season only reports none, and a series with absolute numbering has episode 27 in
 // season 2. When the number matches in several seasons and none of them is the season asked for,
 // there is no answer that is better than "this source has nothing to contribute here".
+//
+// The case it cannot catch, stated rather than papered over: two sources that *both* report no
+// season at all, where one counts from the start of the season and the other from the start of
+// the series. Episode 3 of season 2 is episode 3 in the first and episode 15 in the second, and
+// nothing in either episode list says so. When either side names a season the disagreement is
+// visible and this refuses; when neither does, there is nothing to see. The pooled picker is
+// what makes that survivable — the streams carry release names, so a wrong-episode row is
+// visible before it is played — but it can happen. Closing it properly means comparing air
+// dates or episode titles across sources, which is a larger change than this one.
 fun List<Episode>.matchingEpisode(target: Episode): Episode? {
     val sameNumber = filter { abs(it.episodeNumber - target.episodeNumber) < EPISODE_NUMBER_TOLERANCE }
     if (sameNumber.isEmpty()) return null
     if (target.season != null) {
         sameNumber.firstOrNull { it.season == target.season }?.let { return it }
+        // A source that reports no season is listing one season's worth of episodes and so cannot
+        // contradict the target. Its unqualified entry is the only match it is able to offer, and
+        // excluding it would keep every scripted extension out of the pool.
+        sameNumber.firstOrNull { it.season == null }?.let { return it }
+        // Every candidate names a season and none is the one asked for, so this refuses — including
+        // when there is exactly one of them.
+        //
+        // That single-candidate case used to be taken, on the reasoning that one candidate is not
+        // ambiguous: it is a source numbering its one season from 1 where the target numbers from
+        // the series. That reasoning is sound and it is also indistinguishable, from here, from a
+        // source that is simply showing a different season — which is what a two-cour show split
+        // into two seasons by one source and left whole by AniList produces. The two look identical
+        // and only one of them is safe, so taking it meant silently playing the wrong episode: the
+        // worst thing this feature can do, and the exact outcome the rest of this function is
+        // written to avoid.
+        //
+        // The cost of refusing is one peer contributing nothing to a list that several other
+        // sources are still filling, and saying so under it. That is not close.
+        return null
     }
-    // A source that reports no season is listing one season's worth of episodes, so an unqualified
-    // match is the only match it is able to offer.
-    sameNumber.firstOrNull { it.season == null }?.let { return it }
-    return sameNumber.singleOrNull()
+    // The target names no season, so nothing here can contradict it: an unqualified entry is the
+    // natural match, and a lone candidate is unambiguous.
+    return sameNumber.firstOrNull { it.season == null } ?: sameNumber.singleOrNull()
 }
