@@ -32,23 +32,26 @@ import com.otakustream.feature.tracking.formatCountdown
 
 // When the next episode of everything on the viewer's AniList list airs, grouped by day.
 //
-// Reads the same AniListHomeViewModel state the Play tab does rather than fetching anything: the
-// schedule is derived from the list load that already happens there, so opening this screen costs
-// nothing and shows exactly what the home rail was working from.
+// The view model is supplied by the caller rather than obtained here with a bare hiltViewModel().
+// That call scopes to the *destination* it runs in, so this screen would get its own
+// AniListHomeViewModel — a second instance re-running discovery and re-fetching the viewer's lists,
+// which are not cached. Opening the schedule would cost a full reload of data the Play tab already
+// had. The navigation graph hands over the Play destination's instance instead, so this screen
+// really does read the state the home rail was built from.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AiringScheduleScreen(
     onBack: () -> Unit,
     onAniListClick: (mediaId: Long, title: String) -> Unit,
+    viewModel: AniListHomeViewModel,
     modifier: Modifier = Modifier,
-    viewModel: AniListHomeViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    // Read once per composition rather than per row, so every countdown on screen is measured from
-    // the same instant. Per-row clock reads would let the top and bottom of a long list disagree by
-    // a minute, which looks like a rendering bug.
-    val nowMs = remember(uiState.airingDays) { System.currentTimeMillis() }
+    // One reading shared by every row, advanced on a tick. Per-row clock reads would let the top
+    // and bottom of a long list disagree by a minute; a value fixed at first composition would
+    // still say "in 1m" a quarter of an hour later.
+    val nowMs by rememberTickingNow()
 
     Scaffold(
         modifier = modifier.fillMaxSize(),

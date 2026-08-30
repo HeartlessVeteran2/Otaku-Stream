@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -394,9 +395,16 @@ fun AppNavHost(
                 )
             }
             composable(ROUTE_AIRING_SCHEDULE) {
+                // Scoped to the Play destination, not this one. A bare hiltViewModel() here would
+                // build a second AniListHomeViewModel, re-running discovery and re-fetching the
+                // viewer's lists (which are not cached) just to render a schedule the Play tab has
+                // already computed. Play is always beneath this screen on the back stack, since
+                // this route is only reachable from it.
+                val playEntry = remember(it) { navController.getBackStackEntry(ROUTE_PLAY) }
                 AiringScheduleScreen(
                     onBack = { navController.popBackStack() },
                     onAniListClick = { mediaId, _ -> navController.navigate("anilist/$mediaId") },
+                    viewModel = hiltViewModel(playEntry),
                 )
             }
             composable(

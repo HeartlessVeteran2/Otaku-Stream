@@ -12,6 +12,7 @@ import com.otakustream.feature.tracking.airingSchedule
 import com.otakustream.feature.tracking.readyToWatch
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -51,6 +52,15 @@ class AniListHomeViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(AniListHomeUiState())
     val uiState: StateFlow<AniListHomeUiState> = _uiState.asStateFlow()
+
+    // The in-flight personal-list load, so a token change can cancel it.
+    //
+    // Without this, signing out (or switching accounts) started a new load while the old one was
+    // still running, and whichever finished last won. The losing order is the plausible one: the
+    // sign-out path returns immediately with empty state, then the previous account's request lands
+    // and writes its lists back over it. The user is signed out and looking at their own data, or
+    // signed in as one account and looking at another's.
+    private var listJob: Job? = null
 
     init {
         loadDiscovery()
@@ -95,6 +105,9 @@ class AniListHomeViewModel @Inject constructor(
     }
 
     private fun loadContinueWatching(token: String?) {
+        // Cancelled on the way out too: a sign-out must not merely be overwritten later by a
+        // request that was already running when it happened.
+        listJob?.cancel()
         if (token == null) {
             _uiState.value = _uiState.value.copy(
                 continueWatching = emptyList(),
@@ -103,7 +116,8 @@ class AniListHomeViewModel @Inject constructor(
             )
             return
         }
-        viewModelScope.launch {
+        listJob?.cancel()
+        listJob = viewModelScope.launch {
             runCatching {
                 val viewer = aniListClient.fetchViewer(token)
                 aniListClient.fetchUserAnimeLists(token, viewer.id)
