@@ -50,6 +50,7 @@ import com.otakustream.core.player.ui.PlayerScreen
 import com.otakustream.core.sources.api.UiMessages
 import com.otakustream.feature.library.LibraryScreen
 import com.otakustream.feature.sources.ui.AniListDetailScreen
+import com.otakustream.feature.sources.ui.AiringScheduleScreen
 import com.otakustream.feature.sources.ui.AniListSearchScreen
 import com.otakustream.feature.sources.ui.AniListWatchScreen
 import com.otakustream.feature.sources.ui.BrowseSourceCatalogScreen
@@ -85,6 +86,7 @@ private const val ROUTE_DETAILS = "details/{sourceId}?mediaUrl={mediaUrl}&title=
 private const val ROUTE_ANILIST_DETAILS = "anilist/{mediaId}"
 private const val ROUTE_ANILIST_WATCH = "anilist-watch/{mediaId}?title={title}"
 private const val ROUTE_ANILIST_SEARCH = "anilist-search"
+private const val ROUTE_AIRING_SCHEDULE = "airing-schedule"
 // fromSource rides on the route so it survives process death. PendingPlayback is in-memory, and the
 // back stack is not: after the OS kills the app and the user returns, this route is restored with its
 // arguments while the stash is gone. Without the flag, a source-supplied url would come back looking
@@ -226,6 +228,7 @@ fun AppNavHost(
                     onMediaClick = { sourceId, mediaUrl, title -> navController.navigateToDetails(sourceId, mediaUrl, title) },
                     onAniListClick = { mediaId, _ -> navController.navigate("anilist/$mediaId") },
                     onAniListSearch = { navController.navigate(ROUTE_ANILIST_SEARCH) },
+                    onSeeSchedule = { navController.navigate(ROUTE_AIRING_SCHEDULE) },
                 )
             }
             composable(ROUTE_CATALOG) {
@@ -388,6 +391,12 @@ fun AppNavHost(
                 AniListSearchScreen(
                     onBack = { navController.popBackStack() },
                     onOpenAniList = { mediaId, _ -> navController.navigate("anilist/$mediaId") },
+                )
+            }
+            composable(ROUTE_AIRING_SCHEDULE) {
+                AiringScheduleScreen(
+                    onBack = { navController.popBackStack() },
+                    onAniListClick = { mediaId, _ -> navController.navigate("anilist/$mediaId") },
                 )
             }
             composable(
