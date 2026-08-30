@@ -44,7 +44,7 @@ object PendingPlayback {
     // known — a suspend closure so core:player stays ignorant of AniList/AniSkip.
     // directPlayTitle names the thing being played for watch history, and only matters when
     // historyHandled is false. The player otherwise derives a name from the URL, which works for a
-    // file but not for an identity-shaped one: torrent://<hash>/0 yields its last path segment, so
+    // file but not for an identity-shaped one: torrent://<hash>/auto yields its last path segment, so
     // every magnet landed in Continue Watching called "0". A magnet carries a `dn`; this is how it
     // reaches the row the user actually reads.
     data class Stashed(

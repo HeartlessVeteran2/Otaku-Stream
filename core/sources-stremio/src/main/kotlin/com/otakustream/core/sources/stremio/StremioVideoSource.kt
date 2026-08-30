@@ -8,6 +8,8 @@ import com.otakustream.core.sources.api.MediaDetails
 import com.otakustream.core.sources.api.MediaItem
 import com.otakustream.core.sources.api.MediaStatus
 import com.otakustream.core.sources.api.SourceFilter
+import com.otakustream.core.network.await
+import com.otakustream.core.sources.api.SourceHttpException
 import com.otakustream.core.sources.api.SubtitleTrack
 import com.otakustream.core.sources.api.Video
 import com.otakustream.core.sources.api.VideoSource
@@ -175,7 +177,7 @@ class StremioVideoSource(
 
     // Best-effort stream fetch: the per-call timeout in get() bounds a dead/slow endpoint, and
     // failures yield no streams rather than propagating so one provider can't sink the others.
-    private fun fetchStreams(url: String): List<StremioStream> =
+    private suspend fun fetchStreams(url: String): List<StremioStream> =
         runCatching { parseStreamResponse(get(url)).streams }.getOrElse { error ->
             if (error is CancellationException) throw error
             emptyList()
@@ -213,7 +215,7 @@ class StremioVideoSource(
     // sinking the others or breaking stream resolution. Tracks from another add-on carry its name
     // in the label, because merging several providers otherwise gives the user a list of
     // indistinguishable "English" entries.
-    private fun fetchSubtitleTracks(url: String, providerName: String?): List<SubtitleTrack> =
+    private suspend fun fetchSubtitleTracks(url: String, providerName: String?): List<SubtitleTrack> =
         runCatching {
             parseSubtitlesResponse(get(url)).subtitles.map {
                 SubtitleTrack(
@@ -275,15 +277,17 @@ class StremioVideoSource(
         CatalogPage(items = items, hasNextPage = items.isNotEmpty())
     }
 
-    private fun get(url: String): String {
+    private suspend fun get(url: String): String {
         val request = Request.Builder().url(url).build()
         val call = httpClient.newCall(request).apply {
-            // A coroutine timeout can't interrupt OkHttp's blocking execute(), but a per-call
-            // timeout aborts the call at the deadline — so a hung provider actually gives up.
+            // Still a per-call timeout, and still for the same reason: it is the only thing that
+            // bounds a provider that accepts the connection and then says nothing. Cancellation and
+            // a deadline answer different questions — await() stops a request nobody wants any more,
+            // the timeout stops one nobody is going to answer.
             timeout().timeout(REQUEST_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         }
-        call.execute().use { response ->
-            require(response.isSuccessful) { "Stremio request failed: HTTP ${response.code}" }
+        call.await().use { response ->
+            if (!response.isSuccessful) throw SourceHttpException(response.code, url)
             return response.body?.string() ?: error("Empty response body")
         }
     }

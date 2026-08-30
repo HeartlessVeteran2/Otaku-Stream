@@ -20,15 +20,37 @@ object TorrentUri {
     // URL that parses but can never resolve.
     private const val INFO_HASH_LENGTH = 40
 
+    // "Whichever file in this torrent is the one worth playing" — resolved against the torrent's
+    // metadata at open time, which is the first moment anything knows what the files are.
+    //
+    // A magnet carries no file list, so at the moment a url has to be built there is nothing to
+    // choose from. The old answer was to write index 0 and hope; for a season pack that is an .nfo,
+    // a sample, or episode 1 when the viewer wanted episode 12. `auto` says "not known yet" instead
+    // of asserting a wrong answer, and resolution happens where the file list actually exists.
+    //
+    // It stays a stable identity despite being deferred: selection is deterministic and the
+    // info-hash pins the file list forever, so the same url always resolves to the same file — which
+    // is what resume position and watch history require of it.
+    const val AUTO_FILE_INDEX = -1
+
+    private const val AUTO_SEGMENT = "auto"
+
     fun isTorrentUrl(url: String): Boolean = url.startsWith(PREFIX, ignoreCase = true)
 
     // Returns null rather than throwing for anything malformed: these strings come from add-on
     // responses, so a bad one is expected input, not a programming error.
+    // A null fileIdx means the caller genuinely does not know which file it wants — a magnet link,
+    // or a Stremio add-on that returned an info-hash without one. That is now recorded as `auto`
+    // rather than silently becoming index 0.
+    //
+    // A negative index is still rejected: AUTO_FILE_INDEX is how `auto` is represented after
+    // parsing, not something a caller passes in. Accepting it here would give the same torrent two
+    // spellings of the same url.
     fun build(infoHash: String, fileIdx: Int?): String? {
         val normalized = normalizeInfoHash(infoHash) ?: return null
-        val index = fileIdx ?: 0
-        if (index < 0) return null
-        return "$PREFIX$normalized/$index"
+        if (fileIdx == null) return "$PREFIX$normalized/$AUTO_SEGMENT"
+        if (fileIdx < 0) return null
+        return "$PREFIX$normalized/$fileIdx"
     }
 
     fun parse(url: String): TorrentRef? {
@@ -38,7 +60,11 @@ object TorrentUri {
         val parts = body.split('/')
         if (parts.size != 2) return null
         val infoHash = normalizeInfoHash(parts[0]) ?: return null
-        val fileIdx = parts[1].toIntOrNull()?.takeIf { it >= 0 } ?: return null
+        val fileIdx = if (parts[1].equals(AUTO_SEGMENT, ignoreCase = true)) {
+            AUTO_FILE_INDEX
+        } else {
+            parts[1].toIntOrNull()?.takeIf { it >= 0 } ?: return null
+        }
         return TorrentRef(infoHash = infoHash, fileIdx = fileIdx)
     }
 
@@ -60,6 +86,11 @@ object TorrentUri {
     }
 }
 
-// One playable file inside a torrent. fileIdx 0 is both the common case (single-file torrents) and
-// the fallback Stremio uses when an add-on doesn't say which file it means.
-data class TorrentRef(val infoHash: String, val fileIdx: Int)
+// One playable file inside a torrent.
+//
+// fileIdx is TorrentUri.AUTO_FILE_INDEX when the url did not name one, in which case the reader
+// picks against the torrent's real file list. `isAuto` rather than comparing to -1 at each use, so
+// the sentinel has exactly one spelling.
+data class TorrentRef(val infoHash: String, val fileIdx: Int) {
+    val isAuto: Boolean get() = fileIdx == TorrentUri.AUTO_FILE_INDEX
+}

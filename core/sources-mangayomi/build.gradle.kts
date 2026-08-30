@@ -25,6 +25,7 @@ android {
 
 dependencies {
     api(project(":core:sources-api"))
+    implementation(project(":core:network"))
     api(project(":core:database"))
     implementation(project(":core:common"))
 

@@ -3,6 +3,7 @@ package com.otakustream.core.sources.mangayomi
 import com.otakustream.core.database.mangayomi.MangayomiSourceRecord
 import com.otakustream.core.database.mangayomi.MangayomiSourceRepository
 import com.otakustream.core.sources.api.RemoteCodeUrl
+import com.otakustream.core.sources.api.SourceHttpException
 import com.otakustream.core.sources.mangayomi.repo.MangayomiExtensionListing
 import com.otakustream.core.sources.mangayomi.repo.MangayomiRepoPrefs
 import kotlinx.coroutines.Dispatchers
@@ -48,7 +49,7 @@ class MangayomiExtensionInstaller @Inject constructor(
         val cancellation = currentCoroutineContext()[Job]?.invokeOnCompletion { call.cancel() }
         return try {
             call.execute().use { response ->
-                require(response.isSuccessful) { "Failed to download extension: HTTP ${response.code}" }
+                if (!response.isSuccessful) throw SourceHttpException(response.code)
                 response.body?.string() ?: error("Empty extension body")
             }
         } finally {

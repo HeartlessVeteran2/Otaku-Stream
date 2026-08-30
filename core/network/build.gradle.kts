@@ -26,11 +26,15 @@ android {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.okhttp)
+    // api, not implementation: Call.await() is an extension on okhttp3.Call and Response is its
+    // return type, so both are part of this module's ABI rather than an internal detail.
+    api(libs.okhttp)
     implementation(libs.okhttp.urlconnection)
 
     implementation(libs.hilt.android)
     kapt(libs.hilt.compiler)
 
     testImplementation(libs.junit)
+    testImplementation(libs.mockwebserver)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

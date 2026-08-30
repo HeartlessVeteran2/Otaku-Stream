@@ -20,7 +20,7 @@ import com.otakustream.core.torrent.MagnetLinks
 //
 // historyHandled = false because nothing upstream recorded this play — there is no view model
 // behind an "Open with" or a pasted link, so the player records it itself. The magnet's `dn` goes
-// with it as directPlayTitle: the url is torrent://<hash>/0, so left to derive a name from that the
+// with it as directPlayTitle: the url is torrent://<hash>/auto, so left to derive a name from that the
 // player would file every torrent in Continue Watching as "0" — its last path segment.
 //
 // Provenance is USER on both paths. MainActivity only reaches here after the user accepted the
@@ -35,7 +35,7 @@ internal fun prepareMagnetPlayback(magnet: String): String? {
     val link = MagnetLinks.parse(magnet) ?: return null
     val url = MagnetLinks.toTorrentUrl(link) ?: return null
     // `dn` is optional in a magnet, and plenty of real ones omit it. Falling through to the player's
-    // URL-derived name would file those as "0" — the last path segment of torrent://<hash>/0 — so
+    // URL-derived name would file those as "auto" — the last path segment of torrent://<hash>/auto — so
     // every unnamed torrent would look like the same entry in Continue Watching. A short prefix of
     // the info hash is not pretty, but it is stable and distinct, which is what the row needs to be.
     //

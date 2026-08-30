@@ -127,6 +127,6 @@ class MagnetLinksTest {
     @Test
     fun `converts to the canonical playback url`() {
         val link = MagnetLinks.parse("magnet:?xt=urn:btih:$hex")!!
-        assertEquals("torrent://$hex/0", MagnetLinks.toTorrentUrl(link))
+        assertEquals("torrent://$hex/auto", MagnetLinks.toTorrentUrl(link))
     }
 }

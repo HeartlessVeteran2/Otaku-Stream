@@ -4,14 +4,14 @@ import android.content.Context
 import com.otakustream.core.sources.api.RemoteCodeUrl
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
 import javax.inject.Inject
 import javax.inject.Singleton
+import com.otakustream.core.network.await
+import com.otakustream.core.sources.api.SourceHttpException
 
 // One installable source in the catalog directory: either a scripted (.js) source or a Stremio
 // add-on manifest, both installed by URL.
@@ -56,17 +56,11 @@ class SourceCatalogClient @Inject constructor(
         // that can be rewritten in flight redirects every install made from the catalog screen.
         RemoteCodeUrl.require(repoUrl, "A source directory")
         val request = Request.Builder().url(repoUrl).build()
-        val call = httpClient.newCall(request)
-        // Cancel the blocking OkHttp call if the coroutine is cancelled (navigate away / reload),
-        // instead of leaving it to occupy the thread until it completes on its own.
-        val cancellation = currentCoroutineContext()[Job]?.invokeOnCompletion { call.cancel() }
-        val content = try {
-            call.execute().use { response ->
-                require(response.isSuccessful) { "Failed to load source catalog: HTTP ${response.code}" }
-                response.body?.string() ?: error("Empty response body")
-            }
-        } finally {
-            cancellation?.dispose()
+        // await() rather than the hand-rolled invokeOnCompletion/dispose pair this used to carry:
+        // same intent, with the bookkeeping in one tested place.
+        val content = httpClient.newCall(request).await().use { response ->
+            if (!response.isSuccessful) throw SourceHttpException(response.code, repoUrl)
+            response.body?.string() ?: error("Empty response body")
         }
         parse(content)
     }

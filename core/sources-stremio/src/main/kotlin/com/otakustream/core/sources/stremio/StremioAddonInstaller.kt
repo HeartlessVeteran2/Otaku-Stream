@@ -2,6 +2,7 @@ package com.otakustream.core.sources.stremio
 
 import com.otakustream.core.database.stremio.StremioAddonRecord
 import com.otakustream.core.database.stremio.StremioRepository
+import com.otakustream.core.sources.api.SourceHttpException
 import com.otakustream.core.sources.api.stableSourceId
 import com.otakustream.core.sources.stremio.model.parseManifest
 import kotlinx.coroutines.Dispatchers
@@ -31,7 +32,7 @@ class StremioAddonInstaller @Inject constructor(
         val normalizedUrl = normalizeStremioManifestUrl(manifestUrl)
         val request = Request.Builder().url(normalizedUrl).build()
         val content = httpClient.newCall(request).execute().use { response ->
-            require(response.isSuccessful) { "Failed to download manifest: HTTP ${response.code}" }
+            if (!response.isSuccessful) throw SourceHttpException(response.code)
             response.body?.string() ?: error("Empty manifest body")
         }
         val sources = buildSources(normalizedUrl, content)
