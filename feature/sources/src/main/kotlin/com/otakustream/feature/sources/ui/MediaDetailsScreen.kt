@@ -26,6 +26,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material3.CircularProgressIndicator
@@ -86,6 +88,7 @@ fun MediaDetailsScreen(
     val inLibrary by viewModel.inLibrary.collectAsState()
     val libraryStatus by viewModel.libraryStatus.collectAsState()
     val watchedEpisodeUrls by viewModel.watchedEpisodeUrls.collectAsState()
+    val downloadedEpisodeUrls by viewModel.downloadedEpisodeUrls.collectAsState()
     val trackerLink by viewModel.trackerLink.collectAsState()
     val selectedSeason by viewModel.selectedSeason.collectAsState()
     val hasTrackerToken by viewModel.hasTrackerToken.collectAsState()
@@ -339,6 +342,7 @@ fun MediaDetailsScreen(
         val episodeItems: LazyListScope.() -> Unit = {
         items(visibleEpisodes, key = { it.url }) { episode ->
             val watched = episode.url in watchedEpisodeUrls
+            val downloaded = episode.url in downloadedEpisodeUrls
             val resolving = episode.url == uiState.resolvingEpisodeUrl
             // While any episode is resolving, block taps so a second tap can't start a
             // competing resolve (or re-trigger the one in flight).
@@ -355,25 +359,52 @@ fun MediaDetailsScreen(
                         },
                     )
                 },
-                trailingContent = when {
-                    resolving -> {
-                        {
+                trailingContent = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (resolving) {
                             CircularProgressIndicator(
                                 strokeWidth = 2.dp,
                                 modifier = Modifier.size(20.dp),
                             )
-                        }
-                    }
-                    watched -> {
-                        {
+                        } else if (watched) {
                             Icon(
                                 imageVector = Icons.Filled.CheckCircle,
                                 contentDescription = "Watched",
                                 tint = MaterialTheme.colorScheme.tertiary,
                             )
                         }
+                        // Its own tap target beside the row rather than a long-press or a menu:
+                        // saving an episode for offline is a deliberate act, and a hidden gesture
+                        // would mean the feature exists but nobody finds it.
+                        IconButton(
+                            onClick = {
+                                if (downloaded) {
+                                    viewModel.cancelDownload(episode)
+                                } else {
+                                    viewModel.downloadEpisode(sourceId, episode)
+                                }
+                            },
+                            enabled = rowEnabled,
+                        ) {
+                            Icon(
+                                imageVector = if (downloaded) {
+                                    Icons.Filled.DownloadDone
+                                } else {
+                                    Icons.Filled.Download
+                                },
+                                contentDescription = if (downloaded) {
+                                    "Remove download"
+                                } else {
+                                    "Download episode"
+                                },
+                                tint = if (downloaded) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
                     }
-                    else -> null
                 },
                 modifier = Modifier.clickable(enabled = rowEnabled) {
                     viewModel.playEpisode(sourceId, episode)
