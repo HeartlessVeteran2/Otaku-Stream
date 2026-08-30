@@ -108,7 +108,10 @@ object MagnetLinks {
     // Magnet → the app's own stable playback identity. fileIdx 0 because a magnet says nothing about
     // which file inside the torrent is meant; for the single-file torrents these links overwhelmingly
     // point at, that is also the right answer.
-    fun toTorrentUrl(link: MagnetLink): String? = TorrentUri.build(link.infoHash, 0)
+    // null, not 0: a magnet carries no file list, so which file to play is genuinely unknown here
+    // and is resolved once the torrent's metadata arrives. Writing 0 was the bug in #109 — for a
+    // season pack it is whatever sorted first, which is routinely an .nfo or a sample.
+    fun toTorrentUrl(link: MagnetLink): String? = TorrentUri.build(link.infoHash, null)
 
     private fun decode(value: String): String? =
         // A stray '%' that isn't a valid escape makes URLDecoder throw. That's a malformed

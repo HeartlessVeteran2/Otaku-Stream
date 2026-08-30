@@ -187,13 +187,30 @@ class TorrentFileReader private constructor(
             val handle = addAndAwaitHandle(session, ref, trackers, saveDir)
             val info = awaitMetadata(handle)
             val files = info.files()
-            if (ref.fileIdx >= files.numFiles()) {
-                throw IOException("Torrent ${ref.infoHash} has no file at index ${ref.fileIdx}")
+
+            // Built before the index is settled, because when the url said `auto` the file list is
+            // what settles it. This is the first point in the whole flow where the torrent's shape
+            // is known at all — a magnet carries none of it.
+            val entries = (0 until files.numFiles()).map { index ->
+                TorrentFileEntry(index = index, path = files.filePath(index), sizeBytes = files.fileSize(index))
+            }
+
+            val fileIdx = if (ref.isAuto) {
+                TorrentVideoFiles.selectPlayableFile(entries)
+                    // Distinct from "no file at index N": this torrent has no video in it at all, and
+                    // saying so is more useful than opening whatever sorted first and letting the
+                    // player fail on an .nfo with nothing to explain.
+                    ?: throw IOException("Torrent ${ref.infoHash} contains no playable video file")
+            } else {
+                ref.fileIdx
+            }
+            if (fileIdx >= files.numFiles()) {
+                throw IOException("Torrent ${ref.infoHash} has no file at index $fileIdx")
             }
 
             val layout = TorrentFileLayout(
-                fileOffset = files.fileOffset(ref.fileIdx),
-                fileLength = files.fileSize(ref.fileIdx),
+                fileOffset = files.fileOffset(fileIdx),
+                fileLength = files.fileSize(fileIdx),
                 pieceLength = info.pieceLength(),
             )
 
@@ -201,19 +218,19 @@ class TorrentFileReader private constructor(
             // Release groups very often ship them alongside instead of muxing them in, and they are
             // kilobytes against the video's gigabytes — so fetching them costs nothing measurable,
             // while not fetching them means a torrent that has subtitles plays without any.
-            val entries = (0 until files.numFiles()).map { index ->
-                TorrentFileEntry(index = index, path = files.filePath(index), sizeBytes = files.fileSize(index))
-            }
-            val subtitles = TorrentSubtitles.pick(entries, ref.fileIdx)
+            //
+            // Picked against the resolved index, so a season pack opened via `auto` gets the
+            // subtitles for the episode actually chosen rather than for whatever index 0 was.
+            val subtitles = TorrentSubtitles.pick(entries, fileIdx)
 
             // Everything else is set to IGNORE. Without this, a season pack would download every
             // episode to play one — the user's data, spent on files they didn't ask for.
             val subtitleIndices = subtitles.mapTo(mutableSetOf()) { it.fileIndex }
             val priorities = Array(files.numFiles()) { index ->
-                if (index == ref.fileIdx || index in subtitleIndices) Priority.DEFAULT else Priority.IGNORE
+                if (index == fileIdx || index in subtitleIndices) Priority.DEFAULT else Priority.IGNORE
             }
             runCatching { handle.prioritizeFiles(priorities) }
-                .onFailure { Log.w(TAG, "Could not narrow the download to file ${ref.fileIdx}", it) }
+                .onFailure { Log.w(TAG, "Could not narrow the download to file $fileIdx", it) }
 
             // The container's header and trailer, so duration and seeking work before the middle of
             // the file has arrived.
@@ -226,7 +243,7 @@ class TorrentFileReader private constructor(
 
             handle.resume()
 
-            val file = TorrentPaths.containedFile(saveDir, files.filePath(ref.fileIdx))
+            val file = TorrentPaths.containedFile(saveDir, files.filePath(fileIdx))
                 ?: throw IOException("The torrent's file path escapes the download directory")
             // libtorrent creates the file when it allocates storage; give it a moment rather than
             // failing the open on a race with the first write.

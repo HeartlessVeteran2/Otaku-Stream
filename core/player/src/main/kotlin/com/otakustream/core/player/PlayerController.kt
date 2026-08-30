@@ -20,6 +20,7 @@ import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlayer
@@ -120,6 +121,10 @@ class PlayerController @Inject constructor(
     private val playerSettingsPrefs: PlayerSettingsPrefs,
     private val castManager: com.otakustream.core.player.cast.CastManager,
     private val torrentEngine: com.otakustream.core.torrent.TorrentEngine,
+    // Injected rather than constructed here: SimpleCache takes an exclusive lock on its directory,
+    // so the downloader and the player must be looking at the same instance, not two views of the
+    // same folder.
+    private val downloadStore: com.otakustream.core.download.DownloadStore,
 ) {
     val player: ExoPlayer = ExoPlayer.Builder(appContext, PlayerRenderersFactory(appContext)).build()
 
@@ -504,11 +509,29 @@ class PlayerController @Inject constructor(
             // falls back to the HTTP factory (headers intact) for http(s) — so local files and
             // content:// URIs from the file picker / "Open with" play, not just remote URLs.
             val baseDataSourceFactory = DefaultDataSource.Factory(appContext, httpDataSourceFactory)
+            // Downloaded episodes play from disk without any of the code above knowing.
+            //
+            // CacheDataSource serves whatever the download store already holds and falls through to
+            // the network for anything it does not, so there is no separate "offline player" and no
+            // branch at the call site: the same url plays the same way whether or not it was
+            // downloaded. That also keeps resume position, skip markers and history working, since
+            // they all key on that url.
+            //
+            // Read-only, deliberately — the write sink is null. Without that, ordinary streaming
+            // would fill the download store, and a store whose evictor is NoOp (so that a saved
+            // episode is never silently deleted) would then grow without limit from content the user
+            // never asked to keep.
+            val offlineFirstFactory = CacheDataSource.Factory()
+                .setCache(downloadStore.cache)
+                .setUpstreamDataSourceFactory(baseDataSourceFactory)
+                .setCacheWriteDataSinkFactory(null)
             // torrent:// urls can't be fetched by any of the above, so they route through the torrent
             // engine instead. The trackers come from the stashed Video rather than the url: the url is
             // deliberately just the torrent's identity, so that everything keyed on it above — resume
             // position, skip segments, history — stays stable across sessions.
             val dataSourceFactory = if (TorrentUri.isTorrentUrl(url)) {
+                // Torrents keep their own storage and are never in the download store, so they skip
+                // the cache layer rather than paying a lookup that can only miss.
                 TorrentDataSource.Factory(
                     engine = torrentEngine,
                     saveDir = com.otakustream.core.torrent.torrentCacheDir(appContext),
@@ -516,7 +539,7 @@ class PlayerController @Inject constructor(
                     delegate = baseDataSourceFactory,
                 )
             } else {
-                baseDataSourceFactory
+                offlineFirstFactory
             }
             val mediaSource = DefaultMediaSourceFactory(dataSourceFactory).createMediaSource(mediaItem)
 
@@ -626,7 +649,7 @@ class PlayerController @Inject constructor(
     //     Watching then keeps the name it already had rather than degrading to whatever the URL
     //     yields;
     //  3. derived from the URL, which is right for a file and useless for an identity — a
-    //     torrent://<hash>/0 has no name in it, and its last path segment is "0".
+    //     torrent://<hash>/auto has no name in it, and its last path segment is "auto".
     //
     // Step 2 is what makes step 1 stick: without it the first play of a magnet was titled correctly
     // and every replay afterwards overwrote that with "0". It is restricted to torrent:// because

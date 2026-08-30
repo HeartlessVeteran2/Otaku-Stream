@@ -32,6 +32,7 @@ dependencies {
     implementation(project(":core:ui"))
     implementation(project(":core:common"))
     implementation(project(":core:network"))
+    implementation(project(":core:download"))
     implementation(project(":core:sources-api"))
     implementation(project(":core:sources-scripting"))
     implementation(project(":core:sources-stremio"))
@@ -54,4 +55,6 @@ dependencies {
     implementation(libs.hilt.android)
     implementation(libs.hilt.navigation.compose)
     kapt(libs.hilt.compiler)
+
+    testImplementation(libs.junit)
 }

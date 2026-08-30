@@ -1,5 +1,6 @@
 package com.otakustream.core.sources.stremio
 
+import com.otakustream.core.sources.api.SourceHttpException
 import com.otakustream.core.sources.stremio.model.AddonListOrigin
 import com.otakustream.core.sources.stremio.model.OfficialAddonListing
 import com.otakustream.core.sources.stremio.model.parseAddonCollection
@@ -93,7 +94,7 @@ class StremioAddonDirectoryClient @Inject constructor(
         val cancellation = currentCoroutineContext()[Job]?.invokeOnCompletion { call.cancel() }
         val content = try {
             call.execute().use { response ->
-                require(response.isSuccessful) { "HTTP ${response.code}" }
+                if (!response.isSuccessful) throw SourceHttpException(response.code)
                 response.body?.string() ?: error("Empty response body")
             }
         } finally {

@@ -39,6 +39,14 @@ player, one library, one watch history.
 - Broad format support: HLS, DASH, RTSP, progressive — plus `stremio://` deep links, `magnet:`
   links, and Android's "Open with" for local files.
 
+### 📥 Watch offline
+Save an episode with the download icon beside it and watch it with no connection. Downloads run in
+the background with a notification, one at a time, and can be paused, resumed or deleted from the
+Library's **Downloads** tab. A saved episode plays through the ordinary player — the same resume
+position, subtitle and skip behaviour as streaming it — because it is the same url either way.
+
+Nothing is ever evicted automatically: an episode you saved stays until you delete it.
+
 ### 📱 Phone and tablet
 The show page adapts to the space it has: on a phone the hero, synopsis and controls scroll away
 above the episode list, and once there is width for it — a tablet, or a phone in landscape — the two

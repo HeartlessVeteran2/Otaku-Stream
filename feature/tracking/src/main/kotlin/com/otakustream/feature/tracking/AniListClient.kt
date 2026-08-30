@@ -1,5 +1,6 @@
 package com.otakustream.feature.tracking
 
+import com.otakustream.core.network.await
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -274,14 +275,18 @@ class AniListClient @Inject constructor(
         malId
     }
 
-    private fun execute(query: String, variables: JSONObject, token: String?): JSONObject {
+    // suspend + await(), not execute(): a blocking call cannot be interrupted by cancellation, so
+    // the enclosing withContext(Dispatchers.IO) used to abandon requests rather than stop them. The
+    // dispatcher hop is kept because the JSON parsing below is real work that must not land on the
+    // main thread — await only fixes who can stop the request, not where the parsing runs.
+    private suspend fun execute(query: String, variables: JSONObject, token: String?): JSONObject {
         val body = JSONObject().put("query", query).put("variables", variables).toString()
         val request = Request.Builder()
             .url(ANILIST_GRAPHQL_URL)
             .post(body.toRequestBody("application/json".toMediaType()))
             .apply { if (token != null) addHeader("Authorization", "Bearer $token") }
             .build()
-        httpClient.newCall(request).execute().use { response ->
+        httpClient.newCall(request).await().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
                 // Body may be non-JSON (proxy/HTML error page) — never let a parse failure mask the HTTP code.
