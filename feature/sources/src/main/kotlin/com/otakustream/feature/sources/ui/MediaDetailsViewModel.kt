@@ -20,6 +20,8 @@ import com.otakustream.core.sources.api.PlaybackQueue
 import com.otakustream.core.sources.api.SkipMark
 import com.otakustream.core.sources.api.Video
 import com.otakustream.feature.sources.SourceRepository
+import com.otakustream.feature.sources.describe
+import com.otakustream.feature.sources.toFailureReason
 import com.otakustream.feature.tracking.AniListClient
 import com.otakustream.feature.tracking.AniSkipClient
 import com.otakustream.feature.tracking.TrackingManager
@@ -266,9 +268,12 @@ class MediaDetailsViewModel @Inject constructor(
             runCatching { source.getVideoList(episode) }
                 .onSuccess { videos ->
                     when {
+                        // Named, because this screen only ever asks one source: without the name
+                        // the user cannot tell whether this episode is missing everywhere or just
+                        // from the add-on they happen to be browsing.
                         videos.isEmpty() ->
                             _uiState.value = _uiState.value.copy(
-                                error = "No playable stream was found for this episode.",
+                                error = "${source.name} has no playable stream for this episode.",
                                 resolvingEpisodeUrl = null,
                             )
                         videos.size == 1 -> playVideo(sourceId, episode, videos.first())
@@ -281,8 +286,11 @@ class MediaDetailsViewModel @Inject constructor(
                 }
                 .onFailure { error ->
                     if (error is CancellationException) throw error
+                    // Say what actually happened. "Something went wrong ... please try again" is
+                    // advice that is wrong half the time — a 403 or a dead endpoint will not fix
+                    // itself on a second tap, and the user needs to know to try another source.
                     _uiState.value = _uiState.value.copy(
-                        error = "Something went wrong starting playback. Please try again.",
+                        error = "Couldn't start playback: ${source.name} ${error.toFailureReason().describe()}.",
                         resolvingEpisodeUrl = null,
                     )
                 }

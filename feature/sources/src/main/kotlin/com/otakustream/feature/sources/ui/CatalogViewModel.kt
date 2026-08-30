@@ -7,8 +7,11 @@ import com.otakustream.core.database.library.LibraryRepository
 import com.otakustream.core.sources.api.MediaItem
 import com.otakustream.core.sources.api.SourceFilter
 import com.otakustream.core.sources.api.VideoSource
+import com.otakustream.feature.sources.FailureReason
 import com.otakustream.feature.sources.SourceBootstrapper
+import com.otakustream.feature.sources.SourceFailure
 import com.otakustream.feature.sources.SourceRepository
+import com.otakustream.feature.sources.toFailureReason
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
@@ -53,9 +56,10 @@ data class CatalogUiState(
     // Set once the first fan-out completes, so the UI can tell "still loading the first page" from
     // "loaded and genuinely empty."
     val hasLoadedOnce: Boolean = false,
-    // How many sources failed on the last fetch (network down, dead addon). Surfaced as a
-    // dismissible "some sources couldn't load" banner rather than silently dropping their results.
-    val failedSourceCount: Int = 0,
+    // Which sources failed on the last fetch, and why. Surfaced as a dismissible banner that
+    // names them rather than silently dropping their results — a count alone cannot distinguish a
+    // dead add-on from a dropped connection, and those want opposite responses from the user.
+    val failures: List<SourceFailure> = emptyList(),
     // mediaUrls currently in the library, so each poster can show a filled/empty save bookmark and
     // toggle it without leaving the grid.
     val savedMediaUrls: Set<String> = emptySet(),
@@ -65,7 +69,8 @@ private data class SourceFetch(
     val sourceId: Long,
     val entries: List<CatalogEntry>,
     val hasNextPage: Boolean,
-    val failed: Boolean = false,
+    // null when the fetch succeeded. Carries why rather than merely that it failed.
+    val failure: FailureReason? = null,
 )
 
 private const val SEARCH_DEBOUNCE_MS = 300L
@@ -177,12 +182,12 @@ class CatalogViewModel @Inject constructor(
 
     // Re-run the current search — used by the "some sources couldn't load" retry affordance.
     fun retry() {
-        _uiState.value = _uiState.value.copy(isLoading = true, failedSourceCount = 0)
+        _uiState.value = _uiState.value.copy(isLoading = true, failures = emptyList())
         startSearch(_uiState.value.query)
     }
 
     fun dismissSourceError() {
-        _uiState.value = _uiState.value.copy(failedSourceCount = 0)
+        _uiState.value = _uiState.value.copy(failures = emptyList())
     }
 
     fun loadMore() {
@@ -205,7 +210,7 @@ class CatalogViewModel @Inject constructor(
                     it.sourceId to (current.nextPageBySource[it.sourceId] ?: FIRST_LOAD_MORE_PAGE) + 1
                 },
                 exhaustedSources = current.exhaustedSources + results.filterNot { it.hasNextPage }.map { it.sourceId },
-                failedSourceCount = results.count { it.failed },
+                failures = results.toFailures(current.sourceNames),
             )
         }
     }
@@ -230,7 +235,7 @@ class CatalogViewModel @Inject constructor(
             entries = results.flatMap { it.entries }.distinctBy { it.sourceId to it.media.url },
             isLoading = false,
             hasLoadedOnce = true,
-            failedSourceCount = results.count { it.failed },
+            failures = results.toFailures(_uiState.value.sourceNames),
             nextPageBySource = results.associate { it.sourceId to FIRST_LOAD_MORE_PAGE },
             exhaustedSources = results.filterNot { it.hasNextPage }.map { it.sourceId }.toSet(),
         )
@@ -272,15 +277,35 @@ class CatalogViewModel @Inject constructor(
                     // not left blocking the others.
                     val result = withTimeoutOrNull(SOURCE_FETCH_TIMEOUT_MS) {
                         if (query.isBlank() && filters.isEmpty()) source.getPopular(page) else source.search(query, filters, page)
-                    } ?: return@async SourceFetch(source.id, emptyList(), hasNextPage = false, failed = true)
+                    } ?: return@async SourceFetch(
+                        source.id,
+                        emptyList(),
+                        hasNextPage = false,
+                        // The budget is known here and nowhere else, so it is stamped in rather
+                        // than left for the UI to guess at.
+                        failure = FailureReason.Timeout(SOURCE_FETCH_TIMEOUT_MS),
+                    )
                     SourceFetch(source.id, result.items.map { CatalogEntry(source.id, it) }, result.hasNextPage)
                 }.getOrElse { error ->
                     // Don't swallow cancellation — a newer search cancels this fan-out, and eating
                     // the CancellationException would break structured concurrency.
                     if (error is CancellationException) throw error
-                    SourceFetch(source.id, emptyList(), hasNextPage = false, failed = true)
+                    SourceFetch(source.id, emptyList(), hasNextPage = false, failure = error.toFailureReason())
                 }
             }
         }.awaitAll()
     }
+
+    // Names come from the registry snapshot rather than the fetch, because a source can be
+    // unregistered between the fan-out starting and its results landing — in which case there is
+    // no name to show and reporting a bare id would be worse than saying nothing.
+    private fun List<SourceFetch>.toFailures(names: Map<Long, String>): List<SourceFailure> =
+        mapNotNull { fetch ->
+            val reason = fetch.failure ?: return@mapNotNull null
+            SourceFailure(
+                sourceId = fetch.sourceId,
+                sourceName = names[fetch.sourceId] ?: "Unknown source",
+                reason = reason,
+            )
+        }
 }

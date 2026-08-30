@@ -626,7 +626,7 @@ class PlayerController @Inject constructor(
     //     Watching then keeps the name it already had rather than degrading to whatever the URL
     //     yields;
     //  3. derived from the URL, which is right for a file and useless for an identity — a
-    //     torrent://<hash>/0 has no name in it, and its last path segment is "0".
+    //     torrent://<hash>/auto has no name in it, and its last path segment is "auto".
     //
     // Step 2 is what makes step 1 stick: without it the first play of a magnet was titled correctly
     // and every replay afterwards overwrote that with "0". It is restricted to torrent:// because

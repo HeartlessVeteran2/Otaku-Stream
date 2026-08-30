@@ -2,6 +2,10 @@ package com.otakustream.feature.sources.ui
 
 import com.otakustream.core.ui.CoverImage
 import com.otakustream.core.ui.EmptyState
+import com.otakustream.feature.sources.SourceFailure
+import com.otakustream.feature.sources.allOffline
+import com.otakustream.feature.sources.describe
+import com.otakustream.feature.sources.headline
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -53,6 +57,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -161,9 +166,9 @@ fun CatalogScreen(
                 }
             }
 
-            if (uiState.failedSourceCount > 0) {
+            if (uiState.failures.isNotEmpty()) {
                 SourceErrorBanner(
-                    count = uiState.failedSourceCount,
+                    failures = uiState.failures,
                     onRetry = viewModel::retry,
                     onDismiss = viewModel::dismissSourceError,
                 )
@@ -220,22 +225,52 @@ fun CatalogScreen(
     }
 }
 
+// Collapsed by default: the common case is one flaky source and the user only wants the grid back.
+// Expanding names each source and what it said, which is the difference between "retry" and
+// "uninstall this add-on" — a decision the old bare count could not support.
+//
+// When every source failed the same device-level way there is nothing per-source worth listing, so
+// the cause replaces the headline instead of being repeated under it.
 @Composable
-private fun SourceErrorBanner(count: Int, onRetry: () -> Unit, onDismiss: () -> Unit) {
+private fun SourceErrorBanner(
+    failures: List<SourceFailure>,
+    onRetry: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val offline = failures.allOffline()
     Surface(
         color = MaterialTheme.colorScheme.errorContainer,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
         shape = MaterialTheme.shapes.small,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 12.dp)) {
-            Text(
-                text = if (count == 1) "1 source couldn't load" else "$count sources couldn't load",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(onClick = onRetry) { Text("Retry") }
-            TextButton(onClick = onDismiss) { Text("Dismiss") }
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 12.dp)) {
+                Text(
+                    text = if (offline) "No connection" else failures.headline(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.weight(1f),
+                )
+                if (!offline) {
+                    TextButton(onClick = { expanded = !expanded }) {
+                        Text(if (expanded) "Hide" else "Details")
+                    }
+                }
+                TextButton(onClick = onRetry) { Text("Retry") }
+                TextButton(onClick = onDismiss) { Text("Dismiss") }
+            }
+            if (expanded && !offline) {
+                Column(modifier = Modifier.padding(start = 12.dp, end = 12.dp, bottom = 12.dp)) {
+                    failures.forEach { failure ->
+                        Text(
+                            text = failure.describe(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                    }
+                }
+            }
         }
     }
 }

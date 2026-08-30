@@ -23,7 +23,7 @@ class TorrentUriTest {
     @Test
     fun `null file index means the first file`() {
         // Stremio add-ons omit fileIdx for single-file torrents; 0 is the protocol's own fallback.
-        assertEquals("torrent://$hash/0", TorrentUri.build(hash, null))
+        assertEquals("torrent://$hash/auto", TorrentUri.build(hash, null))
     }
 
     @Test
@@ -103,5 +103,46 @@ class TorrentUriTest {
         assertTrue(TorrentUri.isTorrentUrl("TORRENT://$hash/0"))
         assertFalse(TorrentUri.isTorrentUrl("https://example.com/a.mkv"))
         assertFalse(TorrentUri.isTorrentUrl("content://media/external/video/1"))
+    }
+
+    // A magnet has no file list, so "which file" is unknown until metadata arrives. `auto` records
+    // that, where index 0 asserted a wrong answer (#109).
+    @Test
+    fun `an unknown file index round-trips as auto`() {
+        val url = TorrentUri.build(hash, null)!!
+        assertEquals("torrent://$hash/auto", url)
+        val ref = TorrentUri.parse(url)!!
+        assertEquals(hash, ref.infoHash)
+        assertTrue(ref.isAuto)
+        assertEquals(TorrentUri.AUTO_FILE_INDEX, ref.fileIdx)
+    }
+
+    @Test
+    fun `a named index is not auto`() {
+        val ref = TorrentUri.parse(TorrentUri.build(hash, 4)!!)!!
+        assertFalse(ref.isAuto)
+        assertEquals(4, ref.fileIdx)
+    }
+
+    // One spelling only. The url is the identity resume position and watch history key on, and they
+    // key on the raw string, so every extra spelling parse accepts is another way for one file to
+    // become two entries. build() only ever writes "auto".
+    @Test
+    fun `only the exact auto spelling is accepted`() {
+        assertNull(TorrentUri.parse("torrent://$hash/AUTO"))
+        assertNull(TorrentUri.parse("torrent://$hash/Auto"))
+    }
+
+    // The sentinel is an output of parsing, never an input to build: accepting it here would give
+    // one torrent two spellings of the same url, and two resume positions.
+    @Test
+    fun `the auto sentinel is not accepted as a caller supplied index`() {
+        assertNull(TorrentUri.build(hash, TorrentUri.AUTO_FILE_INDEX))
+    }
+
+    @Test
+    fun `a non numeric segment is still rejected`() {
+        assertNull(TorrentUri.parse("torrent://$hash/latest"))
+        assertNull(TorrentUri.parse("torrent://$hash/"))
     }
 }

@@ -2,10 +2,10 @@ package com.otakustream.core.sources.mangayomi.repo
 
 import android.content.Context
 import com.otakustream.core.sources.api.RemoteCodeUrl
+import com.otakustream.core.network.await
+import com.otakustream.core.sources.api.SourceHttpException
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -41,16 +41,12 @@ class MangayomiRepoClient @Inject constructor(
         // redirects every install made from it — including of extensions the user picked by name.
         RemoteCodeUrl.require(repoUrl, "An extension repository")
         val request = Request.Builder().url(repoUrl).build()
-        val call = httpClient.newCall(request)
-        // Cancel the blocking OkHttp call if the coroutine is cancelled (navigate away / reload).
-        val cancellation = currentCoroutineContext()[Job]?.invokeOnCompletion { call.cancel() }
-        val content = try {
-            call.execute().use { response ->
-                require(response.isSuccessful) { "Failed to load extension repo: HTTP ${response.code}" }
-                response.body?.string() ?: error("Empty response body")
-            }
-        } finally {
-            cancellation?.dispose()
+        // await() rather than the hand-rolled invokeOnCompletion/dispose pair this used to carry:
+        // same intent — cancel the request when the caller navigates away or reloads — but the
+        // bookkeeping lives in one tested place instead of being repeated at each call site.
+        val content = httpClient.newCall(request).await().use { response ->
+            if (!response.isSuccessful) throw SourceHttpException(response.code)
+            response.body?.string() ?: error("Empty response body")
         }
         parseMangayomiIndex(content)
     }
