@@ -51,6 +51,20 @@ suspend fun findPeerSources(
         .distinctBy { it.source.id }
 }
 
+// A cost this deduplication does not cover, recorded rather than left to be rediscovered:
+// StremioVideoSource.getVideoList already fans out to every installed *stream* provider (Torrentio
+// and the like), and it does so per catalog add-on. So a show linked from two different Stremio
+// catalog add-ons asks Torrentio the same question twice. The pooled list is still correct —
+// duplicate streams share a url and are deduplicated — but it is two requests for one answer, and
+// with three such links, three.
+//
+// Not fixed here. The fix is a short-lived in-flight cache on the /stream url inside
+// StremioStreamProviderRegistry, which is the one object all those sources share; adding a caching
+// layer to the path that resolves playback, with no device to watch it on, is the more expensive
+// mistake. It only bites when the same show is deliberately linked from two Stremio catalog
+// add-ons, which is not what pooling is mainly for — a Stremio add-on plus a Mangayomi extension
+// share no providers at all.
+
 // One source's streams for an episode, tagged with where they came from and what can be read off
 // the text the source wrote about them.
 suspend fun streamOptionsFrom(source: VideoSource, episode: Episode): List<StreamOption> =
