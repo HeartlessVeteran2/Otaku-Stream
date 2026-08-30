@@ -93,3 +93,38 @@ val MIGRATION_11_12 = object : Migration(11, 12) {
         db.execSQL("ALTER TABLE `tracker_links_new` RENAME TO `tracker_links`")
     }
 }
+
+// v12 → v13: a `downloads` table holding what a downloaded episode is called and what it belongs
+// to. Deliberately not its state or progress — Media3's own download index owns those, and it is
+// the component that writes them, so a second copy here would drift. What Media3 has no notion of
+// is a title, which is why a Downloads list built on it alone could only show urls.
+val MIGRATION_12_13 = object : Migration(12, 13) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `downloads` (
+                `videoUrl` TEXT NOT NULL,
+                `mediaUrl` TEXT NOT NULL,
+                `episodeUrl` TEXT NOT NULL,
+                `sourceId` INTEGER NOT NULL,
+                `mediaTitle` TEXT NOT NULL,
+                `episodeName` TEXT,
+                `episodeNumber` REAL,
+                `coverUrl` TEXT,
+                `requestedAtEpochMs` INTEGER NOT NULL,
+                `headersJson` TEXT,
+                `isM3U8` INTEGER NOT NULL,
+                PRIMARY KEY(`videoUrl`)
+            )
+            """.trimIndent(),
+        )
+        // Name must match what Room generates for Index("requestedAtEpochMs"), or schema validation
+        // fails on the next open.
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_downloads_requestedAtEpochMs` " +
+                "ON `downloads` (`requestedAtEpochMs`)",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_downloads_mediaUrl` ON `downloads` (`mediaUrl`)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_downloads_episodeUrl` ON `downloads` (`episodeUrl`)")
+    }
+}

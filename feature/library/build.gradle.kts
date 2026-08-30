@@ -31,6 +31,7 @@ android {
 dependencies {
     implementation(project(":core:ui"))
     implementation(project(":core:database"))
+    implementation(project(":core:download"))
     implementation(project(":core:sources-api"))
     implementation(project(":feature:tracking"))
 
