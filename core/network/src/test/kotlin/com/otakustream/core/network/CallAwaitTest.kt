@@ -102,7 +102,8 @@ class CallAwaitTest {
     }
 
     // A response that arrives after cancellation has no owner — nothing will read or close it, and
-    // an unclosed body keeps its connection out of the pool. This pins that await closes it.
+    // an unclosed body keeps its connection checked out of the pool for good. This pins that await
+    // closes it on that path.
     @Test
     fun `a response arriving after cancellation does not leak its connection`() = runTest {
         server.enqueue(MockResponse().setBody("late").setBodyDelay(300, TimeUnit.MILLISECONDS))
@@ -111,9 +112,25 @@ class CallAwaitTest {
         // Cancel before the delayed body can arrive.
         job.cancel()
         job.join()
-        // Give the dispatcher time to deliver onResponse/onFailure into the cancelled continuation.
-        Thread.sleep(600)
-        assertEquals("no connection should be left in use", 0, client.connectionPool.connectionCount() - client.connectionPool.idleConnectionCount())
+
+        // Polled rather than slept on a fixed delay: the response is delivered into the cancelled
+        // continuation by OkHttp's dispatcher thread, and how long that takes is not ours to
+        // predict. A fixed sleep either makes the test slow or makes it flaky on a loaded runner.
+        assertTrue("a connection was left checked out", awaitNoConnectionsInUse())
+    }
+
+    // In-use = pooled minus idle. A body that was never closed keeps its connection out of the idle
+    // set, so this reaching zero is the observable form of "the response was closed".
+    private fun connectionsInUse(): Int =
+        client.connectionPool.connectionCount() - client.connectionPool.idleConnectionCount()
+
+    private fun awaitNoConnectionsInUse(): Boolean {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (System.nanoTime() < deadline) {
+            if (connectionsInUse() == 0) return true
+            Thread.sleep(25)
+        }
+        return connectionsInUse() == 0
     }
 
     @Test
