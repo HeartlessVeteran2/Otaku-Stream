@@ -47,6 +47,12 @@ position, subtitle and skip behaviour as streaming it — because it is the same
 
 Nothing is ever evicted automatically: an episode you saved stays until you delete it.
 
+### 📱 Phone and tablet
+The show page adapts to the space it has: on a phone the hero, synopsis and controls scroll away
+above the episode list, and once there is width for it — a tablet, or a phone in landscape — the two
+sit side by side, so the episode list is on screen from the moment the page opens. The decision is
+made from the width the screen actually has, not the device type, so split-screen behaves sensibly.
+
 ### 🌐 Torrent streaming, on the device
 Torrent-backed streams play with **no streaming server to host**, via an embedded libtorrent engine.
 Pick a torrent stream and it plays; seek and the download re-aims at where you actually are.
