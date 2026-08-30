@@ -6,8 +6,13 @@ import com.otakustream.core.database.tracking.TrackingRepository
 import com.otakustream.feature.tracking.AniListClient
 import com.otakustream.feature.tracking.AniListListEntry
 import com.otakustream.feature.tracking.AniListMedia
+import com.otakustream.feature.tracking.AiringDay
+import com.otakustream.feature.tracking.ReadyToWatch
+import com.otakustream.feature.tracking.airingSchedule
+import com.otakustream.feature.tracking.readyToWatch
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,6 +29,12 @@ data class AniListHomeUiState(
     // The signed-in user's in-progress list (CURRENT/REPEATING), shown as an AniList "Continue
     // watching" rail above the discovery rails. Empty when logged out.
     val continueWatching: List<AniListListEntry> = emptyList(),
+    // Shows on that list with episodes already aired past where the viewer stopped. Distinct from
+    // continueWatching, which is everything in progress whether or not there is anything new: this
+    // is the "something you follow has dropped" rail, and it is the one worth leading with.
+    val readyToWatch: List<ReadyToWatch> = emptyList(),
+    // When the next episode of each of those shows airs, grouped by day.
+    val airingDays: List<AiringDay> = emptyList(),
     val isLoading: Boolean = false,
     val hasLoadedOnce: Boolean = false,
     val error: String? = null,
@@ -41,6 +52,15 @@ class AniListHomeViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(AniListHomeUiState())
     val uiState: StateFlow<AniListHomeUiState> = _uiState.asStateFlow()
+
+    // The in-flight personal-list load, so a token change can cancel it.
+    //
+    // Without this, signing out (or switching accounts) started a new load while the old one was
+    // still running, and whichever finished last won. The losing order is the plausible one: the
+    // sign-out path returns immediately with empty state, then the previous account's request lands
+    // and writes its lists back over it. The user is signed out and looking at their own data, or
+    // signed in as one account and looking at another's.
+    private var listJob: Job? = null
 
     init {
         loadDiscovery()
@@ -85,11 +105,19 @@ class AniListHomeViewModel @Inject constructor(
     }
 
     private fun loadContinueWatching(token: String?) {
+        // Cancelled on the way out too: a sign-out must not merely be overwritten later by a
+        // request that was already running when it happened.
+        listJob?.cancel()
         if (token == null) {
-            _uiState.value = _uiState.value.copy(continueWatching = emptyList())
+            _uiState.value = _uiState.value.copy(
+                continueWatching = emptyList(),
+                readyToWatch = emptyList(),
+                airingDays = emptyList(),
+            )
             return
         }
-        viewModelScope.launch {
+        listJob?.cancel()
+        listJob = viewModelScope.launch {
             runCatching {
                 val viewer = aniListClient.fetchViewer(token)
                 aniListClient.fetchUserAnimeLists(token, viewer.id)
@@ -98,11 +126,24 @@ class AniListHomeViewModel @Inject constructor(
                 val inProgress = entries
                     .filter { it.status == "CURRENT" || it.status == "REPEATING" }
                     .sortedByDescending { it.progress }
-                _uiState.value = _uiState.value.copy(continueWatching = inProgress)
+                _uiState.value = _uiState.value.copy(
+                    continueWatching = inProgress,
+                    // Both derived from the same `entries` that were already being fetched here and
+                    // filtered down to the rail above. MEDIA_SELECTION has always requested
+                    // nextAiringEpisode { episode airingAt } and AniListModels has always parsed
+                    // both, so the airing data was arriving on every refresh and being discarded.
+                    // These cost no extra request.
+                    readyToWatch = readyToWatch(entries),
+                    airingDays = airingSchedule(entries, System.currentTimeMillis()),
+                )
             }.onFailure { failure ->
                 if (failure is CancellationException) throw failure
                 // A personal-rail failure must never blank the logged-out discovery rails.
-                _uiState.value = _uiState.value.copy(continueWatching = emptyList())
+                _uiState.value = _uiState.value.copy(
+                    continueWatching = emptyList(),
+                    readyToWatch = emptyList(),
+                    airingDays = emptyList(),
+                )
             }
         }
     }

@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -23,9 +24,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,6 +43,9 @@ import com.otakustream.core.ui.CoverImage
 import com.otakustream.core.ui.EmptyState
 import com.otakustream.feature.tracking.AniListListEntry
 import com.otakustream.feature.tracking.AniListMedia
+import com.otakustream.feature.tracking.AiringDay
+import com.otakustream.feature.tracking.ReadyToWatch
+import com.otakustream.feature.tracking.formatCountdown
 
 // The Stremio-style content home rendered on the Play tab. AniList discovery rails lead (Trending,
 // This Season, All-Time Popular — no login needed), AnymeX-style; below them sit Continue Watching
@@ -50,6 +56,7 @@ fun HomeContent(
     onPlayDirect: (url: String) -> Unit,
     onBrowseAddons: () -> Unit,
     onAniListClick: (mediaId: Long, title: String) -> Unit,
+    onSeeSchedule: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel(),
     aniListViewModel: AniListHomeViewModel = hiltViewModel(),
@@ -71,6 +78,30 @@ fun HomeContent(
     // scrolled to. Each rail is one item with its header, so a header can never be stranded on
     // screen without its row.
     LazyColumn(modifier = modifier.fillMaxSize()) {
+        // Leads the screen, above Continue Watching, because it answers the question someone opens
+        // a seasonal-anime app to ask: has anything I follow dropped? Continue Watching lists
+        // everything in progress whether or not there is a new episode, so on its own it cannot
+        // distinguish "three episodes waiting" from "caught up and waiting until Friday".
+        if (aniListState.readyToWatch.isNotEmpty()) {
+            item(key = "anilist-new-episodes") {
+                RailHeader(
+                    title = "New episodes",
+                    // Only offered when there is a schedule to show. Sending someone to an empty
+                    // screen is worse than not offering the link.
+                    actionLabel = "Schedule".takeIf { aniListState.airingDays.isNotEmpty() },
+                    onAction = onSeeSchedule,
+                )
+                ReadyToWatchRail(aniListState.readyToWatch, onAniListClick)
+            }
+        } else if (aniListState.airingDays.isNotEmpty()) {
+            // Caught up on everything, with episodes still on the way. Gating the schedule behind
+            // "something is waiting" hid it in exactly the state it is most useful: when there is
+            // nothing to watch, when the next episode arrives is the only thing left to say.
+            item(key = "anilist-airing-soon") {
+                RailHeader(title = "Airing soon", actionLabel = "Schedule", onAction = onSeeSchedule)
+                AiringSoonRail(aniListState.airingDays, onAniListClick)
+            }
+        }
         // ---- AniList discovery (works logged-out) ----
         if (aniListState.continueWatching.isNotEmpty()) {
             item(key = "anilist-continue") {
@@ -192,13 +223,70 @@ private fun AniListRailsError(onRetry: () -> Unit) {
     }
 }
 
+// actionLabel is optional so the existing rails keep their plain heading; only rails with
+// somewhere to go grow a trailing action.
 @Composable
-private fun RailHeader(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.titleMedium,
-        modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 8.dp),
-    )
+private fun RailHeader(
+    title: String,
+    actionLabel: String? = null,
+    onAction: () -> Unit = {},
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 16.dp, bottom = 8.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.weight(1f),
+        )
+        if (actionLabel != null) {
+            TextButton(onClick = onAction) { Text(actionLabel) }
+        }
+    }
+}
+
+// What is coming, for someone with nothing waiting. Flattened out of the day grouping because a
+// rail has no room for headings — the schedule screen behind the header is where the days are.
+@Composable
+private fun AiringSoonRail(days: List<AiringDay>, onAniListClick: (Long, String) -> Unit) {
+    // Shared across the rail and advanced on a tick, for the same reason the schedule screen does
+    // it: one instant for every tile, and not one frozen at first composition.
+    val nowMs by rememberTickingNow()
+    val upcoming = remember(days) { days.flatMap { it.items }.take(AIRING_SOON_CAP) }
+    LazyRow {
+        items(upcoming, key = { "soon-${it.media.id}" }) { item ->
+            AniListPosterTile(
+                title = item.media.displayTitle,
+                coverUrl = item.media.coverImageUrl,
+                subtitle = "Ep ${item.episode} · ${formatCountdown(item.airingAtSeconds, nowMs)}",
+                onClick = { onAniListClick(item.media.id, item.media.displayTitle) },
+            )
+        }
+    }
+}
+
+// Enough to show the week without turning a rail into the schedule screen it links to.
+private const val AIRING_SOON_CAP = 20
+
+// Subtitled with the episode the viewer would actually open next, not with how far behind they are.
+// For a long-running show "947 episodes behind" is a reason to give up; "Ep 51" is a thing to tap.
+@Composable
+private fun ReadyToWatchRail(ready: List<ReadyToWatch>, onAniListClick: (Long, String) -> Unit) {
+    LazyRow {
+        items(ready, key = { "rtw-${it.media.id}" }) { item ->
+            AniListPosterTile(
+                title = item.media.displayTitle,
+                coverUrl = item.media.coverImageUrl,
+                subtitle = if (item.behindBy > 1) {
+                    "Ep ${item.nextEpisode} · ${item.behindBy} waiting"
+                } else {
+                    "Ep ${item.nextEpisode}"
+                },
+                onClick = { onAniListClick(item.media.id, item.media.displayTitle) },
+            )
+        }
+    }
 }
 
 @Composable
