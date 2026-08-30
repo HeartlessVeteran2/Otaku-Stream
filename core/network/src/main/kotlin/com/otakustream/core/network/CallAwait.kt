@@ -5,7 +5,6 @@ import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.Response
 import java.io.IOException
-import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 // Awaits an OkHttp call in a way that cancelling the coroutine actually cancels the request.
@@ -35,22 +34,24 @@ suspend fun Call.await(): Response = suspendCancellableCoroutine { continuation 
     }
     enqueue(object : Callback {
         override fun onResponse(call: Call, response: Response) {
-            // resume, not resumeWith(success): if the continuation was already cancelled this is a
-            // no-op and the response body would leak its connection. Closing it on that path is the
-            // caller's contract for a cancelled await — see below.
-            if (continuation.isActive) {
-                continuation.resume(response)
-            } else {
-                // Nothing will read it, and an unclosed body holds its connection out of the pool
-                // until the finalizer runs. This is the one path where the body has no owner.
-                runCatching { response.close() }
-            }
+            // The two-argument resume, not an isActive check followed by a plain resume.
+            //
+            // Checking first looks equivalent and is not: cancellation can land between the check
+            // and the resume, after which resume is a silent no-op and this response has no owner.
+            // Nothing reads it, nothing closes it, and an unclosed body holds its connection out of
+            // the pool. The window is small and the leak is permanent, which is the worst shape for
+            // a bug to have.
+            //
+            // This overload exists for exactly that: the handler runs when the value could not be
+            // delivered because the continuation was cancelled, with no gap for cancellation to slip
+            // through.
+            continuation.resume(response) { _ -> runCatching { response.close() } }
         }
 
         override fun onFailure(call: Call, e: IOException) {
-            // A cancelled call reports failure too. Resuming a cancelled continuation is a no-op,
-            // so the guard is about not doing pointless work rather than correctness.
-            if (continuation.isActive) continuation.resumeWithException(e)
+            // No equivalent hazard: an exception delivered to a cancelled continuation is dropped,
+            // and there is nothing holding a resource to release.
+            continuation.resumeWithException(e)
         }
     })
 }

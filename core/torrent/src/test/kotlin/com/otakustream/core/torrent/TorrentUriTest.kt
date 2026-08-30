@@ -124,12 +124,13 @@ class TorrentUriTest {
         assertEquals(4, ref.fileIdx)
     }
 
-    // Case-insensitive because the url can come back through history, an intent, or an add-on that
-    // spelled it differently — and a url that parses one way and not the other is two identities.
+    // One spelling only. The url is the identity resume position and watch history key on, and they
+    // key on the raw string, so every extra spelling parse accepts is another way for one file to
+    // become two entries. build() only ever writes "auto".
     @Test
-    fun `auto is recognised whatever its case`() {
-        assertTrue(TorrentUri.parse("torrent://$hash/AUTO")!!.isAuto)
-        assertTrue(TorrentUri.parse("torrent://$hash/Auto")!!.isAuto)
+    fun `only the exact auto spelling is accepted`() {
+        assertNull(TorrentUri.parse("torrent://$hash/AUTO"))
+        assertNull(TorrentUri.parse("torrent://$hash/Auto"))
     }
 
     // The sentinel is an output of parsing, never an input to build: accepting it here would give

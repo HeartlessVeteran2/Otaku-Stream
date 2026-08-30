@@ -168,20 +168,37 @@ class StremioVideoSource(
                 .map { provider -> async { fetchStreams("${provider.baseUrl}/stream/$type/$videoId.json") } }
             val subtitleTracksDeferred = async { fetchAllSubtitleTracks(type, videoId) }
             val serverBaseUrl = stremioRepository.getServerBaseUrl()
-            val allStreams = ownStreamsDeferred.await() + providerStreamDeferreds.awaitAll().flatten()
+            val fetches = listOf(ownStreamsDeferred.await()) + providerStreamDeferreds.awaitAll()
+            val allStreams = fetches.flatMap { it.streams }
+            // Best-effort stops at "some of them worked". When every provider failed and produced
+            // nothing, returning an empty list tells the details screen this episode has no stream
+            // — which is a claim about the episode, and false: it is a claim about the network, or
+            // about a host that is refusing us. Re-throwing the first failure lets that screen name
+            // what actually happened instead of inventing an explanation.
+            if (allStreams.isEmpty()) {
+                fetches.firstNotNullOfOrNull { it.error }?.let { throw it }
+            }
             val subtitleTracks = subtitleTracksDeferred.await()
             allStreams.mapNotNull { stream -> stream.toVideo(serverBaseUrl, subtitleTracks) }
                 .distinctBy { it.url }
         }
     }
 
-    // Best-effort stream fetch: the per-call timeout in get() bounds a dead/slow endpoint, and
-    // failures yield no streams rather than propagating so one provider can't sink the others.
-    private suspend fun fetchStreams(url: String): List<StremioStream> =
-        runCatching { parseStreamResponse(get(url)).streams }.getOrElse { error ->
-            if (error is CancellationException) throw error
-            emptyList()
-        }
+    // One provider's answer: its streams, or why it had none.
+    //
+    // The failure is carried rather than discarded so the fan-out can tell "this provider is down
+    // and the others covered for it" from "all of them are down". Both used to look like an empty
+    // list.
+    private class StreamFetch(val streams: List<StremioStream>, val error: Throwable?)
+
+    // Best-effort stream fetch: the per-call timeout in get() bounds a dead/slow endpoint, and a
+    // failure yields no streams rather than propagating, so one provider can't sink the others.
+    private suspend fun fetchStreams(url: String): StreamFetch =
+        runCatching { StreamFetch(parseStreamResponse(get(url)).streams, error = null) }
+            .getOrElse { error ->
+                if (error is CancellationException) throw error
+                StreamFetch(emptyList(), error)
+            }
 
     // Subtitles are aggregated the same way streams are: this add-on's own /subtitles endpoint plus
     // every installed add-on that declares the subtitles resource for this type/id. Without the

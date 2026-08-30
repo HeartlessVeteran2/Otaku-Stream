@@ -15,8 +15,14 @@ object TorrentVideoFiles {
 
     // Containers Media3 has a chance with. Deliberately not "anything that isn't a subtitle": an
     // .nfo or a .txt scoring as a candidate is how index 0 became the bug in the first place.
+    //
+    // Erring wide within that: a container missing from this list makes a torrent that does contain
+    // video report that it contains none, and that failure is indistinguishable from a genuinely
+    // videoless torrent. The 3GP family and the MPEG-TS variants are here for that reason rather
+    // than because anime ships in them.
     val EXTENSIONS = setOf(
-        "mkv", "mp4", "m4v", "avi", "mov", "webm", "ts", "m2ts", "mpg", "mpeg", "wmv", "flv", "ogv",
+        "mkv", "mp4", "m4v", "avi", "mov", "webm", "ts", "m2ts", "mts", "m2t",
+        "mpg", "mpeg", "wmv", "flv", "ogv", "ogm", "3gp", "3g2",
     )
 
     // Release groups ship a short teaser next to the real file, conventionally with "sample" as a
@@ -39,16 +45,6 @@ object TorrentVideoFiles {
             compareBy<TorrentFileEntry> { it.sizeBytes }.thenByDescending { it.path.lowercase() },
         )?.index
 
-    // Every playable file, in the order a person would expect to choose from — episode order, not
-    // size order. A season pack's picker is a list of episodes, and sorting it by size would
-    // scramble them into an order with no meaning to the viewer.
-    fun listPlayableFiles(files: List<TorrentFileEntry>): List<TorrentFileEntry> =
-        candidates(files).sortedWith(compareBy(NATURAL) { it.path })
-
-    // True when the choice is genuinely the user's to make. One candidate is not a choice, and
-    // prompting for it would put a dialog in front of every ordinary single-file magnet.
-    fun needsPicker(files: List<TorrentFileEntry>): Boolean = candidates(files).size > 1
-
     private fun candidates(files: List<TorrentFileEntry>): List<TorrentFileEntry> {
         val videos = files.filter { extensionOf(it.path) in EXTENSIONS && it.sizeBytes > 0 }
         val withoutSamples = videos.filterNot(::isSample)
@@ -65,37 +61,4 @@ object TorrentVideoFiles {
             .any { it.lowercase() in SAMPLE_MARKERS }
 
     private fun extensionOf(path: String): String = path.substringAfterLast('.', "").lowercase()
-
-    // Compares digit runs as numbers so "Episode 2" precedes "Episode 10". Lexicographic ordering
-    // puts "10" before "2", which in a 12-episode pack is exactly the list the viewer has to scan
-    // twice to find what they wanted.
-    private val NATURAL = Comparator<String> { left, right ->
-        var i = 0
-        var j = 0
-        while (i < left.length && j < right.length) {
-            val a = left[i]
-            val b = right[j]
-            if (a.isDigit() && b.isDigit()) {
-                var iEnd = i
-                while (iEnd < left.length && left[iEnd].isDigit()) iEnd++
-                var jEnd = j
-                while (jEnd < right.length && right[jEnd].isDigit()) jEnd++
-                // Compared as text after dropping leading zeros, so arbitrarily long runs can't
-                // overflow a numeric parse — a torrent path is untrusted input like any other.
-                val aDigits = left.substring(i, iEnd).trimStart('0').ifEmpty { "0" }
-                val bDigits = right.substring(j, jEnd).trimStart('0').ifEmpty { "0" }
-                if (aDigits.length != bDigits.length) return@Comparator aDigits.length - bDigits.length
-                val cmp = aDigits.compareTo(bDigits)
-                if (cmp != 0) return@Comparator cmp
-                i = iEnd
-                j = jEnd
-            } else {
-                val cmp = a.lowercaseChar().compareTo(b.lowercaseChar())
-                if (cmp != 0) return@Comparator cmp
-                i++
-                j++
-            }
-        }
-        (left.length - i) - (right.length - j)
-    }
 }

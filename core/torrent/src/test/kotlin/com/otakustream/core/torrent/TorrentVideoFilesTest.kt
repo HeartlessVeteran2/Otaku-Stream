@@ -1,9 +1,7 @@
 package com.otakustream.core.torrent
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 private const val MB = 1024L * 1024L
@@ -26,7 +24,6 @@ class TorrentVideoFilesTest {
     fun `single file torrent still resolves to that file`() {
         val files = listOf(file(0, "Movie.2019.1080p.mkv", 2000))
         assertEquals(0, TorrentVideoFiles.selectPlayableFile(files))
-        assertFalse(TorrentVideoFiles.needsPicker(files))
     }
 
     // A sample is a real video in a real container. Only its name marks it, so only the name can
@@ -39,8 +36,6 @@ class TorrentVideoFilesTest {
             file(1, "Show.S01E01/Show.S01E01.mkv", 1400),
         )
         assertEquals(1, TorrentVideoFiles.selectPlayableFile(files))
-        assertEquals(listOf(1), TorrentVideoFiles.listPlayableFiles(files).map { it.index })
-        assertFalse(TorrentVideoFiles.needsPicker(files))
     }
 
     // "Resample" contains "sample". A substring test would drop a legitimate file, and the viewer
@@ -66,7 +61,6 @@ class TorrentVideoFilesTest {
             file(2, "subs/eng.srt", 1),
         )
         assertNull(TorrentVideoFiles.selectPlayableFile(files))
-        assertTrue(TorrentVideoFiles.listPlayableFiles(files).isEmpty())
     }
 
     @Test
@@ -76,49 +70,6 @@ class TorrentVideoFilesTest {
             file(1, "real.mkv", 500),
         )
         assertEquals(1, TorrentVideoFiles.selectPlayableFile(files))
-    }
-
-    @Test
-    fun `a season pack asks rather than guessing`() {
-        val files = (1..12).map { file(it - 1, "Show S01/Show S01E%02d.mkv".format(it), 350) }
-        assertTrue(TorrentVideoFiles.needsPicker(files))
-        assertEquals(12, TorrentVideoFiles.listPlayableFiles(files).size)
-    }
-
-    // Lexicographic ordering puts episode 10 before episode 2. In a 12-episode pack that is a list
-    // the viewer has to scan twice.
-    @Test
-    fun `picker lists episodes in numeric order not lexicographic`() {
-        val files = listOf(
-            file(0, "Show - 10.mkv", 350),
-            file(1, "Show - 2.mkv", 350),
-            file(2, "Show - 1.mkv", 350),
-        )
-        assertEquals(
-            listOf("Show - 1.mkv", "Show - 2.mkv", "Show - 10.mkv"),
-            TorrentVideoFiles.listPlayableFiles(files).map { it.path },
-        )
-    }
-
-    @Test
-    fun `zero padded and unpadded numbering sort together`() {
-        val files = listOf(
-            file(0, "E09.mkv", 350),
-            file(1, "E10.mkv", 350),
-            file(2, "E1.mkv", 350),
-        )
-        assertEquals(
-            listOf("E1.mkv", "E09.mkv", "E10.mkv"),
-            TorrentVideoFiles.listPlayableFiles(files).map { it.path },
-        )
-    }
-
-    // A path is untrusted input; a digit run long enough to overflow a Long parse must not throw.
-    @Test
-    fun `absurdly long digit runs do not overflow`() {
-        val huge = "9".repeat(400)
-        val files = listOf(file(0, "E$huge.mkv", 10), file(1, "E2.mkv", 10))
-        assertEquals(listOf("E2.mkv", "E$huge.mkv"), TorrentVideoFiles.listPlayableFiles(files).map { it.path })
     }
 
     // The index ends up inside torrent://<hash>/<index>, which resume position and watch history key
@@ -141,6 +92,14 @@ class TorrentVideoFilesTest {
             file(2, "Extras/outtakes.mkv", 90),
         )
         assertEquals(1, TorrentVideoFiles.selectPlayableFile(files))
+    }
+
+    // A container missing from the list makes a torrent that does contain video report that it
+    // contains none, which is indistinguishable from a genuinely videoless one.
+    @Test
+    fun `less common containers are still recognised as video`() {
+        assertEquals(0, TorrentVideoFiles.selectPlayableFile(listOf(file(0, "clip.3gp", 300))))
+        assertEquals(0, TorrentVideoFiles.selectPlayableFile(listOf(file(0, "clip.mts", 300))))
     }
 
     @Test

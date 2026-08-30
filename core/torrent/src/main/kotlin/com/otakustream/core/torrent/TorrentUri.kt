@@ -60,7 +60,12 @@ object TorrentUri {
         val parts = body.split('/')
         if (parts.size != 2) return null
         val infoHash = normalizeInfoHash(parts[0]) ?: return null
-        val fileIdx = if (parts[1].equals(AUTO_SEGMENT, ignoreCase = true)) {
+        // Matched exactly, not case-insensitively. This url *is* the identity that resume position
+        // and watch history key on, and they key on the raw string — so every spelling parse accepts
+        // is another way for one file to become two entries. build() only ever writes "auto", and
+        // nothing outside it constructs these (torrent:// is not among the schemes an external
+        // intent can hand us), so accepting "AUTO" would buy no compatibility and cost that.
+        val fileIdx = if (parts[1] == AUTO_SEGMENT) {
             AUTO_FILE_INDEX
         } else {
             parts[1].toIntOrNull()?.takeIf { it >= 0 } ?: return null
