@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,6 +34,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -43,6 +45,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.otakustream.core.sources.stremio.normalizeStremioManifestUrl
 import com.otakustream.core.sources.stremio.model.AddonListOrigin
 import com.otakustream.core.sources.stremio.model.OfficialAddonListing
 import com.otakustream.core.ui.CoverImage
@@ -111,7 +114,7 @@ fun BrowseStremioAddonsScreen(
             items(uiState.listings, key = { it.transportUrl }) { listing ->
                 AddonListingRow(
                     listing = listing,
-                    isInstalled = listing.transportUrl in uiState.installedUrls,
+                    isInstalled = normalizeStremioManifestUrl(listing.transportUrl) in uiState.installedUrls,
                     isInstalling = uiState.installingUrl == listing.transportUrl,
                     canInstall = uiState.installingUrl == null,
                     onInstall = { viewModel.install(listing) },
@@ -135,9 +138,16 @@ fun BrowseStremioAddonsScreen(
 // full.
 @Composable
 private fun FilterRow(selected: AddonFilter, onSelect: (AddonFilter) -> Unit) {
+    // Horizontally scrollable, not a plain Row. Four chips fit on a typical phone at the default
+    // font scale and stop fitting at larger ones — and a chip that overflows a Row is not merely
+    // ugly, it is clipped and unreachable, so "Subtitles" would silently become unselectable for
+    // exactly the users who most need a bigger font.
     Row(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(top = 12.dp),
     ) {
         AddonFilter.entries.forEach { option ->
             FilterChip(
@@ -241,18 +251,28 @@ private fun AddonListingRow(
             )
         },
         trailingContent = {
+            val configureUrl = listing.configureUrl
             Column(horizontalAlignment = Alignment.End) {
                 when {
                     isInstalled -> Text("Installed", style = MaterialTheme.typography.bodySmall)
                     isInstalling -> CircularProgressIndicator(modifier = Modifier.padding(4.dp))
+                    // Configure *replaces* Install rather than sitting beside it when the add-on
+                    // serves nothing until configured. Offering Install there offers the one action
+                    // guaranteed not to work: it succeeds, and leaves a source that returns nothing
+                    // forever. Configuring hands back a different, personalised manifest URL, which
+                    // is what actually gets installed — so this row's Install was never the route.
+                    listing.configurationRequired && configureUrl != null ->
+                        Button(onClick = { onConfigure(configureUrl) }, enabled = canInstall) {
+                            Text("Configure")
+                        }
                     else -> Button(onClick = onInstall, enabled = canInstall) { Text("Install") }
                 }
-                // Opens the add-on's own configure page in a browser, which is where it hands back a
-                // personalised manifest URL to paste back in. That round trip is how Stremio itself
-                // configures these, and there is no in-app substitute: the page is arbitrary HTML
-                // served by the add-on.
-                listing.configureUrl?.let { url ->
-                    TextButton(onClick = { onConfigure(url) }) {
+                // A secondary link where configuring is optional — Torrentio and Comet work
+                // unconfigured, and configuring adds a debrid service or narrows the trackers.
+                // Opens in a browser because the page is arbitrary HTML served by the add-on;
+                // that round trip is how Stremio itself configures these.
+                if (!listing.configurationRequired && configureUrl != null) {
+                    TextButton(onClick = { onConfigure(configureUrl) }) {
                         Text("Configure", style = MaterialTheme.typography.labelSmall)
                     }
                 }

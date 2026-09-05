@@ -106,6 +106,44 @@ class StremioParsingTest {
         )
     }
 
+    // A configured add-on's manifest URL routinely carries a query, and removeSuffix only matches
+    // at the end of the string — so this used to produce "…/manifest.json?token=x/configure": a
+    // link to nothing, opened in the browser at the exact moment the user was trying to make the
+    // add-on work. The query configures the manifest and means nothing to the page that generates
+    // it, so it is dropped rather than carried.
+    @Test
+    fun `builds a configure url from a manifest carrying a query or fragment`() {
+        fun configureUrlOf(transport: String): String? {
+            val json = """[{"transportUrl":"$transport","manifest":{"name":"N",
+                "behaviorHints":{"configurable":true}}}]"""
+            return parseAddonCollection(json, AddonListOrigin.COMMUNITY).single().configureUrl
+        }
+        assertEquals("https://host/configure", configureUrlOf("https://host/manifest.json?token=x"))
+        assertEquals("https://host/configure", configureUrlOf("https://host/manifest.json#frag"))
+        assertEquals("https://host/a/b/configure", configureUrlOf("https://host/a/b/manifest.json?c=1"))
+        // A trailing slash parses to an empty last segment, which must not become "//configure".
+        assertEquals("https://host/a/configure", configureUrlOf("https://host/a/manifest.json/"))
+    }
+
+    // stremio:// is the deep-link spelling of the same address and turns up in hand-written lists.
+    // A browser cannot open it, so it is mapped to https exactly as installation already does.
+    @Test
+    fun `maps the stremio scheme to https for the configure url`() {
+        val json = """[{"transportUrl":"stremio://host/manifest.json","manifest":{"name":"N",
+            "behaviorHints":{"configurable":true}}}]"""
+        assertEquals(
+            "https://host/configure",
+            parseAddonCollection(json, AddonListOrigin.COMMUNITY).single().configureUrl,
+        )
+    }
+
+    @Test
+    fun `an unparseable transport url yields no configure url`() {
+        val json = """[{"transportUrl":"not a url","manifest":{"name":"N",
+            "behaviorHints":{"configurable":true}}}]"""
+        assertNull(parseAddonCollection(json, AddonListOrigin.COMMUNITY).single().configureUrl)
+    }
+
     @Test
     fun `a stream without sources has no trackers`() {
         val json = """{"streams":[{"infoHash":"8c9c2f1e4a5b6d7e8f9a0b1c2d3e4f5a6b7c8d9e"}]}"""

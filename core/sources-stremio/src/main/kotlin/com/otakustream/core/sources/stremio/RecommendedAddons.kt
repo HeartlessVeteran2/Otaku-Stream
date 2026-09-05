@@ -107,10 +107,6 @@ internal object RecommendedAddons {
         ),
     )
 
-    // The manifest URLs above, normalized, so the directory can drop the duplicates that appear in
-    // the fetched lists rather than showing an add-on twice under two different headings.
-    val transportUrls: Set<String> = listings.map { normalizeStremioManifestUrl(it.transportUrl) }.toSet()
-
     private fun recommended(
         name: String,
         description: String,

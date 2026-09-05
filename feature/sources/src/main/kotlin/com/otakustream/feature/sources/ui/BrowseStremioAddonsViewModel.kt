@@ -6,6 +6,7 @@ import com.otakustream.core.database.stremio.StremioRepository
 import com.otakustream.core.sources.stremio.StremioAddonDirectoryClient
 import com.otakustream.core.sources.stremio.StremioAddonInstaller
 import com.otakustream.core.sources.stremio.StremioDirectorySettings
+import com.otakustream.core.sources.stremio.normalizeStremioManifestUrl
 import com.otakustream.core.sources.stremio.model.AddonKind
 import com.otakustream.core.sources.stremio.model.OfficialAddonListing
 import com.otakustream.core.sources.stremio.model.kind
@@ -74,7 +75,14 @@ class BrowseStremioAddonsViewModel @Inject constructor(
             isLoading = loading,
             listings = visible,
             filter = selected,
-            installedUrls = installed.map { it.manifestUrl }.toSet(),
+            // Normalized on both sides, because installation normalizes before saving.
+            //
+            // A listing whose transportUrl is `stremio://…`, or which omits the trailing
+            // /manifest.json, is stored under a different string than the one the row holds — so
+            // comparing raw strings left it reading "Install" after it had just been installed,
+            // and tapping again reinstalled it. Not introduced here, but this is the screen it
+            // shows on, and the curated list makes hand-written URLs more common rather than less.
+            installedUrls = installed.mapTo(mutableSetOf()) { normalizeStremioManifestUrl(it.manifestUrl) },
             installingUrl = installing,
             error = err,
             customListUrl = customUrl.orEmpty(),

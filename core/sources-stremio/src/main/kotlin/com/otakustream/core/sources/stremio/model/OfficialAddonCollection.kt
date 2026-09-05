@@ -2,6 +2,7 @@ package com.otakustream.core.sources.stremio.model
 
 import com.otakustream.core.common.stringOrEmpty
 import com.otakustream.core.common.stringOrNull
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -45,13 +46,41 @@ data class OfficialAddonListing(
     // Stremio add-ons are configured at /configure on the same host, by convention and by the
     // official SDK's own routing. Derived rather than stored because it is a property of the
     // transport URL, and one that cannot then disagree with it.
+    //
+    // Parsed rather than string-sliced. `removeSuffix("/manifest.json")` only matches when the URL
+    // *ends* there, so a manifest carrying a query or fragment — which a configured add-on's URL
+    // often does — fell straight through it and produced
+    // "https://host/manifest.json?token=x/configure": a link to nothing, opened in the user's
+    // browser at the exact moment they were trying to make the add-on work. The query and fragment
+    // are dropped rather than carried, because they configure the *manifest* and mean nothing to
+    // the page that generates them.
+    //
+    // stremio:// is the deep-link spelling of the same address and appears in hand-written lists.
+    // A browser cannot open it, so it is mapped to https the same way installation already does.
     val configureUrl: String?
-        get() = if (!isConfigurable && !configurationRequired) {
-            null
-        } else {
-            transportUrl.removeSuffix("/manifest.json").trimEnd('/') + "/configure"
+        get() {
+            if (!isConfigurable && !configurationRequired) return null
+            val url = transportUrl.trim()
+                .replaceFirst(STREMIO_SCHEME_REGEX, "https://")
+                .toHttpUrlOrNull()
+                ?: return null
+            val builder = url.newBuilder().query(null).fragment(null)
+            val segments = url.pathSegments
+            // A trailing empty segment is what a URL ending in "/" parses to; drop those first so
+            // the manifest.json check below is looking at the real last segment.
+            var last = segments.lastIndex
+            while (last >= 0 && segments[last].isEmpty()) {
+                builder.removePathSegment(last)
+                last--
+            }
+            if (last >= 0 && segments[last].equals("manifest.json", ignoreCase = true)) {
+                builder.removePathSegment(last)
+            }
+            return builder.addPathSegment("configure").build().toString()
         }
 }
+
+private val STREMIO_SCHEME_REGEX = Regex("^stremio://", RegexOption.IGNORE_CASE)
 
 // What an add-on contributes, for a directory that can be filtered down to the part you want.
 enum class AddonKind { STREAMS, CATALOGS, SUBTITLES, OTHER }
