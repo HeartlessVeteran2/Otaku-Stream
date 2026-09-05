@@ -63,7 +63,10 @@ fun PlayerControlsOverlay(
         modifier = modifier
             .fillMaxWidth()
             .background(
-                Brush.verticalGradient(listOf(Color.Transparent, MaterialTheme.colorScheme.background.copy(alpha = 0.9f))),
+                // Black, not colorScheme.background: this sits over video and the player is
+                // always rendered in the dark scheme, so naming the colour is more honest than
+                // depending on a theme role that would be near-white if it ever weren't.
+                Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.9f))),
             )
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {

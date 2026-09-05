@@ -4,16 +4,23 @@
          runtime regardless of what's set here — the root Surface color (set to
          MaterialTheme.colorScheme.background) is what actually determines the tone seen
          behind the transparent status bar. windowBackground matches it so the frames between
-         the splash dismissing and Compose's first draw are brand-navy, not platform grey. -->
+         the splash dismissing and Compose's first draw are the right colour rather than
+         platform grey.
+
+         @color/window_background has a values-night variant, so this resolves to the light or
+         dark background by the system setting. That is the best the resource system can do: it
+         cannot see the in-app Appearance override, so someone who forces light while their phone
+         is dark gets one dark frame before Compose draws. Following the system is the right
+         default for the common case, and one frame is not worth reading a preference file on the
+         way to inflating a window. -->
     <style name="Theme.OtakuStream" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@color/ic_launcher_background</item>
+        <item name="android:windowBackground">@color/window_background</item>
     </style>
 
-    <!-- Cold-start splash: brand navy with the logo mark, handing off to the app theme.
-         Uses the same padded icon asset as the launcher so the mark sits inside the
-         splash icon's circular reveal. -->
+    <!-- Cold-start splash, handing off to the app theme. Uses the same padded icon asset as the
+         launcher so the mark sits inside the splash icon's circular reveal. -->
     <style name="Theme.OtakuStream.Splash" parent="Theme.SplashScreen">
-        <item name="windowSplashScreenBackground">@color/ic_launcher_background</item>
+        <item name="windowSplashScreenBackground">@color/window_background</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_fg</item>
         <item name="postSplashScreenTheme">@style/Theme.OtakuStream</item>
     </style>
