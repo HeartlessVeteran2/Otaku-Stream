@@ -153,7 +153,7 @@ fun parseAddonCollection(json: String, origin: AddonListOrigin): List<OfficialAd
             // parentheses which, since elvis binds tighter than `||`, are not doing anything.
             configurationRequired = hints?.optBoolean("configurationRequired", false) == true ||
                 manifest.optBoolean("configurationRequired", false),
-            isAdult = isAdultManifest(hints, manifest.parseTypeNames()),
+            isAdult = isAdultManifest(hints, types),
             declaredConfigureUrl = hints?.stringOrNull("configureUrl"),
         )
     }
@@ -176,8 +176,3 @@ private val ADULT_TYPE_WORDS = setOf("porn", "hentai", "xxx", "adult", "nsfw", "
 internal fun isAdultManifest(hints: JSONObject?, types: List<String>): Boolean =
     hints?.optBoolean("adult", false) == true ||
         types.any { it.trim().lowercase() in ADULT_TYPE_WORDS }
-
-private fun JSONObject.parseTypeNames(): List<String> {
-    val array = optJSONArray("types") ?: return emptyList()
-    return (0 until array.length()).mapNotNull { array.stringOrNull(it) }
-}

@@ -72,8 +72,9 @@ fun BrowseStremioAddonsScreen(
                     Text(
                         text = "Add-ons recommended for anime lead the list, then the community index at " +
                             "stremio-addons.net, then Stremio's own official and community lists. Stremio's " +
-                            "own lists carry no stream add-ons at all, so everything that resolves a video " +
-                            "comes from the first two groups.",
+                            "own two lists carry no stream add-ons at all, so of what ships with the app, " +
+                            "everything that resolves a video is in the first two groups. A custom list can " +
+                            "add more.",
                         style = MaterialTheme.typography.bodySmall,
                     )
 

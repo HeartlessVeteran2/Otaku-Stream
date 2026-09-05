@@ -25,6 +25,12 @@ data class AddonDirectory(
     // Stremio's own endpoints failed. Reported rather than thrown, because the recommended list is
     // local and still worth showing — see fetchAddonCatalog.
     val builtInListError: String? = null,
+    // The setting these listings were actually filtered on.
+    //
+    // Reported so the switch on screen can be driven by it rather than by a second, independent
+    // read. Two reads of the same preference settle at different times, and the pairing that
+    // produces is the bad one: adult rows listed under a switch that says they are off.
+    val showAdult: Boolean = false,
 )
 
 // Lets users browse add-ons and one-tap install them, like the real Stremio app. Fetches Stremio's
@@ -41,9 +47,8 @@ class StremioAddonDirectoryClient @Inject constructor(
     suspend fun fetchAddonCatalog(): AddonDirectory = coroutineScope {
         val customUrl = directorySettings.get()
         // Read here rather than in the UI, so an adult listing never reaches the screen's state at
-        // all while the setting is off — not merely goes unrendered by it. Read from the store and
-        // not the flow, because the flow starts false and settles asynchronously, which would hide
-        // adult add-ons on every cold start even with the setting on.
+        // all while the setting is off — not merely goes unrendered by it. The value is handed back
+        // in the result so the switch renders from the same read that did the filtering.
         val showAdult = adultContentSettings.get()
         val thirdParty = bundledCommunityAddons.listings()
         val official = async { fetchListing(OFFICIAL_ADDON_COLLECTION_URL, AddonListOrigin.OFFICIAL) }
@@ -110,6 +115,7 @@ class StremioAddonDirectoryClient @Inject constructor(
                 "Couldn't load your custom list: ${failure.message ?: "unknown error"}"
             },
             builtInListError = builtInListError,
+            showAdult = showAdult,
         )
     }
 

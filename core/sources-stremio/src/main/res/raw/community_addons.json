@@ -30,7 +30,7 @@
    "name": "AIOStreams | ElfHosted",
    "types": [],
    "resources": [],
-   "description": "AIOStreams consolidates multiple Stremio addons and debrid services into a single, easily configurable addon. It allows highly customisable filtering,",
+   "description": "AIOStreams consolidates multiple Stremio addons and debrid services into a single, easily configurable addon.",
    "behaviorHints": {
     "configurable": true,
     "configurationRequired": true
@@ -55,7 +55,7 @@
      "name": "stream"
     }
    ],
-   "description": "Watch 12,000+ daily updated premium IPTV channels in English, Spanish, Russian, French, German, Hindi, Chinese and other languages. Explore categories",
+   "description": "Watch 12,000+ daily updated premium IPTV channels in English, Spanish, Russian, French, German, Hindi, Chinese and other languages.",
    "behaviorHints": {
     "configurable": true
    }
@@ -100,7 +100,7 @@
      "name": "subtitles"
     }
    ],
-   "description": "Tip: press Configure and pick your language before installing. Finds the English subtitle for what you are watching and translates it into your langua",
+   "description": "Tip: press Configure and pick your language before installing. Finds the English subtitle for what you are watching and translates it into your language with tested AI models.",
    "behaviorHints": {
     "configurable": true,
     "configurationRequired": true
@@ -122,7 +122,7 @@
      "name": "stream"
     }
    ],
-   "description": "Fornece streams de filmes e series dublados de provedores de torrent. Suporta atualmente ApacheTorrent(+), BaixaFilmesTorrentHD(+), EraiRaws(+), HDRTo",
+   "description": "Fornece streams de filmes e series dublados de provedores de torrent.",
    "behaviorHints": {
     "configurable": true
    }
@@ -431,7 +431,7 @@
      "name": "stream"
     }
    ],
-   "description": "Access your Trakt.tv watchlists, collections, custom lists, trending content and calendars directly in Stremio. Seamlessly browse your personal movie ",
+   "description": "Access your Trakt.tv watchlists, collections, custom lists, trending content and calendars directly in Stremio.",
    "behaviorHints": {
     "configurable": true,
     "configurationRequired": true
@@ -517,7 +517,7 @@
      "name": "subtitles"
     }
    ],
-   "description": "Provides Persian subtitles from the SubSource API.\n\nAuthor: Ali Rostami  \nWebsite: alirostami.com/support \nGitHub: https://github.com/alirostami01/Per"
+   "description": "Provides Persian subtitles from the SubSource API. Author: Ali Rostami Website: alirostami.com/support GitHub: https://github.com/alirostami01/Persian-Subtitles/"
   }
  },
  {
@@ -680,7 +680,7 @@
      "name": "meta"
     }
    ],
-   "description": "Streaming Catalog Plus organizes general movies and series by platform (Netflix, Disney+, Prime Video, HBO Max, SkyShowtime and Crunchyroll), excludin",
+   "description": "Streaming Catalog Plus organizes general movies and series by platform (Netflix, Disney+, Prime Video, HBO Max, SkyShowtime and Crunchyroll), excluding kids content and adding…",
    "behaviorHints": {
     "configurable": true,
     "configurationRequired": true
@@ -723,7 +723,7 @@
      "name": "subtitles"
     }
    ],
-   "description": "Subtitle aggregator that fetches subtitles in your selected languages from multiple sources including OpenSubtitles, SubDL, SubSource, AnimeTosho and ",
+   "description": "Subtitle aggregator that fetches subtitles in your selected languages from multiple sources including OpenSubtitles, SubDL, SubSource, AnimeTosho and more.",
    "behaviorHints": {
     "configurable": true,
     "configurationRequired": true
@@ -768,7 +768,7 @@
      "name": "meta"
     }
    ],
-   "description": "Stremio addon that provides rich metadata for movies and TV shows from TMDB, featuring customizable catalogs, multi-language support, favorites lists,",
+   "description": "Stremio addon that provides rich metadata for movies and TV shows from TMDB, featuring customizable catalogs, multi-language support, favorites lists, watchlist, ratings, and IMDb…",
    "behaviorHints": {
     "configurable": true
    }
@@ -790,7 +790,7 @@
      "name": "meta"
     }
    ],
-   "description": "One addon instead of eight: streams, TMDB metadata, subtitles, anime IDs and debrid — all in one. Replaces Torrentio + Cinemeta + OpenSubtitles + Anim",
+   "description": "One addon instead of eight: streams, TMDB metadata, subtitles, anime IDs and debrid — all in one. Replaces Torrentio + Cinemeta + OpenSubtitles + Anime Kitsu.",
    "behaviorHints": {
     "configurable": true
    }
@@ -811,7 +811,7 @@
      "name": "stream"
     }
    ],
-   "description": "Provides torrent streams from scraped torrent providers. Currently supports YTS(+), EZTV(+), 1337x(+), TorrentCSV(+), 1lou(+), Nyaa(+), Sk-CzTorrent(+",
+   "description": "Provides torrent streams from scraped torrent providers. Currently supports YTS(+), EZTV(+), 1337x(+), TorrentCSV(+), 1lou(+), Nyaa(+), Sk-CzTorrent(+), 1TamilBlasters(+)…",
    "behaviorHints": {
     "configurable": true
    }
@@ -838,7 +838,7 @@
      "name": "stream"
     }
    ],
-   "description": "Stremio and Nuvio addon with 4K, HD & VR, MegaPack adult streams from 12+ P2P indexers (ThePirateBay, PornRips, Sukebei and more via Knaben) and 35+ t",
+   "description": "Stremio and Nuvio addon with 4K, HD & VR, MegaPack adult streams from 12+ P2P indexers (ThePirateBay, PornRips, Sukebei and more via Knaben) and 35+ tube sites, plus Stripchat and…",
    "behaviorHints": {
     "configurable": true,
     "configureUrl": "https://tpb-adult-addon.click/configure",

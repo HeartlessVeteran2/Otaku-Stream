@@ -60,6 +60,11 @@ class BrowseStremioAddonsViewModel @Inject constructor(
 
     private val listings = MutableStateFlow<List<OfficialAddonListing>>(emptyList())
     private val filter = MutableStateFlow(AddonFilter.ALL)
+
+    // Driven by what the directory actually filtered on, not by a second read of the preference.
+    // Two independent reads settle at different moments, and the pairing that produces is the one
+    // that must never happen: adult rows on screen under a switch that reads off.
+    private val showAdult = MutableStateFlow(false)
     private val isLoading = MutableStateFlow(false)
     private val installingUrl = MutableStateFlow<String?>(null)
     private val error = MutableStateFlow<String?>(null)
@@ -74,7 +79,7 @@ class BrowseStremioAddonsViewModel @Inject constructor(
             error,
             directorySettings.customListUrl,
             customListError,
-            adultContentSettings.showAdult,
+            showAdult,
         ) { err, customUrl, customErr, adult ->
             DirectoryPrefsState(err, customUrl, customErr, adult)
         },
@@ -107,12 +112,28 @@ class BrowseStremioAddonsViewModel @Inject constructor(
         filter.value = selected
     }
 
-    // Saved, then reloaded — in that order and awaited, because the fetch reads this store to
-    // decide what to include. Reloading first, or not awaiting the save, would filter on the
-    // previous value and show the user the opposite of what they just chose.
+    // Turning it off hides what is already on screen *before* anything is saved or refetched.
+    //
+    // The reload is what rebuilds the list properly, but it is a network round trip that can be
+    // slow and can fail — and until it returns, the adult rows fetched under the old setting are
+    // still being rendered. Leaving them there for the duration is precisely the thing this switch
+    // exists to prevent, so the off case does not wait for anything it does not have to.
+    //
+    // Turning it *on* has no such urgency and stays purely reload-driven: nothing can be shown
+    // early that was not already fetched.
     fun setShowAdult(enabled: Boolean) {
+        if (!enabled) {
+            showAdult.value = false
+            listings.value = listings.value.filterNot { it.isAdult }
+        }
         viewModelScope.launch {
-            adultContentSettings.set(enabled)
+            // The switch follows the store, not the tap. A preferences write can fail, and a switch
+            // that moved while the setting did not would disagree with the directory on the next
+            // load — and would disagree in the direction of showing more than the user asked for.
+            val stored = adultContentSettings.set(enabled)
+            if (!stored) {
+                error.value = "Couldn't save that setting."
+            }
             load()
         }
     }
@@ -131,6 +152,7 @@ class BrowseStremioAddonsViewModel @Inject constructor(
             runCatching { directoryClient.fetchAddonCatalog() }
                 .onSuccess { directory ->
                     listings.value = directory.listings
+                    showAdult.value = directory.showAdult
                     customListError.value = directory.customListError
                     // A banner beside the recommended list rather than instead of it: the fetched
                     // lists being unreachable no longer empties the screen.
