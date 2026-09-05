@@ -125,6 +125,10 @@ class BrowseStremioAddonsViewModel @Inject constructor(
     // early that was not already fetched.
     fun setShowAdult(enabled: Boolean) {
         if (!enabled) {
+            // The in-flight load goes first. It was started under the old setting, and if it lands
+            // after the hide below it publishes its own list straight over the top — putting the
+            // adult rows back on a screen whose switch now reads off.
+            loadJob?.cancel()
             showAdult.value = false
             listings.value = listings.value.filterNot { it.isAdult }
         }
@@ -145,6 +149,13 @@ class BrowseStremioAddonsViewModel @Inject constructor(
                 // the next load — in the direction of showing more than the user asked for.
                 if (!adultContentSettings.set(target)) {
                     error.value = "Couldn't save that setting."
+                    // Deliberately no reload. The write failed, so the store still holds the old
+                    // value — and reloading reads the store, which for a failed switch-off would
+                    // fetch with adult content still enabled and put back the rows just hidden.
+                    // The screen keeps the safe state and says the setting did not save; a
+                    // deliberate Retry is what re-reads the store.
+                    isLoading.value = false
+                    return@withLock
                 }
                 load()
             }
@@ -180,8 +191,11 @@ class BrowseStremioAddonsViewModel @Inject constructor(
                     if (failure is CancellationException) throw failure
                     error.value = failure.message ?: "Failed to load addon catalog"
                 }
-            isLoading.value = false
         }
+        // In an invokeOnCompletion rather than at the end of the body, so a cancelled load clears
+        // the spinner too. setShowAdult cancels an in-flight load, and without this the screen would
+        // sit showing progress for a fetch that is never coming back.
+        loadJob?.invokeOnCompletion { isLoading.value = false }
     }
 
     // Saving re-fetches so the list the user just added (or removed) is reflected immediately. The
