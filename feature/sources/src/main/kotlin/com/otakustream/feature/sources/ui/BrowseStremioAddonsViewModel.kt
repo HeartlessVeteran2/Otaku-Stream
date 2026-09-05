@@ -154,7 +154,12 @@ class BrowseStremioAddonsViewModel @Inject constructor(
                     // fetch with adult content still enabled and put back the rows just hidden.
                     // The screen keeps the safe state and says the setting did not save; a
                     // deliberate Retry is what re-reads the store.
-                    isLoading.value = false
+                    //
+                    // The spinner is deliberately not touched here. It belongs to load(), and
+                    // clearing it from this path would hide progress for a fetch still running —
+                    // which is exactly what happens when the switch is turned *on* during a load,
+                    // since that path does not cancel anything. Where a load was cancelled (the
+                    // off path above), its own completion callback has already cleared it.
                     return@withLock
                 }
                 load()
@@ -192,10 +197,17 @@ class BrowseStremioAddonsViewModel @Inject constructor(
                     error.value = failure.message ?: "Failed to load addon catalog"
                 }
         }
+        // `isLoading` is written here and nowhere else, and only by the job that currently owns it.
+        //
         // In an invokeOnCompletion rather than at the end of the body, so a cancelled load clears
-        // the spinner too. setShowAdult cancels an in-flight load, and without this the screen would
+        // the spinner too — setShowAdult cancels an in-flight load, and otherwise the screen would
         // sit showing progress for a fetch that is never coming back.
-        loadJob?.invokeOnCompletion { isLoading.value = false }
+        //
+        // Guarded on identity, because completion runs for cancellation as well, and a cancelled
+        // load's callback can fire *after* the load that replaced it has already set the spinner
+        // going. Clearing it then would hide progress for a fetch that is very much still running.
+        val started = loadJob
+        started?.invokeOnCompletion { if (loadJob === started) isLoading.value = false }
     }
 
     // Saving re-fetches so the list the user just added (or removed) is reflected immediately. The
