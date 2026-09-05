@@ -100,11 +100,15 @@ fun parseAddonCollection(json: String, origin: AddonListOrigin): List<OfficialAd
             types = types,
             origin = origin,
             resources = manifest.parseResourceNames(),
-            isConfigurable = hints?.optBoolean("configurable", false) ?: false,
+            isConfigurable = hints?.optBoolean("configurable", false) == true,
             // Read from both places it is written. The protocol puts it in behaviorHints; enough
             // add-ons put it at the top level of the manifest instead that reading only one of them
             // would let a configure-first add-on install as though it were ready to use.
-            configurationRequired = (hints?.optBoolean("configurationRequired", false) ?: false) ||
+            //
+            // `== true` rather than an elvis: on a nullable Boolean it means the same thing, and it
+            // does not need the parentheses that `?: false ||` wants in order to be readable —
+            // parentheses which, since elvis binds tighter than `||`, are not doing anything.
+            configurationRequired = hints?.optBoolean("configurationRequired", false) == true ||
                 manifest.optBoolean("configurationRequired", false),
         )
     }
