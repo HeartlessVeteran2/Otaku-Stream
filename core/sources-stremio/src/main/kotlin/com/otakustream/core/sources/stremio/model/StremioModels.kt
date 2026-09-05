@@ -74,15 +74,24 @@ data class StremioSubtitle(val id: String, val url: String, val lang: String)
 
 data class StremioSubtitleResponse(val subtitles: List<StremioSubtitle>)
 
+// "resources" entries are either a plain string ("catalog") or an object with a "name" field
+// ({"name": "catalog", "types": [...], "idPrefixes": [...]}) depending on the add-on. Both forms are
+// current, and the add-ons that matter most — Comet, MediaFusion — use the object form.
+//
+// One implementation, used by both the installed-add-on path (parseManifest) and the directory
+// listing path (parseAddonCollection). They had a copy each, and a second reading of a format that
+// is still gaining shapes is a second thing to remember to update.
+internal fun JSONObject.resourceNames(): List<String> {
+    val array = optJSONArray("resources") ?: return emptyList()
+    return (0 until array.length()).mapNotNull { index ->
+        val obj = array.optJSONObject(index)
+        if (obj != null) obj.stringOrEmpty("name").ifEmpty { null } else array.stringOrNull(index)
+    }
+}
+
 fun parseManifest(json: String): StremioManifest {
     val root = JSONObject(json)
-    val resourcesArray = root.optJSONArray("resources") ?: JSONArray()
-    // "resources" entries can be either a plain string ("catalog") or an object with a "name"
-    // field ({"name": "catalog", ...}) depending on the addon.
-    val resources = (0 until resourcesArray.length()).mapNotNull { index ->
-        val obj = resourcesArray.optJSONObject(index)
-        if (obj != null) obj.stringOrEmpty("name").ifEmpty { null } else resourcesArray.stringOrNull(index)
-    }
+    val resources = root.resourceNames()
     val catalogsArray = root.optJSONArray("catalogs") ?: JSONArray()
     val catalogs = (0 until catalogsArray.length()).map { index ->
         val entry = catalogsArray.getJSONObject(index)

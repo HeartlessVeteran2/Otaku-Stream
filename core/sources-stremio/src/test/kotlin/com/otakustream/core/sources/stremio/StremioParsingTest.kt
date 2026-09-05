@@ -1,9 +1,13 @@
 package com.otakustream.core.sources.stremio
 
+import com.otakustream.core.sources.stremio.model.AddonKind
 import com.otakustream.core.sources.stremio.model.AddonListOrigin
+import com.otakustream.core.sources.stremio.model.OfficialAddonListing
+import com.otakustream.core.sources.stremio.model.kind
 import com.otakustream.core.sources.stremio.model.parseAddonCollection
 import com.otakustream.core.sources.stremio.model.parseStreamResponse
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -32,6 +36,177 @@ class StremioParsingTest {
             listOf("udp://tracker.opentrackr.org:1337/announce", "http://tracker.example.com/announce"),
             stream.trackers,
         )
+    }
+
+    // Both forms are current, and the add-ons that matter most here — Comet, MediaFusion — use the
+    // object form. Reading only the string form left every one of them classified as "other",
+    // which is the bucket the directory filter cannot show under Streams.
+    @Test
+    fun `reads resource names in both the string and object forms`() {
+        val json = """
+            [{"transportUrl":"https://x/manifest.json","manifest":{
+              "name":"Mixed",
+              "resources":["catalog",{"name":"stream","types":["movie"]},{"name":"meta"}]
+            }}]
+        """.trimIndent()
+        val listing = parseAddonCollection(json, AddonListOrigin.COMMUNITY).single()
+        assertEquals(listOf("catalog", "stream", "meta"), listing.resources)
+        // Streams wins when an add-on does several things: it is the scarce one, and the one
+        // someone browsing this screen is looking for.
+        assertEquals(AddonKind.STREAMS, listing.kind())
+    }
+
+    @Test
+    fun `classifies catalogs and subtitles`() {
+        fun listingWith(vararg resources: String): OfficialAddonListing {
+            val res = resources.joinToString(",") { "\"$it\"" }
+            val json = """[{"transportUrl":"https://x/manifest.json","manifest":{"name":"N","resources":[$res]}}]"""
+            return parseAddonCollection(json, AddonListOrigin.COMMUNITY).single()
+        }
+        assertEquals(AddonKind.CATALOGS, listingWith("catalog", "meta").kind())
+        assertEquals(AddonKind.SUBTITLES, listingWith("subtitles").kind())
+        // No resources at all is what a configuration-required add-on serves until it is
+        // configured; it is not a stream add-on yet and must not claim to be.
+        assertEquals(AddonKind.OTHER, listingWith().kind())
+    }
+
+    // An add-on that serves nothing until configured installs perfectly happily and then returns no
+    // streams forever, which looks exactly like a broken app. Both spellings are read because
+    // add-ons use both.
+    @Test
+    fun `reads configurable and configuration-required from either place`() {
+        val hinted = """[{"transportUrl":"https://x/manifest.json","manifest":{"name":"N",
+            "behaviorHints":{"configurable":true,"configurationRequired":true}}}]"""
+        parseAddonCollection(hinted, AddonListOrigin.COMMUNITY).single().let {
+            assertTrue(it.isConfigurable)
+            assertTrue(it.configurationRequired)
+            assertEquals("https://x/configure", it.configureUrl)
+        }
+
+        val topLevel = """[{"transportUrl":"https://x/manifest.json","manifest":{"name":"N",
+            "configurationRequired":true}}]"""
+        assertTrue(parseAddonCollection(topLevel, AddonListOrigin.COMMUNITY).single().configurationRequired)
+
+        val plain = """[{"transportUrl":"https://x/manifest.json","manifest":{"name":"N"}}]"""
+        parseAddonCollection(plain, AddonListOrigin.COMMUNITY).single().let {
+            assertFalse(it.isConfigurable)
+            assertNull(it.configureUrl)
+        }
+    }
+
+    // The configure page lives at /configure on the same host, by convention and by the official
+    // SDK's routing — including for an add-on whose manifest sits under a path.
+    @Test
+    fun `derives the configure url from the transport url`() {
+        val json = """[{"transportUrl":"https://host/stremio/torz/manifest.json","manifest":{"name":"N",
+            "behaviorHints":{"configurable":true}}}]"""
+        assertEquals(
+            "https://host/stremio/torz/configure",
+            parseAddonCollection(json, AddonListOrigin.COMMUNITY).single().configureUrl,
+        )
+    }
+
+    // A configured add-on's manifest URL routinely carries a query, and removeSuffix only matches
+    // at the end of the string — so this used to produce "…/manifest.json?token=x/configure": a
+    // link to nothing, opened in the browser at the exact moment the user was trying to make the
+    // add-on work. The query configures the manifest and means nothing to the page that generates
+    // it, so it is dropped rather than carried.
+    @Test
+    fun `builds a configure url from a manifest carrying a query or fragment`() {
+        fun configureUrlOf(transport: String): String? {
+            val json = """[{"transportUrl":"$transport","manifest":{"name":"N",
+                "behaviorHints":{"configurable":true}}}]"""
+            return parseAddonCollection(json, AddonListOrigin.COMMUNITY).single().configureUrl
+        }
+        assertEquals("https://host/configure", configureUrlOf("https://host/manifest.json?token=x"))
+        assertEquals("https://host/configure", configureUrlOf("https://host/manifest.json#frag"))
+        assertEquals("https://host/a/b/configure", configureUrlOf("https://host/a/b/manifest.json?c=1"))
+        // A trailing slash parses to an empty last segment, which must not become "//configure".
+        assertEquals("https://host/a/configure", configureUrlOf("https://host/a/manifest.json/"))
+    }
+
+    // stremio:// is the deep-link spelling of the same address and turns up in hand-written lists.
+    // A browser cannot open it, so it is mapped to https exactly as installation already does.
+    @Test
+    fun `maps the stremio scheme to https for the configure url`() {
+        val json = """[{"transportUrl":"stremio://host/manifest.json","manifest":{"name":"N",
+            "behaviorHints":{"configurable":true}}}]"""
+        assertEquals(
+            "https://host/configure",
+            parseAddonCollection(json, AddonListOrigin.COMMUNITY).single().configureUrl,
+        )
+    }
+
+    @Test
+    fun `an unparseable transport url yields no configure url`() {
+        val json = """[{"transportUrl":"not a url","manifest":{"name":"N",
+            "behaviorHints":{"configurable":true}}}]"""
+        assertNull(parseAddonCollection(json, AddonListOrigin.COMMUNITY).single().configureUrl)
+    }
+
+    private fun listingOf(manifestJson: String): OfficialAddonListing =
+        parseAddonCollection(
+            """[{"transportUrl":"https://x/manifest.json","manifest":$manifestJson}]""",
+            AddonListOrigin.COMMUNITY,
+        ).single()
+
+    // behaviorHints.adult is the protocol's flag and is believed whenever set.
+    @Test
+    fun `reads the adult flag from behaviorHints`() {
+        assertTrue(listingOf("""{"name":"N","behaviorHints":{"adult":true}}""").isAdult)
+        assertFalse(listingOf("""{"name":"N","behaviorHints":{"adult":false}}""").isAdult)
+        assertFalse(listingOf("""{"name":"N"}""").isAdult)
+    }
+
+    // The flag alone is not enough, and this is measured rather than assumed: of the four adult
+    // add-ons in the community directory, two set behaviorHints.adult and two set no behaviorHints
+    // at all. Trusting only the flag would show pornography to someone who left the setting off.
+    // Their declared types are what give them away.
+    @Test
+    fun `treats an adult content type as adult even with no behaviorHints`() {
+        assertTrue(listingOf("""{"name":"N","types":["Porn","hentai","series"]}""").isAdult)
+        assertTrue(listingOf("""{"name":"N","types":["XXX"]}""").isAdult)
+        assertTrue(listingOf("""{"name":"N","types":["adult"]}""").isAdult)
+    }
+
+    // The ordinary types must not trip it — an anime add-on is not adult for saying "anime".
+    @Test
+    fun `ordinary content types are not adult`() {
+        assertFalse(listingOf("""{"name":"N","types":["anime","movie","series","tv","other"]}""").isAdult)
+    }
+
+    // An add-on that names its own configure page is the authority on where that page is; the
+    // /configure convention is only the fallback. TPB 4K Porn is one that sets this.
+    @Test
+    fun `a declared configure url beats the derived one`() {
+        val listing = listingOf(
+            """{"name":"N","behaviorHints":{"configurable":true,"configureUrl":"https://elsewhere.test/setup"}}""",
+        )
+        assertEquals("https://elsewhere.test/setup", listing.configureUrl)
+    }
+
+    @Test
+    fun `a blank declared configure url falls back to the convention`() {
+        val listing = listingOf("""{"name":"N","behaviorHints":{"configurable":true,"configureUrl":"  "}}""")
+        assertEquals("https://x/configure", listing.configureUrl)
+    }
+
+    // An add-on-supplied configureUrl ends up in an ACTION_VIEW intent, so anything that is not an
+    // absolute http(s) URL falls back to the derived page rather than being handed to whatever app
+    // claims that scheme.
+    @Test
+    fun `a declared configure url that is not http falls back to the convention`() {
+        fun configureUrlFor(declared: String): String? = listingOf(
+            """{"name":"N","behaviorHints":{"configurable":true,"configureUrl":"$declared"}}""",
+        ).configureUrl
+        assertEquals("https://x/configure", configureUrlFor("javascript:alert(1)"))
+        assertEquals("https://x/configure", configureUrlFor("intent://evil#Intent;end"))
+        assertEquals("https://x/configure", configureUrlFor("file:///etc/passwd"))
+        assertEquals("https://x/configure", configureUrlFor("not a url at all"))
+        assertEquals("https://x/configure", configureUrlFor("/relative/configure"))
+        // A real one still wins.
+        assertEquals("https://elsewhere.test/setup", configureUrlFor("https://elsewhere.test/setup"))
+        assertEquals("http://plain.test/setup", configureUrlFor("http://plain.test/setup"))
     }
 
     @Test

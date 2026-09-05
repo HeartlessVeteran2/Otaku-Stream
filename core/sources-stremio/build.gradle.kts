@@ -13,6 +13,15 @@ android {
         minSdk = 24
     }
 
+    // The shipped res/raw is the unit tests' resource root too, so BundledCommunityAddonsTest reads
+    // the very file the app loads rather than a copy of it. A copy would pass while the real
+    // catalogue drifted — and drifting is precisely what a checked-in harvest does.
+    sourceSets {
+        getByName("test") {
+            resources.srcDir("src/main/res/raw")
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
