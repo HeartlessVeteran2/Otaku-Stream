@@ -26,6 +26,7 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -69,13 +70,16 @@ fun BrowseStremioAddonsScreen(
             item {
                 Column {
                     Text(
-                        text = "Add-ons recommended for anime lead the list; below them is Stremio's own " +
-                            "official and community directory. Note that Stremio's lists carry no stream " +
-                            "add-ons at all — everything that resolves a video is in the first group.",
+                        text = "Add-ons recommended for anime lead the list, then the community index at " +
+                            "stremio-addons.net, then Stremio's own official and community lists. Stremio's " +
+                            "own lists carry no stream add-ons at all, so everything that resolves a video " +
+                            "comes from the first two groups.",
                         style = MaterialTheme.typography.bodySmall,
                     )
 
                     FilterRow(selected = uiState.filter, onSelect = viewModel::setFilter)
+
+                    AdultToggle(checked = uiState.showAdult, onChange = viewModel::setShowAdult)
 
                     CustomListField(
                         savedUrl = uiState.customListUrl,
@@ -156,6 +160,30 @@ private fun FilterRow(selected: AddonFilter, onSelect: (AddonFilter) -> Unit) {
                 label = { Text(option.label, style = MaterialTheme.typography.labelMedium) },
             )
         }
+    }
+}
+
+// Off until switched on, and phrased so it is obvious what switching it on does.
+//
+// The row exists at all because the directory carries adult add-ons that are worth having if you
+// want them and worth never seeing if you don't — and because the two Stremio lists it merges are
+// not the only source: a custom list is arbitrary. The switch governs every origin, not just the
+// curated one.
+@Composable
+private fun AdultToggle(checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text("Show adult add-ons", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                text = "Off by default. Includes pornography.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onChange)
     }
 }
 
@@ -303,12 +331,14 @@ private fun AddonListingRow(
 private fun OriginChip(origin: AddonListOrigin) {
     val color = when (origin) {
         AddonListOrigin.RECOMMENDED -> MaterialTheme.colorScheme.primary
+        AddonListOrigin.THIRD_PARTY -> MaterialTheme.colorScheme.tertiary
         AddonListOrigin.OFFICIAL -> MaterialTheme.colorScheme.primary
         AddonListOrigin.COMMUNITY -> MaterialTheme.colorScheme.tertiary
         AddonListOrigin.CUSTOM -> MaterialTheme.colorScheme.secondary
     }
     val label = when (origin) {
         AddonListOrigin.RECOMMENDED -> "For anime"
+        AddonListOrigin.THIRD_PARTY -> "stremio-addons.net"
         AddonListOrigin.OFFICIAL -> "Official"
         AddonListOrigin.COMMUNITY -> "Community"
         AddonListOrigin.CUSTOM -> "Custom list"

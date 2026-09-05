@@ -17,6 +17,11 @@ enum class AddonListOrigin {
     // somewhere else, which is a thing you have to already know to do. This is that knowledge,
     // written down.
     RECOMMENDED,
+    // Harvested from stremio-addons.net, the community-maintained index where the add-ons Stremio's
+    // own collection will not carry actually get listed. Bundled with the app rather than fetched:
+    // that site is a server-rendered app with no JSON API, and its manifest URLs live one page per
+    // add-on, so reading it live would mean scraping fifty pages of markup that can change any day.
+    THIRD_PARTY,
     OFFICIAL,
     COMMUNITY,
     CUSTOM,
@@ -42,6 +47,11 @@ data class OfficialAddonListing(
     // The add-on does nothing at all until configured. Installing one blind produces a source that
     // is silently empty forever, which looks exactly like a broken app.
     val configurationRequired: Boolean = false,
+    // Adult content. Hidden from the directory unless the user turns it on.
+    val isAdult: Boolean = false,
+    // The add-on's own configure page, when its manifest names one, rather than the /configure
+    // convention derived below. Some adult and debrid add-ons host it off the manifest's own path.
+    val declaredConfigureUrl: String? = null,
 ) {
     // Stremio add-ons are configured at /configure on the same host, by convention and by the
     // official SDK's own routing. Derived rather than stored because it is a property of the
@@ -60,6 +70,10 @@ data class OfficialAddonListing(
     val configureUrl: String?
         get() {
             if (!isConfigurable && !configurationRequired) return null
+            // What the add-on says about itself beats the convention. `behaviorHints.configureUrl`
+            // is a real field — TPB 4K Porn is one that sets it — and an add-on that names its own
+            // page is the authority on where that page is.
+            declaredConfigureUrl?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
             val url = transportUrl.trim()
                 .replaceFirst(STREMIO_SCHEME_REGEX, "https://")
                 .toHttpUrlOrNull()
@@ -139,6 +153,31 @@ fun parseAddonCollection(json: String, origin: AddonListOrigin): List<OfficialAd
             // parentheses which, since elvis binds tighter than `||`, are not doing anything.
             configurationRequired = hints?.optBoolean("configurationRequired", false) == true ||
                 manifest.optBoolean("configurationRequired", false),
+            isAdult = isAdultManifest(hints, manifest.parseTypeNames()),
+            declaredConfigureUrl = hints?.stringOrNull("configureUrl"),
         )
     }
+}
+
+// Words that only appear as a content type on adult add-ons.
+private val ADULT_TYPE_WORDS = setOf("porn", "hentai", "xxx", "adult", "nsfw", "erotic")
+
+// Whether a listing is adult content.
+//
+// `behaviorHints.adult` is the protocol's own flag and is believed whenever it is set. It is not
+// enough on its own: of four adult add-ons in the community directory, two set it and two set no
+// behaviorHints at all, so trusting only the flag would show hard pornography to someone who had
+// left the setting off. The types are the second reading — an add-on declaring a type of "Porn" or
+// "hentai" has said what it is regardless of which fields it bothered to fill in.
+//
+// Deliberately errs toward marking things adult. The cost of a false positive is one add-on hidden
+// behind a switch the user can flip; the cost of a false negative is the thing that switch exists
+// to prevent.
+internal fun isAdultManifest(hints: JSONObject?, types: List<String>): Boolean =
+    hints?.optBoolean("adult", false) == true ||
+        types.any { it.trim().lowercase() in ADULT_TYPE_WORDS }
+
+private fun JSONObject.parseTypeNames(): List<String> {
+    val array = optJSONArray("types") ?: return emptyList()
+    return (0 until array.length()).mapNotNull { array.stringOrNull(it) }
 }

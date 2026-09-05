@@ -35,9 +35,17 @@ data class AddonDirectory(
 class StremioAddonDirectoryClient @Inject constructor(
     private val httpClient: OkHttpClient,
     private val directorySettings: StremioDirectorySettings,
+    private val adultContentSettings: AdultContentSettings,
+    private val bundledCommunityAddons: BundledCommunityAddons,
 ) {
     suspend fun fetchAddonCatalog(): AddonDirectory = coroutineScope {
         val customUrl = directorySettings.get()
+        // Read here rather than in the UI, so an adult listing never reaches the screen's state at
+        // all while the setting is off — not merely goes unrendered by it. Read from the store and
+        // not the flow, because the flow starts false and settles asynchronously, which would hide
+        // adult add-ons on every cold start even with the setting on.
+        val showAdult = adultContentSettings.get()
+        val thirdParty = bundledCommunityAddons.listings()
         val official = async { fetchListing(OFFICIAL_ADDON_COLLECTION_URL, AddonListOrigin.OFFICIAL) }
         val community = async { fetchListing(COMMUNITY_ADDON_COLLECTION_URL, AddonListOrigin.COMMUNITY) }
         // Fetched as a Result rather than null-on-failure: unlike the two built-in collections, a
@@ -76,9 +84,19 @@ class StremioAddonDirectoryClient @Inject constructor(
         // a stream.
         val merged = (
             RecommendedAddons.listings +
+                (if (showAdult) RecommendedAddons.adultListings else emptyList()) +
+                // After the curated picks and before Stremio's own lists: these are the add-ons
+                // that resolve video, which is what the screen is for, but they are a whole
+                // community index rather than a chosen few.
+                thirdParty +
                 builtIn.filterNotNull().flatten() +
                 customResult?.getOrNull().orEmpty()
             )
+            // Applies to every origin, not just the curated tier. Stremio's own two lists happen to
+            // carry no adult entries today — checked, both are zero — but a custom list the user
+            // pointed at is arbitrary, and the setting has to mean the same thing wherever a
+            // listing came from.
+            .filterNot { it.isAdult && !showAdult }
             .filterNot { it.origin in FETCHED_ORIGINS && isUnreachableOnDevice(it.transportUrl) }
             .distinctBy { normalizeStremioManifestUrl(it.transportUrl) }
 

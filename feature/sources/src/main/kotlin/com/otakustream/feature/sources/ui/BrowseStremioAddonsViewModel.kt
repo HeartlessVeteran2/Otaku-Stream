@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.otakustream.core.database.stremio.StremioRepository
 import com.otakustream.core.sources.stremio.StremioAddonDirectoryClient
 import com.otakustream.core.sources.stremio.StremioAddonInstaller
+import com.otakustream.core.sources.stremio.AdultContentSettings
 import com.otakustream.core.sources.stremio.StremioDirectorySettings
 import com.otakustream.core.sources.stremio.normalizeStremioManifestUrl
 import com.otakustream.core.sources.stremio.model.AddonKind
@@ -44,6 +45,7 @@ data class BrowseStremioUiState(
     // Reported separately from `error`: a broken custom list must not read as the whole directory
     // being down, since the official and community add-ons are still listed below it.
     val customListError: String? = null,
+    val showAdult: Boolean = false,
 )
 
 @HiltViewModel
@@ -53,6 +55,7 @@ class BrowseStremioAddonsViewModel @Inject constructor(
     private val stremioRepository: StremioRepository,
     private val sourceRepository: SourceRepository,
     private val directorySettings: StremioDirectorySettings,
+    private val adultContentSettings: AdultContentSettings,
 ) : ViewModel() {
 
     private val listings = MutableStateFlow<List<OfficialAddonListing>>(emptyList())
@@ -67,10 +70,15 @@ class BrowseStremioAddonsViewModel @Inject constructor(
         stremioRepository.observeAddons(),
         isLoading,
         installingUrl,
-        combine(error, directorySettings.customListUrl, customListError) { err, customUrl, customErr ->
-            Triple(err, customUrl, customErr)
+        combine(
+            error,
+            directorySettings.customListUrl,
+            customListError,
+            adultContentSettings.showAdult,
+        ) { err, customUrl, customErr, adult ->
+            DirectoryPrefsState(err, customUrl, customErr, adult)
         },
-    ) { (visible, selected), installed, loading, installing, (err, customUrl, customErr) ->
+    ) { (visible, selected), installed, loading, installing, prefs ->
         BrowseStremioUiState(
             isLoading = loading,
             listings = visible,
@@ -84,9 +92,10 @@ class BrowseStremioAddonsViewModel @Inject constructor(
             // shows on, and the curated list makes hand-written URLs more common rather than less.
             installedUrls = installed.mapTo(mutableSetOf()) { normalizeStremioManifestUrl(it.manifestUrl) },
             installingUrl = installing,
-            error = err,
-            customListUrl = customUrl.orEmpty(),
-            customListError = customErr,
+            error = prefs.error,
+            customListUrl = prefs.customListUrl.orEmpty(),
+            customListError = prefs.customListError,
+            showAdult = prefs.showAdult,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BrowseStremioUiState())
 
@@ -96,6 +105,16 @@ class BrowseStremioAddonsViewModel @Inject constructor(
 
     fun setFilter(selected: AddonFilter) {
         filter.value = selected
+    }
+
+    // Saved, then reloaded — in that order and awaited, because the fetch reads this store to
+    // decide what to include. Reloading first, or not awaiting the save, would filter on the
+    // previous value and show the user the opposite of what they just chose.
+    fun setShowAdult(enabled: Boolean) {
+        viewModelScope.launch {
+            adultContentSettings.set(enabled)
+            load()
+        }
     }
 
     // A newer load supersedes an older one rather than racing it: Retry and Save both call this, and
@@ -170,3 +189,14 @@ private fun List<OfficialAddonListing>.filteredBy(filter: AddonFilter): List<Off
         AddonFilter.CATALOGS -> filter { it.kind() == AddonKind.CATALOGS }
         AddonFilter.SUBTITLES -> filter { it.kind() == AddonKind.SUBTITLES }
     }
+
+// The four values that ride together through the combine, which is capped at five flows. A named
+// holder rather than another nested Triple: the previous destructuring was already at the edge of
+// readable, and adding a fourth positional field to it would make a mis-ordered argument a silent
+// bug rather than a compile error.
+private data class DirectoryPrefsState(
+    val error: String?,
+    val customListUrl: String?,
+    val customListError: String?,
+    val showAdult: Boolean,
+)

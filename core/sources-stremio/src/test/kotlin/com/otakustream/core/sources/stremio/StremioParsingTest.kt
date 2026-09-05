@@ -144,6 +144,53 @@ class StremioParsingTest {
         assertNull(parseAddonCollection(json, AddonListOrigin.COMMUNITY).single().configureUrl)
     }
 
+    private fun listingOf(manifestJson: String): OfficialAddonListing =
+        parseAddonCollection(
+            """[{"transportUrl":"https://x/manifest.json","manifest":$manifestJson}]""",
+            AddonListOrigin.COMMUNITY,
+        ).single()
+
+    // behaviorHints.adult is the protocol's flag and is believed whenever set.
+    @Test
+    fun `reads the adult flag from behaviorHints`() {
+        assertTrue(listingOf("""{"name":"N","behaviorHints":{"adult":true}}""").isAdult)
+        assertFalse(listingOf("""{"name":"N","behaviorHints":{"adult":false}}""").isAdult)
+        assertFalse(listingOf("""{"name":"N"}""").isAdult)
+    }
+
+    // The flag alone is not enough, and this is measured rather than assumed: of the four adult
+    // add-ons in the community directory, two set behaviorHints.adult and two set no behaviorHints
+    // at all. Trusting only the flag would show pornography to someone who left the setting off.
+    // Their declared types are what give them away.
+    @Test
+    fun `treats an adult content type as adult even with no behaviorHints`() {
+        assertTrue(listingOf("""{"name":"N","types":["Porn","hentai","series"]}""").isAdult)
+        assertTrue(listingOf("""{"name":"N","types":["XXX"]}""").isAdult)
+        assertTrue(listingOf("""{"name":"N","types":["adult"]}""").isAdult)
+    }
+
+    // The ordinary types must not trip it — an anime add-on is not adult for saying "anime".
+    @Test
+    fun `ordinary content types are not adult`() {
+        assertFalse(listingOf("""{"name":"N","types":["anime","movie","series","tv","other"]}""").isAdult)
+    }
+
+    // An add-on that names its own configure page is the authority on where that page is; the
+    // /configure convention is only the fallback. TPB 4K Porn is one that sets this.
+    @Test
+    fun `a declared configure url beats the derived one`() {
+        val listing = listingOf(
+            """{"name":"N","behaviorHints":{"configurable":true,"configureUrl":"https://elsewhere.test/setup"}}""",
+        )
+        assertEquals("https://elsewhere.test/setup", listing.configureUrl)
+    }
+
+    @Test
+    fun `a blank declared configure url falls back to the convention`() {
+        val listing = listingOf("""{"name":"N","behaviorHints":{"configurable":true,"configureUrl":"  "}}""")
+        assertEquals("https://x/configure", listing.configureUrl)
+    }
+
     @Test
     fun `a stream without sources has no trackers`() {
         val json = """{"streams":[{"infoHash":"8c9c2f1e4a5b6d7e8f9a0b1c2d3e4f5a6b7c8d9e"}]}"""

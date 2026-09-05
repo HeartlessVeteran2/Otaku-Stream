@@ -98,12 +98,85 @@ internal object RecommendedAddons {
             resources = listOf("catalog", "meta"),
         ),
         recommended(
+            name = "TorrentsDB",
+            description = "Stream add-on that declares an anime type of its own, so it answers for " +
+                "series the general indexers index only by their English title.",
+            transportUrl = "https://torrentsdb.com/manifest.json",
+            types = listOf("movie", "series", "anime", "other"),
+            resources = listOf("stream"),
+            isConfigurable = true,
+        ),
+        recommended(
+            name = "PenguPlay",
+            description = "Streams with subtitles attached, which saves a second add-on for the " +
+                "subtitle track when it has one.",
+            transportUrl = "https://pengu.uk/manifest.json",
+            types = listOf("movie", "series"),
+            resources = listOf("stream", "subtitles"),
+            isConfigurable = true,
+        ),
+        recommended(
+            name = "AIOLists",
+            description = "Builds catalogs from your own lists — MDBList, Trakt, IMDb — including " +
+                "an anime type. Browse what you meant to watch instead of what is trending.",
+            transportUrl = "https://aiolists.elfhosted.com/manifest.json",
+            types = listOf("movie", "series", "anime", "all", "search"),
+            resources = listOf("catalog", "meta"),
+            isConfigurable = true,
+        ),
+        recommended(
             name = "Torrent Catalogs",
             description = "Browse by what is currently well-seeded rather than by what is popular. " +
                 "Pairs with a stream add-on above.",
             transportUrl = "https://torrent-catalogs.strem.fun/manifest.json",
             types = listOf("movie", "series"),
             resources = listOf("catalog", "meta"),
+        ),
+    )
+
+    // Adult add-ons, hidden unless the setting is on.
+    //
+    // Kept as a separate list rather than mixed in above, because the point of the split is that
+    // this one is reachable only through a deliberate choice — and a reviewer should be able to see
+    // at a glance exactly what that choice reveals.
+    //
+    // Marked isAdult here rather than relying on detection: two of these four declare no
+    // behaviorHints at all, so their manifests do not say what they plainly are. Curated entries do
+    // not have to be guessed about.
+    val adultListings: List<OfficialAddonListing> = listOf(
+        recommended(
+            name = "TPB 4K Porn",
+            description = "Adult streams from P2P indexers and tube sites.",
+            transportUrl = "https://tpb-adult-addon.click/manifest.json",
+            resources = listOf("catalog", "meta", "stream"),
+            isConfigurable = true,
+            isAdult = true,
+        ),
+        recommended(
+            name = "Porn Tube",
+            description = "Adult catalogs and streams from tube sites. Needs configuring first.",
+            transportUrl = "https://dirty-pink.ers.pw/manifest.json",
+            types = listOf("movie"),
+            resources = listOf("catalog", "meta", "stream"),
+            isConfigurable = true,
+            configurationRequired = true,
+            isAdult = true,
+        ),
+        recommended(
+            name = "OnlyPorn",
+            description = "Adult catalogs and streams.",
+            transportUrl = "https://07b88951aaab-jaxxx-v2.baby-beamup.club/manifest.json",
+            types = listOf("movie"),
+            resources = listOf("catalog", "stream", "meta"),
+            isAdult = true,
+        ),
+        recommended(
+            name = "xxxClub",
+            description = "Adult catalogs and streams.",
+            transportUrl = "https://xclub-stremio.vercel.app/manifest.json",
+            types = listOf("movie"),
+            resources = listOf("catalog", "stream", "meta"),
+            isAdult = true,
         ),
     )
 
@@ -115,6 +188,7 @@ internal object RecommendedAddons {
         resources: List<String> = emptyList(),
         isConfigurable: Boolean = false,
         configurationRequired: Boolean = false,
+        isAdult: Boolean = false,
     ) = OfficialAddonListing(
         name = name,
         description = description,
@@ -127,5 +201,6 @@ internal object RecommendedAddons {
         resources = resources,
         isConfigurable = isConfigurable,
         configurationRequired = configurationRequired,
+        isAdult = isAdult,
     )
 }
