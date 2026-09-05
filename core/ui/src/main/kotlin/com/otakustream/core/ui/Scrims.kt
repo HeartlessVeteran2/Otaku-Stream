@@ -5,6 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 
 // The two gradients that make text legible over cover art.
 //
@@ -38,13 +39,21 @@ fun posterScrim(): Brush {
 // Full-bleed wash over a detail-screen hero image, ending fully opaque so the artwork dissolves
 // into the page rather than stopping at an edge. Starts its ramp later than posterScrim() because
 // a hero is tall enough that an early ramp just dims the whole image.
+//
+// The midpoint carries a trace of the current title's accent — a tenth, which is enough that the
+// hero of a red show and a blue one do not fade out through the same grey, and little enough that
+// it never becomes a colour cast over the artwork. The bottom stop stays the pure background so
+// the seam into the page below is exact whatever the accent is.
 @Composable
 @ReadOnlyComposable
 fun heroScrim(): Brush {
     val base = MaterialTheme.colorScheme.background
+    val tinted = lerp(base, LocalTitleAccent.current ?: base, ACCENT_IN_SCRIM)
     return Brush.verticalGradient(
         0f to Color.Transparent,
-        0.55f to base.copy(alpha = 0.45f),
+        0.55f to tinted.copy(alpha = 0.45f),
         1f to base,
     )
 }
+
+private const val ACCENT_IN_SCRIM = 0.10f
