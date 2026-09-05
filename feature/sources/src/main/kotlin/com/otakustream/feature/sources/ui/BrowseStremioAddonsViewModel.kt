@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -67,7 +69,20 @@ class BrowseStremioAddonsViewModel @Inject constructor(
     // Two independent reads settle at different moments, and the pairing that produces is the one
     // that must never happen: adult rows on screen under a switch that reads off.
     private val showAdult = MutableStateFlow(false)
-    private val isLoading = MutableStateFlow(false)
+    // A count of loads in flight, not a boolean.
+    //
+    // This replaces a flag that three different places wrote and that had to be guarded on job
+    // identity to be correct. The guard was the problem: cancellation completes on whatever thread
+    // the coroutine happened to be suspended on, so an old load's callback could read `loadJob`
+    // while `load()` on the main thread was still between cancelling the old job and assigning the
+    // new one — see it as still current, and clear the spinner for a fetch that had just started.
+    //
+    // A counter has no such reading to get wrong. Each load raises it once and lowers it once, in a
+    // finally so cancellation counts too, and the spinner is simply "is anything in flight". Two
+    // loads overlapping during a handover is a count of two rather than a question about which of
+    // them owns a flag.
+    private val activeLoads = MutableStateFlow(0)
+    private val isLoading = activeLoads.map { it > 0 }
     private val installingUrl = MutableStateFlow<String?>(null)
     private val error = MutableStateFlow<String?>(null)
     private val customListError = MutableStateFlow<String?>(null)
@@ -178,36 +193,34 @@ class BrowseStremioAddonsViewModel @Inject constructor(
     private var loadJob: Job? = null
 
     fun load() {
+        // Raised before the cancel, so the count cannot dip to zero between the outgoing load
+        // ending and this one beginning — which would blink the spinner off mid-handover.
+        activeLoads.update { it + 1 }
         loadJob?.cancel()
-        isLoading.value = true
         error.value = null
         customListError.value = null
         loadJob = viewModelScope.launch {
-            runCatching { directoryClient.fetchAddonCatalog() }
-                .onSuccess { directory ->
-                    listings.value = directory.listings
-                    showAdult.value = directory.showAdult
-                    customListError.value = directory.customListError
-                    // A banner beside the recommended list rather than instead of it: the fetched
-                    // lists being unreachable no longer empties the screen.
-                    error.value = directory.builtInListError
-                }
-                .onFailure { failure ->
-                    if (failure is CancellationException) throw failure
-                    error.value = failure.message ?: "Failed to load addon catalog"
-                }
+            try {
+                runCatching { directoryClient.fetchAddonCatalog() }
+                    .onSuccess { directory ->
+                        listings.value = directory.listings
+                        showAdult.value = directory.showAdult
+                        customListError.value = directory.customListError
+                        // A banner beside the recommended list rather than instead of it: the
+                        // fetched lists being unreachable no longer empties the screen.
+                        error.value = directory.builtInListError
+                    }
+                    .onFailure { failure ->
+                        if (failure is CancellationException) throw failure
+                        error.value = failure.message ?: "Failed to load addon catalog"
+                    }
+            } finally {
+                // In a finally so a cancelled load lowers the count it raised. setShowAdult cancels
+                // an in-flight load, and without this the screen would sit showing progress for a
+                // fetch that is never coming back.
+                activeLoads.update { (it - 1).coerceAtLeast(0) }
+            }
         }
-        // `isLoading` is written here and nowhere else, and only by the job that currently owns it.
-        //
-        // In an invokeOnCompletion rather than at the end of the body, so a cancelled load clears
-        // the spinner too — setShowAdult cancels an in-flight load, and otherwise the screen would
-        // sit showing progress for a fetch that is never coming back.
-        //
-        // Guarded on identity, because completion runs for cancellation as well, and a cancelled
-        // load's callback can fire *after* the load that replaced it has already set the spinner
-        // going. Clearing it then would hide progress for a fetch that is very much still running.
-        val started = loadJob
-        started?.invokeOnCompletion { if (loadJob === started) isLoading.value = false }
     }
 
     // Saving re-fetches so the list the user just added (or removed) is reflected immediately. The
