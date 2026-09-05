@@ -261,10 +261,25 @@ private fun AddonListingRow(
                     // guaranteed not to work: it succeeds, and leaves a source that returns nothing
                     // forever. Configuring hands back a different, personalised manifest URL, which
                     // is what actually gets installed — so this row's Install was never the route.
-                    listing.configurationRequired && configureUrl != null ->
-                        Button(onClick = { onConfigure(configureUrl) }, enabled = canInstall) {
-                            Text("Configure")
-                        }
+                    // Branching on configurationRequired alone, then on whether there is a URL to
+                    // send them to. Requiring both in the condition let an add-on with an
+                    // unparseable transport URL fall through to Install — putting the button back
+                    // beside the "needs configuring" warning, which is the exact pairing this
+                    // branch exists to prevent.
+                    listing.configurationRequired -> if (configureUrl != null) {
+                        // No `enabled = canInstall`: this opens a browser and installs nothing, so
+                        // gating it on an unrelated add-on's in-flight install would disable it for
+                        // no reason — and the optional Configure link below is ungated already.
+                        Button(onClick = { onConfigure(configureUrl) }) { Text("Configure") }
+                    } else {
+                        // Nothing safe to offer: it cannot be configured, and installing it is
+                        // the one action known not to work.
+                        Text(
+                            text = "Unavailable",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     else -> Button(onClick = onInstall, enabled = canInstall) { Text("Install") }
                 }
                 // A secondary link where configuring is optional — Torrentio and Comet work
