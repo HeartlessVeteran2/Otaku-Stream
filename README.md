@@ -89,7 +89,8 @@ Everything installable lives under one roof: **Settings → Sources**.
   a `p.a.c.k.e.r` unpacker with a stream extractor built on it, and per-extension preferences.
   That's a useful subset rather than the full Mangayomi host surface, so an extension reaching for
   a helper that isn't implemented yet will fail — if one doesn't work, that's why.
-- **A curated source directory** for one-tap installs.
+- **A curated directory of scripted sources** for one-tap installs — separate from the Stremio
+  add-on directory above, and pointable at your own repo URL.
 - **Custom sources** — paste a `.js` URL and it becomes a full source at runtime, sandboxed in an
   embedded Rhino interpreter. See [docs/scripted-sources.md](docs/scripted-sources.md).
 - **Cloudflare challenges** are solved in a hidden WebView when a host demands it, so a source

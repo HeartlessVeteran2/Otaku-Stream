@@ -128,7 +128,7 @@ fun parseAddonCollection(json: String, origin: AddonListOrigin): List<OfficialAd
             transportUrl = transportUrl,
             types = types,
             origin = origin,
-            resources = manifest.parseResourceNames(),
+            resources = manifest.resourceNames(),
             isConfigurable = hints?.optBoolean("configurable", false) == true,
             // Read from both places it is written. The protocol puts it in behaviorHints; enough
             // add-ons put it at the top level of the manifest instead that reading only one of them
@@ -140,17 +140,5 @@ fun parseAddonCollection(json: String, origin: AddonListOrigin): List<OfficialAd
             configurationRequired = hints?.optBoolean("configurationRequired", false) == true ||
                 manifest.optBoolean("configurationRequired", false),
         )
-    }
-}
-
-// "resources" entries are either a plain string ("stream") or an object with a "name" field
-// ({"name": "stream", "types": [...], "idPrefixes": [...]}) — both forms are current, and the
-// add-ons that matter most here use the object form. parseManifest already handles this for the
-// installed-add-on path; the directory needs the same reading to say what a listing does.
-private fun JSONObject.parseResourceNames(): List<String> {
-    val array = optJSONArray("resources") ?: return emptyList()
-    return (0 until array.length()).mapNotNull { index ->
-        val obj = array.optJSONObject(index)
-        if (obj != null) obj.stringOrEmpty("name").ifEmpty { null } else array.stringOrNull(index)
     }
 }

@@ -22,6 +22,9 @@ import javax.inject.Inject
 data class AddonDirectory(
     val listings: List<OfficialAddonListing>,
     val customListError: String? = null,
+    // Stremio's own endpoints failed. Reported rather than thrown, because the recommended list is
+    // local and still worth showing — see fetchAddonCatalog.
+    val builtInListError: String? = null,
 )
 
 // Lets users browse add-ons and one-tap install them, like the real Stremio app. Fetches Stremio's
@@ -54,10 +57,15 @@ class StremioAddonDirectoryClient @Inject constructor(
 
         val builtIn = awaitAll(official, community)
         val customResult = custom?.await()
-        // Both built-in endpoints down → surface the failure; otherwise show whatever loaded.
-        if (builtIn.all { it == null } && customResult?.getOrNull() == null) {
-            error("Failed to load the add-on catalog")
-        }
+        // Both built-in endpoints down is reported, not thrown.
+        //
+        // Throwing blanked the whole screen — which was right when everything on it came off the
+        // network, and is wrong now that the recommended add-ons are local and need no network at
+        // all. Being offline is exactly when someone is most likely to be here fixing their
+        // sources, and hiding the one list that still works behind a full-screen error would be a
+        // strange way to help.
+        val builtInListError = "Couldn't reach Stremio's add-on lists. Showing the recommended ones."
+            .takeIf { builtIn.all { listing -> listing == null } }
 
         // Recommended first, then official (Cinemeta and friends), then community, then the user's
         // own — deduped by normalized manifest URL, so an add-on appearing in more than one list
@@ -71,7 +79,7 @@ class StremioAddonDirectoryClient @Inject constructor(
                 builtIn.filterNotNull().flatten() +
                 customResult?.getOrNull().orEmpty()
             )
-            .filterNot { it.origin != AddonListOrigin.RECOMMENDED && isUnreachableOnDevice(it.transportUrl) }
+            .filterNot { it.origin in FETCHED_ORIGINS && isUnreachableOnDevice(it.transportUrl) }
             .distinctBy { normalizeStremioManifestUrl(it.transportUrl) }
 
         AddonDirectory(
@@ -79,6 +87,7 @@ class StremioAddonDirectoryClient @Inject constructor(
             customListError = customResult?.exceptionOrNull()?.let { failure ->
                 "Couldn't load your custom list: ${failure.message ?: "unknown error"}"
             },
+            builtInListError = builtInListError,
         )
     }
 
@@ -127,14 +136,22 @@ class StremioAddonDirectoryClient @Inject constructor(
     // be, so installing it produces a source that fails every request — and a directory whose very
     // first screen contains something guaranteed to break teaches the user not to trust the rest.
     //
-    // Recommended entries are exempt so this can never quietly delete a curated one; nothing in that
-    // list is a loopback URL, and if one ever is, that is a bug to see rather than to hide.
+    // Applied only to the two lists the app fetches on the user's behalf. A recommended entry is
+    // exempt so this can never quietly delete a curated one — nothing in that list is a loopback
+    // URL, and if one ever is, that is a bug to see rather than to hide. A *custom* entry is exempt
+    // because the user typed the URL of that list themselves: someone pointing the app at their own
+    // collection, which may well serve an add-on running on this very device, has said what they
+    // want more clearly than this heuristic can second-guess.
     private fun isUnreachableOnDevice(transportUrl: String): Boolean {
         val host = transportUrl.toHttpUrlOrNull()?.host ?: return false
         return host == "127.0.0.1" || host == "localhost" || host == "::1" || host == "0.0.0.0"
     }
 
     private companion object {
+        // The origins whose entries the app chose to fetch, as opposed to the ones it ships or the
+        // user supplied.
+        val FETCHED_ORIGINS = setOf(AddonListOrigin.OFFICIAL, AddonListOrigin.COMMUNITY)
+
         const val OFFICIAL_ADDON_COLLECTION_URL = "https://raw.githubusercontent.com/Stremio/stremio-official-addons/master/index.json"
         // Stremio's server-maintained community collection — the source its own app's
         // "Community Add-ons" list is populated from.

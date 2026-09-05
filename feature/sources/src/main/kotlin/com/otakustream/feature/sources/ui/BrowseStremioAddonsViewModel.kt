@@ -113,6 +113,9 @@ class BrowseStremioAddonsViewModel @Inject constructor(
                 .onSuccess { directory ->
                     listings.value = directory.listings
                     customListError.value = directory.customListError
+                    // A banner beside the recommended list rather than instead of it: the fetched
+                    // lists being unreachable no longer empties the screen.
+                    error.value = directory.builtInListError
                 }
                 .onFailure { failure ->
                     if (failure is CancellationException) throw failure
