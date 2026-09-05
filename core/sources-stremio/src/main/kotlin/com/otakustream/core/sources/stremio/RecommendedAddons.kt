@@ -81,23 +81,6 @@ internal object RecommendedAddons {
             configurationRequired = true,
         ),
         recommended(
-            name = "Anime Kitsu",
-            description = "Anime catalogs and metadata from Kitsu, and the add-on that gives titles " +
-                "their kitsu: ids — which is what the stream add-ons above match anime on. Install " +
-                "this if you install nothing else here.",
-            transportUrl = "https://anime-kitsu.strem.fun/manifest.json",
-            types = listOf("anime", "movie", "series"),
-            resources = listOf("catalog", "meta"),
-        ),
-        recommended(
-            name = "Anime Catalogs",
-            description = "Seasonal, airing and top-rated anime catalogs to browse, sourced from " +
-                "MyAnimeList, AniList and Kitsu.",
-            transportUrl = "https://1fe84bc728af-stremio-anime-catalogs.baby-beamup.club/manifest.json",
-            types = listOf("anime", "movie", "series"),
-            resources = listOf("catalog", "meta"),
-        ),
-        recommended(
             name = "TorrentsDB",
             description = "Stream add-on that declares an anime type of its own, so it answers for " +
                 "series the general indexers index only by their English title.",
@@ -123,6 +106,23 @@ internal object RecommendedAddons {
             types = listOf("movie", "series", "anime", "all", "search"),
             resources = listOf("catalog", "meta"),
             isConfigurable = true,
+        ),
+        recommended(
+            name = "Anime Kitsu",
+            description = "Anime catalogs and metadata from Kitsu, and the add-on that gives titles " +
+                "their kitsu: ids — which is what the stream add-ons above match anime on. Install " +
+                "this if you install nothing else here.",
+            transportUrl = "https://anime-kitsu.strem.fun/manifest.json",
+            types = listOf("anime", "movie", "series"),
+            resources = listOf("catalog", "meta"),
+        ),
+        recommended(
+            name = "Anime Catalogs",
+            description = "Seasonal, airing and top-rated anime catalogs to browse, sourced from " +
+                "MyAnimeList, AniList and Kitsu.",
+            transportUrl = "https://1fe84bc728af-stremio-anime-catalogs.baby-beamup.club/manifest.json",
+            types = listOf("anime", "movie", "series"),
+            resources = listOf("catalog", "meta"),
         ),
         recommended(
             name = "Torrent Catalogs",

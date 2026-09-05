@@ -21,6 +21,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import com.otakustream.core.sources.api.UiMessages
 
@@ -126,17 +128,33 @@ class BrowseStremioAddonsViewModel @Inject constructor(
             showAdult.value = false
             listings.value = listings.value.filterNot { it.isAdult }
         }
+        // Recorded before the coroutine starts, so the value that gets written is the last one
+        // tapped rather than the first one dispatched.
+        requestedShowAdult = enabled
         viewModelScope.launch {
-            // The switch follows the store, not the tap. A preferences write can fail, and a switch
-            // that moved while the setting did not would disagree with the directory on the next
-            // load — and would disagree in the direction of showing more than the user asked for.
-            val stored = adultContentSettings.set(enabled)
-            if (!stored) {
-                error.value = "Couldn't save that setting."
+            toggleLock.withLock {
+                // Whoever holds the lock writes whatever was most recently asked for and clears the
+                // request; anyone queued behind finds nothing left to do. Without this, two taps in
+                // quick succession launch two coroutines whose completion order is not the order
+                // they were tapped in, and the setting can come to rest on the earlier one — a
+                // switch reading on with adult content off, or the reverse.
+                val target = requestedShowAdult ?: return@withLock
+                requestedShowAdult = null
+                // The switch follows the store, not the tap. A preferences write can fail, and a
+                // switch that moved while the setting did not would disagree with the directory on
+                // the next load — in the direction of showing more than the user asked for.
+                if (!adultContentSettings.set(target)) {
+                    error.value = "Couldn't save that setting."
+                }
+                load()
             }
-            load()
         }
     }
+
+    private val toggleLock = Mutex()
+
+    @Volatile
+    private var requestedShowAdult: Boolean? = null
 
     // A newer load supersedes an older one rather than racing it: Retry and Save both call this, and
     // two in-flight fetches could otherwise finish out of order and leave the screen showing the

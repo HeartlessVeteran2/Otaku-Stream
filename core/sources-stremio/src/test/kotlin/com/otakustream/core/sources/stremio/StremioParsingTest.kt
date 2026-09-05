@@ -191,6 +191,24 @@ class StremioParsingTest {
         assertEquals("https://x/configure", listing.configureUrl)
     }
 
+    // An add-on-supplied configureUrl ends up in an ACTION_VIEW intent, so anything that is not an
+    // absolute http(s) URL falls back to the derived page rather than being handed to whatever app
+    // claims that scheme.
+    @Test
+    fun `a declared configure url that is not http falls back to the convention`() {
+        fun configureUrlFor(declared: String): String? = listingOf(
+            """{"name":"N","behaviorHints":{"configurable":true,"configureUrl":"$declared"}}""",
+        ).configureUrl
+        assertEquals("https://x/configure", configureUrlFor("javascript:alert(1)"))
+        assertEquals("https://x/configure", configureUrlFor("intent://evil#Intent;end"))
+        assertEquals("https://x/configure", configureUrlFor("file:///etc/passwd"))
+        assertEquals("https://x/configure", configureUrlFor("not a url at all"))
+        assertEquals("https://x/configure", configureUrlFor("/relative/configure"))
+        // A real one still wins.
+        assertEquals("https://elsewhere.test/setup", configureUrlFor("https://elsewhere.test/setup"))
+        assertEquals("http://plain.test/setup", configureUrlFor("http://plain.test/setup"))
+    }
+
     @Test
     fun `a stream without sources has no trackers`() {
         val json = """{"streams":[{"infoHash":"8c9c2f1e4a5b6d7e8f9a0b1c2d3e4f5a6b7c8d9e"}]}"""

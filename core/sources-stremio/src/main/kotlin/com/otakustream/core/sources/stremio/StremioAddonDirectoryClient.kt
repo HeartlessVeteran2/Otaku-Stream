@@ -77,7 +77,7 @@ class StremioAddonDirectoryClient @Inject constructor(
         // all. Being offline is exactly when someone is most likely to be here fixing their
         // sources, and hiding the one list that still works behind a full-screen error would be a
         // strange way to help.
-        val builtInListError = "Couldn't reach Stremio's add-on lists. Showing the recommended ones."
+        val builtInListError = "Couldn't reach Stremio's add-on lists. Showing the ones bundled with the app."
             .takeIf { builtIn.all { listing -> listing == null } }
 
         // Recommended first, then official (Cinemeta and friends), then community, then the user's
@@ -105,8 +105,8 @@ class StremioAddonDirectoryClient @Inject constructor(
             // adult tier added ahead of the index — which duplicated four entries the index already
             // had, and, because deduplication keeps the first occurrence, would have shown
             // pornography under a "For anime" badge.
-            .filterNot { it.isAdult && !showAdult }
             .filterNot { it.origin in FETCHED_ORIGINS && isUnreachableOnDevice(it.transportUrl) }
+            .hideAdultUnless(showAdult)
             .distinctBy { normalizeStremioManifestUrl(it.transportUrl) }
 
         AddonDirectory(
@@ -155,6 +155,21 @@ class StremioAddonDirectoryClient @Inject constructor(
             error("no add-ons found — is it a Stremio add-on collection?")
         }
         parsed
+    }
+
+    // Hides adult listings by url, not by entry.
+    //
+    // Filtering entry-by-entry and then deduplicating gets this wrong when two lists carry the same
+    // add-on and disagree about it — the bundled index marks something adult, a custom list does
+    // not. Removing only the flagged copy leaves the unflagged duplicate for distinctBy to keep,
+    // and the add-on appears with the switch off. Whether a url is adult is therefore decided once,
+    // across every listing that claims it, before anything is dropped.
+    private fun List<OfficialAddonListing>.hideAdultUnless(showAdult: Boolean): List<OfficialAddonListing> {
+        if (showAdult) return this
+        val adultUrls = filter { it.isAdult }
+            .mapTo(mutableSetOf()) { normalizeStremioManifestUrl(it.transportUrl) }
+        if (adultUrls.isEmpty()) return this
+        return filterNot { normalizeStremioManifestUrl(it.transportUrl) in adultUrls }
     }
 
     // Drops listings that point at the machine the app is running on.

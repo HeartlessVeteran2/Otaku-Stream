@@ -42,10 +42,11 @@ class BundledCommunityAddonsTest {
         assertTrue("expected stream add-ons, got ${streams.size}", streams.size >= 15)
     }
 
-    // Two of these declare no behaviorHints and a type of "movie", so nothing in their own
-    // manifests says what they are — the harvest marks them. If that marking is ever lost, adult
-    // add-ons appear for someone who left the setting off, which is the one failure here that
-    // matters.
+    // All four carry behaviorHints.adult in the checked-in file — but two of them only because the
+    // harvest put it there. Upstream, OnlyPorn and xxxClub declare no behaviorHints at all and a
+    // type of "movie", so nothing in their own manifests says what they are; the type-word fallback
+    // does not catch them either. The marking in this file is the only thing standing between them
+    // and someone who left the setting off, which is why it is asserted rather than assumed.
     @Test
     fun `known adult entries are marked adult`() {
         val adultNames = listings.filter { it.isAdult }.map { it.name }.toSet()

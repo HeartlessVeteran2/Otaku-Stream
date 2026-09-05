@@ -73,7 +73,12 @@ data class OfficialAddonListing(
             // What the add-on says about itself beats the convention. `behaviorHints.configureUrl`
             // is a real field — TPB 4K Porn is one that sets it — and an add-on that names its own
             // page is the authority on where that page is.
-            declaredConfigureUrl?.trim()?.takeIf { it.isNotEmpty() }?.let { return it }
+            //
+            // Parsed rather than trusted, because this value is third-party data that ends up in an
+            // ACTION_VIEW intent. toHttpUrlOrNull accepts only absolute http and https, so a
+            // manifest offering `intent:`, `javascript:`, `file:` or plain junk falls through to
+            // the derived URL instead of being handed to whatever app claims that scheme.
+            declaredConfigureUrl?.trim()?.toHttpUrlOrNull()?.let { return it.toString() }
             val url = transportUrl.trim()
                 .replaceFirst(STREMIO_SCHEME_REGEX, "https://")
                 .toHttpUrlOrNull()
