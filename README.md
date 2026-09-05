@@ -76,6 +76,14 @@ Everything installable lives under one roof: **Settings → Sources**.
 
 - **Stremio add-ons** — install any add-on by URL, or browse a built-in directory. Catalogs,
   metadata, streams, and add-on subtitles all flow through. Enable, disable, and reorder them.
+- **An add-on directory with the stream add-ons in it.** The directory shows Stremio's own official
+  and community lists — the same ~100 add-ons Stremio's app shows, from the same endpoints. Worth
+  knowing what that list is: it is subtitles, catalogs, ratings and watch calendars, and **not one
+  entry in it resolves a video.** Stremio's collection carries no torrent or stream add-ons, which
+  is why browsing it end to end never turns up anything that plays. So a short curated list of the
+  ones that do — Torrentio, Comet, MediaFusion, Anime Kitsu and a few more — ships with the app and
+  leads the directory. Filter by Streams / Catalogs / Subtitles, and add-ons that do nothing until
+  configured say so and link to their configure page rather than installing dead.
 - **Anime extensions** — install extensions from AnymeX/Mangayomi repositories, which run in an
   embedded QuickJS engine against a host API covering HTTP, the crypto and deobfuscation helpers,
   a `p.a.c.k.e.r` unpacker with a stream extractor built on it, and per-extension preferences.

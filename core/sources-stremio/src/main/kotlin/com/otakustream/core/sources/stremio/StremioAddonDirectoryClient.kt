@@ -12,6 +12,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import javax.inject.Inject
@@ -58,10 +59,19 @@ class StremioAddonDirectoryClient @Inject constructor(
             error("Failed to load the add-on catalog")
         }
 
-        // Official first (curated base add-ons like Cinemeta lead the list), then community, then the
-        // user's own — deduped by normalized manifest URL, so an add-on appearing in more than one
-        // list shows once, keeping the most-vetted origin it was found under.
-        val merged = (builtIn.filterNotNull().flatten() + customResult?.getOrNull().orEmpty())
+        // Recommended first, then official (Cinemeta and friends), then community, then the user's
+        // own — deduped by normalized manifest URL, so an add-on appearing in more than one list
+        // shows once, keeping the most-vetted origin it was found under.
+        //
+        // Recommended leads because it is the only part of this screen that answers "what do I
+        // install to watch something". Everything below it is worth having and none of it resolves
+        // a stream.
+        val merged = (
+            RecommendedAddons.listings +
+                builtIn.filterNotNull().flatten() +
+                customResult?.getOrNull().orEmpty()
+            )
+            .filterNot { it.origin != AddonListOrigin.RECOMMENDED && isUnreachableOnDevice(it.transportUrl) }
             .distinctBy { normalizeStremioManifestUrl(it.transportUrl) }
 
         AddonDirectory(
@@ -108,6 +118,20 @@ class StremioAddonDirectoryClient @Inject constructor(
             error("no add-ons found — is it a Stremio add-on collection?")
         }
         parsed
+    }
+
+    // Drops listings that point at the machine the app is running on.
+    //
+    // Stremio's official list includes "Local Files", served by the Stremio *desktop* streaming
+    // server at 127.0.0.1:11470. On a phone there is nothing at that address and there never will
+    // be, so installing it produces a source that fails every request — and a directory whose very
+    // first screen contains something guaranteed to break teaches the user not to trust the rest.
+    //
+    // Recommended entries are exempt so this can never quietly delete a curated one; nothing in that
+    // list is a loopback URL, and if one ever is, that is a bug to see rather than to hide.
+    private fun isUnreachableOnDevice(transportUrl: String): Boolean {
+        val host = transportUrl.toHttpUrlOrNull()?.host ?: return false
+        return host == "127.0.0.1" || host == "localhost" || host == "::1" || host == "0.0.0.0"
     }
 
     private companion object {

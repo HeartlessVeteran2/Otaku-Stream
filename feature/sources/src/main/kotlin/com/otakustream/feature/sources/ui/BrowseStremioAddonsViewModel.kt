@@ -6,7 +6,9 @@ import com.otakustream.core.database.stremio.StremioRepository
 import com.otakustream.core.sources.stremio.StremioAddonDirectoryClient
 import com.otakustream.core.sources.stremio.StremioAddonInstaller
 import com.otakustream.core.sources.stremio.StremioDirectorySettings
+import com.otakustream.core.sources.stremio.model.AddonKind
 import com.otakustream.core.sources.stremio.model.OfficialAddonListing
+import com.otakustream.core.sources.stremio.model.kind
 import com.otakustream.feature.sources.SourceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -20,9 +22,20 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 import com.otakustream.core.sources.api.UiMessages
 
+// Which slice of the directory is on screen. ALL is a hundred rows of which about half are subtitle
+// add-ons, so it is browsable rather than useful; STREAMS is what someone opening this screen almost
+// always came for.
+enum class AddonFilter(val label: String) {
+    ALL("All"),
+    STREAMS("Streams"),
+    CATALOGS("Catalogs"),
+    SUBTITLES("Subtitles"),
+}
+
 data class BrowseStremioUiState(
     val isLoading: Boolean = false,
     val listings: List<OfficialAddonListing> = emptyList(),
+    val filter: AddonFilter = AddonFilter.ALL,
     val installedUrls: Set<String> = emptySet(),
     val installingUrl: String? = null,
     val error: String? = null,
@@ -42,23 +55,25 @@ class BrowseStremioAddonsViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val listings = MutableStateFlow<List<OfficialAddonListing>>(emptyList())
+    private val filter = MutableStateFlow(AddonFilter.ALL)
     private val isLoading = MutableStateFlow(false)
     private val installingUrl = MutableStateFlow<String?>(null)
     private val error = MutableStateFlow<String?>(null)
     private val customListError = MutableStateFlow<String?>(null)
 
     val uiState: StateFlow<BrowseStremioUiState> = combine(
-        listings,
+        combine(listings, filter) { all, selected -> all.filteredBy(selected) to selected },
         stremioRepository.observeAddons(),
         isLoading,
         installingUrl,
         combine(error, directorySettings.customListUrl, customListError) { err, customUrl, customErr ->
             Triple(err, customUrl, customErr)
         },
-    ) { listings, installed, loading, installing, (err, customUrl, customErr) ->
+    ) { (visible, selected), installed, loading, installing, (err, customUrl, customErr) ->
         BrowseStremioUiState(
             isLoading = loading,
-            listings = listings,
+            listings = visible,
+            filter = selected,
             installedUrls = installed.map { it.manifestUrl }.toSet(),
             installingUrl = installing,
             error = err,
@@ -69,6 +84,10 @@ class BrowseStremioAddonsViewModel @Inject constructor(
 
     init {
         load()
+    }
+
+    fun setFilter(selected: AddonFilter) {
+        filter.value = selected
     }
 
     // A newer load supersedes an older one rather than racing it: Retry and Save both call this, and
@@ -125,3 +144,18 @@ class BrowseStremioAddonsViewModel @Inject constructor(
         }
     }
 }
+
+// Filtering by what the add-on does, not by what it calls itself.
+//
+// ALL is returned untouched rather than mapped through the same predicate, so a listing whose
+// manifest declares no resources at all — every configuration-required add-on, until it is
+// configured — is reachable from somewhere. Under a specific filter it would fall into no bucket
+// and vanish, which for AIOStreams would mean the add-on cannot be found on the screen that exists
+// to find add-ons.
+private fun List<OfficialAddonListing>.filteredBy(filter: AddonFilter): List<OfficialAddonListing> =
+    when (filter) {
+        AddonFilter.ALL -> this
+        AddonFilter.STREAMS -> filter { it.kind() == AddonKind.STREAMS }
+        AddonFilter.CATALOGS -> filter { it.kind() == AddonKind.CATALOGS }
+        AddonFilter.SUBTITLES -> filter { it.kind() == AddonKind.SUBTITLES }
+    }

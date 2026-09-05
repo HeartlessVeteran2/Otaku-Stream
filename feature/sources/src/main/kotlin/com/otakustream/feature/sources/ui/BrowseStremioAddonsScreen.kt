@@ -1,5 +1,8 @@
 package com.otakustream.feature.sources.ui
 
+import android.content.Intent
+import android.net.Uri
+
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -17,6 +20,7 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -34,6 +38,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -49,6 +54,7 @@ fun BrowseStremioAddonsScreen(
     viewModel: BrowseStremioAddonsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -60,9 +66,13 @@ fun BrowseStremioAddonsScreen(
             item {
                 Column {
                     Text(
-                        text = "Browse official and community add-ons and tap Install to add them to your catalog.",
+                        text = "Add-ons recommended for anime lead the list; below them is Stremio's own " +
+                            "official and community directory. Note that Stremio's lists carry no stream " +
+                            "add-ons at all — everything that resolves a video is in the first group.",
                         style = MaterialTheme.typography.bodySmall,
                     )
+
+                    FilterRow(selected = uiState.filter, onSelect = viewModel::setFilter)
 
                     CustomListField(
                         savedUrl = uiState.customListUrl,
@@ -105,8 +115,36 @@ fun BrowseStremioAddonsScreen(
                     isInstalling = uiState.installingUrl == listing.transportUrl,
                     canInstall = uiState.installingUrl == null,
                     onInstall = { viewModel.install(listing) },
+                    onConfigure = { url ->
+                        // Best-effort: a device with no browser at all would throw, and failing to
+                        // open a help page is not worth crashing the directory over.
+                        runCatching {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        }
+                    },
                 )
             }
+        }
+    }
+}
+
+// Narrows a hundred rows to the handful worth reading.
+//
+// Stremio's community collection is roughly half subtitle add-ons, and scrolling past fifty of them
+// to find the two that stream something is the reason the directory felt empty when it was in fact
+// full.
+@Composable
+private fun FilterRow(selected: AddonFilter, onSelect: (AddonFilter) -> Unit) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+    ) {
+        AddonFilter.entries.forEach { option ->
+            FilterChip(
+                selected = option == selected,
+                onClick = { onSelect(option) },
+                label = { Text(option.label, style = MaterialTheme.typography.labelMedium) },
+            )
         }
     }
 }
@@ -171,6 +209,7 @@ private fun AddonListingRow(
     isInstalling: Boolean,
     canInstall: Boolean,
     onInstall: () -> Unit,
+    onConfigure: (String) -> Unit,
 ) {
     ListItem(
         headlineContent = {
@@ -179,7 +218,21 @@ private fun AddonListingRow(
                 OriginChip(listing.origin)
             }
         },
-        supportingContent = { listing.description?.let { Text(it) } },
+        supportingContent = {
+            Column {
+                listing.description?.let { Text(it) }
+                // Said before installing, not discovered after. An add-on that serves nothing until
+                // it is configured installs perfectly happily and then returns no streams forever,
+                // which is indistinguishable from the app being broken.
+                if (listing.configurationRequired) {
+                    Text(
+                        text = "Needs configuring before it returns anything.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
         leadingContent = {
             CoverImage(
                 url = listing.logoUrl,
@@ -188,10 +241,21 @@ private fun AddonListingRow(
             )
         },
         trailingContent = {
-            when {
-                isInstalled -> Text("Installed", style = MaterialTheme.typography.bodySmall)
-                isInstalling -> CircularProgressIndicator(modifier = Modifier.padding(4.dp))
-                else -> Button(onClick = onInstall, enabled = canInstall) { Text("Install") }
+            Column(horizontalAlignment = Alignment.End) {
+                when {
+                    isInstalled -> Text("Installed", style = MaterialTheme.typography.bodySmall)
+                    isInstalling -> CircularProgressIndicator(modifier = Modifier.padding(4.dp))
+                    else -> Button(onClick = onInstall, enabled = canInstall) { Text("Install") }
+                }
+                // Opens the add-on's own configure page in a browser, which is where it hands back a
+                // personalised manifest URL to paste back in. That round trip is how Stremio itself
+                // configures these, and there is no in-app substitute: the page is arbitrary HTML
+                // served by the add-on.
+                listing.configureUrl?.let { url ->
+                    TextButton(onClick = { onConfigure(url) }) {
+                        Text("Configure", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
             }
         },
     )
@@ -203,11 +267,13 @@ private fun AddonListingRow(
 @Composable
 private fun OriginChip(origin: AddonListOrigin) {
     val color = when (origin) {
+        AddonListOrigin.RECOMMENDED -> MaterialTheme.colorScheme.primary
         AddonListOrigin.OFFICIAL -> MaterialTheme.colorScheme.primary
         AddonListOrigin.COMMUNITY -> MaterialTheme.colorScheme.tertiary
         AddonListOrigin.CUSTOM -> MaterialTheme.colorScheme.secondary
     }
     val label = when (origin) {
+        AddonListOrigin.RECOMMENDED -> "For anime"
         AddonListOrigin.OFFICIAL -> "Official"
         AddonListOrigin.COMMUNITY -> "Community"
         AddonListOrigin.CUSTOM -> "Custom list"

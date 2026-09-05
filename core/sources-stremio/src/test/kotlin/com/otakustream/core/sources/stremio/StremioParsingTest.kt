@@ -1,9 +1,13 @@
 package com.otakustream.core.sources.stremio
 
+import com.otakustream.core.sources.stremio.model.AddonKind
 import com.otakustream.core.sources.stremio.model.AddonListOrigin
+import com.otakustream.core.sources.stremio.model.OfficialAddonListing
+import com.otakustream.core.sources.stremio.model.kind
 import com.otakustream.core.sources.stremio.model.parseAddonCollection
 import com.otakustream.core.sources.stremio.model.parseStreamResponse
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -31,6 +35,74 @@ class StremioParsingTest {
         assertEquals(
             listOf("udp://tracker.opentrackr.org:1337/announce", "http://tracker.example.com/announce"),
             stream.trackers,
+        )
+    }
+
+    // Both forms are current, and the add-ons that matter most here — Comet, MediaFusion — use the
+    // object form. Reading only the string form left every one of them classified as "other",
+    // which is the bucket the directory filter cannot show under Streams.
+    @Test
+    fun `reads resource names in both the string and object forms`() {
+        val json = """
+            [{"transportUrl":"https://x/manifest.json","manifest":{
+              "name":"Mixed",
+              "resources":["catalog",{"name":"stream","types":["movie"]},{"name":"meta"}]
+            }}]
+        """.trimIndent()
+        val listing = parseAddonCollection(json, AddonListOrigin.COMMUNITY).single()
+        assertEquals(listOf("catalog", "stream", "meta"), listing.resources)
+        // Streams wins when an add-on does several things: it is the scarce one, and the one
+        // someone browsing this screen is looking for.
+        assertEquals(AddonKind.STREAMS, listing.kind())
+    }
+
+    @Test
+    fun `classifies catalogs and subtitles`() {
+        fun listingWith(vararg resources: String): OfficialAddonListing {
+            val res = resources.joinToString(",") { "\"$it\"" }
+            val json = """[{"transportUrl":"https://x/manifest.json","manifest":{"name":"N","resources":[$res]}}]"""
+            return parseAddonCollection(json, AddonListOrigin.COMMUNITY).single()
+        }
+        assertEquals(AddonKind.CATALOGS, listingWith("catalog", "meta").kind())
+        assertEquals(AddonKind.SUBTITLES, listingWith("subtitles").kind())
+        // No resources at all is what a configuration-required add-on serves until it is
+        // configured; it is not a stream add-on yet and must not claim to be.
+        assertEquals(AddonKind.OTHER, listingWith().kind())
+    }
+
+    // An add-on that serves nothing until configured installs perfectly happily and then returns no
+    // streams forever, which looks exactly like a broken app. Both spellings are read because
+    // add-ons use both.
+    @Test
+    fun `reads configurable and configuration-required from either place`() {
+        val hinted = """[{"transportUrl":"https://x/manifest.json","manifest":{"name":"N",
+            "behaviorHints":{"configurable":true,"configurationRequired":true}}}]"""
+        parseAddonCollection(hinted, AddonListOrigin.COMMUNITY).single().let {
+            assertTrue(it.isConfigurable)
+            assertTrue(it.configurationRequired)
+            assertEquals("https://x/configure", it.configureUrl)
+        }
+
+        val topLevel = """[{"transportUrl":"https://x/manifest.json","manifest":{"name":"N",
+            "configurationRequired":true}}]"""
+        assertTrue(parseAddonCollection(topLevel, AddonListOrigin.COMMUNITY).single().configurationRequired)
+
+        val plain = """[{"transportUrl":"https://x/manifest.json","manifest":{"name":"N"}}]"""
+        parseAddonCollection(plain, AddonListOrigin.COMMUNITY).single().let {
+            assertFalse(it.isConfigurable)
+            assertNull(it.configureUrl)
+        }
+    }
+
+    // The configure page lives at /configure on the same host, by convention and by the official
+    // SDK's routing — including for an add-on whose manifest sits under a path.
+    @Test
+    fun `derives the configure url from the transport url`() {
+        val json = """[{"transportUrl":"https://host/stremio/torz/manifest.json","manifest":{"name":"N",
+            "behaviorHints":{"configurable":true}}}]"""
+        assertEquals(
+            "https://host/stremio/torz/configure",
+            parseAddonCollection(json, AddonListOrigin.COMMUNITY).single().configureUrl,
         )
     }
 
