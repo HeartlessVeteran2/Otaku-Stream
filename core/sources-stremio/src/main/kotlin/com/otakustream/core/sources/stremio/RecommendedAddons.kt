@@ -134,52 +134,6 @@ internal object RecommendedAddons {
         ),
     )
 
-    // Adult add-ons, hidden unless the setting is on.
-    //
-    // Kept as a separate list rather than mixed in above, because the point of the split is that
-    // this one is reachable only through a deliberate choice — and a reviewer should be able to see
-    // at a glance exactly what that choice reveals.
-    //
-    // Marked isAdult here rather than relying on detection: two of these four declare no
-    // behaviorHints at all, so their manifests do not say what they plainly are. Curated entries do
-    // not have to be guessed about.
-    val adultListings: List<OfficialAddonListing> = listOf(
-        recommended(
-            name = "TPB 4K Porn",
-            description = "Adult streams from P2P indexers and tube sites.",
-            transportUrl = "https://tpb-adult-addon.click/manifest.json",
-            resources = listOf("catalog", "meta", "stream"),
-            isConfigurable = true,
-            isAdult = true,
-        ),
-        recommended(
-            name = "Porn Tube",
-            description = "Adult catalogs and streams from tube sites. Needs configuring first.",
-            transportUrl = "https://dirty-pink.ers.pw/manifest.json",
-            types = listOf("movie"),
-            resources = listOf("catalog", "meta", "stream"),
-            isConfigurable = true,
-            configurationRequired = true,
-            isAdult = true,
-        ),
-        recommended(
-            name = "OnlyPorn",
-            description = "Adult catalogs and streams.",
-            transportUrl = "https://07b88951aaab-jaxxx-v2.baby-beamup.club/manifest.json",
-            types = listOf("movie"),
-            resources = listOf("catalog", "stream", "meta"),
-            isAdult = true,
-        ),
-        recommended(
-            name = "xxxClub",
-            description = "Adult catalogs and streams.",
-            transportUrl = "https://xclub-stremio.vercel.app/manifest.json",
-            types = listOf("movie"),
-            resources = listOf("catalog", "stream", "meta"),
-            isAdult = true,
-        ),
-    )
-
     private fun recommended(
         name: String,
         description: String,
@@ -188,7 +142,6 @@ internal object RecommendedAddons {
         resources: List<String> = emptyList(),
         isConfigurable: Boolean = false,
         configurationRequired: Boolean = false,
-        isAdult: Boolean = false,
     ) = OfficialAddonListing(
         name = name,
         description = description,
@@ -201,6 +154,5 @@ internal object RecommendedAddons {
         resources = resources,
         isConfigurable = isConfigurable,
         configurationRequired = configurationRequired,
-        isAdult = isAdult,
     )
 }

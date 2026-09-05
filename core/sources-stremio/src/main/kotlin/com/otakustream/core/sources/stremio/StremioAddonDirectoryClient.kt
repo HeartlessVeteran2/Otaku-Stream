@@ -84,7 +84,6 @@ class StremioAddonDirectoryClient @Inject constructor(
         // a stream.
         val merged = (
             RecommendedAddons.listings +
-                (if (showAdult) RecommendedAddons.adultListings else emptyList()) +
                 // After the curated picks and before Stremio's own lists: these are the add-ons
                 // that resolve video, which is what the screen is for, but they are a whole
                 // community index rather than a chosen few.
@@ -92,10 +91,15 @@ class StremioAddonDirectoryClient @Inject constructor(
                 builtIn.filterNotNull().flatten() +
                 customResult?.getOrNull().orEmpty()
             )
-            // Applies to every origin, not just the curated tier. Stremio's own two lists happen to
-            // carry no adult entries today — checked, both are zero — but a custom list the user
-            // pointed at is arbitrary, and the setting has to mean the same thing wherever a
-            // listing came from.
+            // Applies to every origin. Stremio's own two lists happen to carry no adult entries
+            // today — checked, both are zero — but the bundled community index carries five, and a
+            // custom list the user pointed at is arbitrary. The setting has to mean the same thing
+            // wherever a listing came from.
+            //
+            // This is also the only gate on adult content now. There was briefly a second, curated
+            // adult tier added ahead of the index — which duplicated four entries the index already
+            // had, and, because deduplication keeps the first occurrence, would have shown
+            // pornography under a "For anime" badge.
             .filterNot { it.isAdult && !showAdult }
             .filterNot { it.origin in FETCHED_ORIGINS && isUnreachableOnDevice(it.transportUrl) }
             .distinctBy { normalizeStremioManifestUrl(it.transportUrl) }
