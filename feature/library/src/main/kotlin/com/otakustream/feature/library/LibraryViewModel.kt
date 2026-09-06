@@ -9,16 +9,19 @@ import com.otakustream.core.download.EpisodeDownloads
 import com.otakustream.core.database.library.LibraryEntry
 import com.otakustream.core.database.library.LibraryRepository
 import com.otakustream.core.database.library.WatchHistoryEntry
+import com.otakustream.core.sources.api.UiMessages
 import com.otakustream.feature.tracking.TrackingManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import org.json.JSONObject
 
 data class LibraryUiState(
     val watchlist: List<LibraryEntry> = emptyList(),
@@ -77,6 +80,9 @@ class LibraryViewModel @Inject constructor(
         .flowOn(Dispatchers.IO)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState())
 
+    // No undo here, and that is the point: this deletes the file's bytes. Offering "Undo" for
+    // something that would have to be re-downloaded over the network — possibly on a metered
+    // connection, possibly not available any more — would be a lie, so the screen asks first.
     fun removeDownload(row: DownloadRow) {
         viewModelScope.launch {
             episodeDownloads.remove(row.entry.videoUrl)
@@ -84,12 +90,50 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
+    // A failed download was a dead end: the row said "Failed" in red and the only button beside it
+    // deleted it, so recovering meant finding the show again and re-tapping the episode. Everything
+    // needed to re-enqueue is already on the row — the stream url, whether it is HLS, and the
+    // per-video headers the host requires — so this is the same call the first attempt made.
+    fun retryDownload(row: DownloadRow) {
+        val entry = row.entry
+        episodeDownloads.start(
+            url = entry.videoUrl,
+            isM3U8 = entry.isM3U8,
+            headers = parseHeaders(entry.headersJson),
+        )
+    }
+
+    // Stored as the JSON the source handed over. Unreadable JSON means retrying without headers,
+    // which is what the download would have done before they were recorded at all — better than
+    // refusing to retry.
+    private fun parseHeaders(json: String?): Map<String, String> {
+        if (json.isNullOrBlank()) return emptyMap()
+        return runCatching {
+            val obj = JSONObject(json)
+            obj.keys().asSequence().associateWith { obj.getString(it) }
+        }.getOrDefault(emptyMap())
+    }
+
     fun pauseDownload(row: DownloadRow) = episodeDownloads.pause(row.entry.videoUrl)
 
     fun resumeDownload(row: DownloadRow) = episodeDownloads.resume(row.entry.videoUrl)
 
+    // Removal happens immediately and offers to put it back, rather than asking first. A watchlist
+    // row is pure metadata — the exact entry can be restored, so the cheap path is the right one
+    // and a dialog would only be in the way of the common case, which is deliberate.
+    //
+    // The entry is captured before the delete because after it there is nothing left to read.
     fun removeFromWatchlist(mediaUrl: String) {
-        viewModelScope.launch { libraryRepository.remove(mediaUrl) }
+        viewModelScope.launch {
+            val removed = libraryRepository.observeLibrary().first().find { it.mediaUrl == mediaUrl }
+            libraryRepository.remove(mediaUrl)
+            if (removed == null) return@launch
+            UiMessages.showUndoable("Removed ${removed.title}") {
+                // Runs on the snackbar host's scope, not this one — see UiMessages.Message. The
+                // repository is a singleton, so it does not care that this ViewModel may be gone.
+                libraryRepository.add(removed)
+            }
+        }
     }
 
     fun setStatus(mediaUrl: String, status: String) {

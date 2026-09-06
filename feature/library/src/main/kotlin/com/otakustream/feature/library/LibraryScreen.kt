@@ -21,10 +21,13 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -69,6 +72,7 @@ import com.otakustream.core.database.library.WatchHistoryEntry
 import com.otakustream.core.download.DownloadProgress
 import com.otakustream.core.sources.api.PendingPlayback
 import com.otakustream.core.sources.api.Video
+import com.otakustream.core.ui.ConfirmDialog
 import com.otakustream.core.ui.CoverImage
 import com.otakustream.core.ui.EmptyState
 import com.otakustream.feature.library.local.LocalVideosViewModel
@@ -113,7 +117,23 @@ fun LibraryScreen(
         TabRow(selectedTabIndex = selectedTab) {
             Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Watchlist") })
             Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("History") })
-            Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("Downloads") })
+            Tab(
+                selected = selectedTab == 2,
+                onClick = { selectedTab = 2 },
+                text = {
+                    // A download running or failed was visible nowhere outside this tab, so the
+                    // only way to learn one had failed was to come looking. The badge counts both:
+                    // in flight and needing attention are the two states worth leaving the tab for.
+                    val active = uiState.downloads.count { row ->
+                        row.isPending || row.progress?.state == DownloadProgress.State.FAILED
+                    }
+                    if (active > 0) {
+                        BadgedBox(badge = { Badge { Text(active.toString()) } }) { Text("Downloads") }
+                    } else {
+                        Text("Downloads")
+                    }
+                },
+            )
             Tab(selected = selectedTab == 3, onClick = { selectedTab = 3 }, text = { Text("On device") })
         }
 
@@ -432,6 +452,19 @@ private fun DownloadsTab(
         )
         return
     }
+    // Deleting a download deletes bytes, so it asks. Everything else in this file that removes
+    // something restores it from the database instead, and offers Undo.
+    var pendingDelete by remember { mutableStateOf<DownloadRow?>(null) }
+    pendingDelete?.let { row ->
+        ConfirmDialog(
+            title = "Delete download?",
+            body = "\"${row.entry.mediaTitle}\" will be removed from this device. Watching it again " +
+                "means downloading it again.",
+            confirmLabel = "Delete",
+            onConfirm = { viewModel.removeDownload(row) },
+            onDismiss = { pendingDelete = null },
+        )
+    }
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         items(uiState.downloads, key = { it.entry.videoUrl }) { row ->
             val progress = row.progress
@@ -516,7 +549,14 @@ private fun DownloadsTab(
                                 )
                             }
                         }
-                        IconButton(onClick = { viewModel.removeDownload(row) }) {
+                        // A failed row now has a way forward as well as a way out. It was the
+                        // only state in the app whose sole affordance was to throw the thing away.
+                        if (progress?.state == DownloadProgress.State.FAILED) {
+                            IconButton(onClick = { viewModel.retryDownload(row) }) {
+                                Icon(Icons.Filled.Refresh, contentDescription = "Retry download")
+                            }
+                        }
+                        IconButton(onClick = { pendingDelete = row }) {
                             Icon(Icons.Filled.Delete, contentDescription = "Delete download")
                         }
                     }

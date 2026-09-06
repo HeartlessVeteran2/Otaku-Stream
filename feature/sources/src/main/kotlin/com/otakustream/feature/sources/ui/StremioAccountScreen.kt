@@ -1,6 +1,7 @@
 package com.otakustream.feature.sources.ui
 
 import com.otakustream.core.ui.BackTopBar
+import com.otakustream.core.ui.ConfirmDialog
 import com.otakustream.core.ui.CoverImage
 
 import androidx.compose.foundation.layout.Arrangement
@@ -141,7 +142,18 @@ private fun LoggedInContent(uiState: StremioAccountUiState, viewModel: StremioAc
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f),
             )
-            OutlinedButton(onClick = viewModel::logout) { Text("Sign out") }
+            var confirmSignOut by remember { mutableStateOf(false) }
+            if (confirmSignOut) {
+                ConfirmDialog(
+                    title = "Sign out of Stremio?",
+                    body = "Your saved credentials are removed from this device and the library " +
+                        "below stops loading. Your Stremio account is not changed.",
+                    confirmLabel = "Sign out",
+                    onConfirm = viewModel::logout,
+                    onDismiss = { confirmSignOut = false },
+                )
+            }
+            OutlinedButton(onClick = { confirmSignOut = true }) { Text("Sign out") }
         }
         Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp),

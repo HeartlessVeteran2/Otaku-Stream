@@ -30,8 +30,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -209,9 +211,21 @@ fun AppNavHost(
     val scope = rememberCoroutineScope()
     DisposableEffect(Unit) {
         UiMessages.setSink { message ->
+            // The undo runs on this scope, not the caller's. A ViewModel that removed something is
+            // routinely cleared the moment the user leaves the screen, while the snackbar offering
+            // to put it back is still on screen — undoing on a cancelled viewModelScope would do
+            // nothing while telling the user it had worked. This scope lives as long as the nav
+            // host, which is as long as there is a snackbar to tap.
             scope.launch {
                 snackbarHostState.currentSnackbarData?.dismiss()
-                snackbarHostState.showSnackbar(message)
+                val result = snackbarHostState.showSnackbar(
+                    message = message.text,
+                    actionLabel = message.actionLabel,
+                    // Long, so there is time to notice a mis-tap and take it back. A plain
+                    // confirmation stays Short — it is telling you something, not asking.
+                    duration = if (message.action != null) SnackbarDuration.Long else SnackbarDuration.Short,
+                )
+                if (result == SnackbarResult.ActionPerformed) message.action?.invoke()
             }
         }
         onDispose { UiMessages.setSink(null) }

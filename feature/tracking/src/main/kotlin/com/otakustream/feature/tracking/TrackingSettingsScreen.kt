@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.database.tracking.TrackingRepository
 import com.otakustream.core.ui.BackTopBar
+import com.otakustream.core.ui.ConfirmDialog
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -167,7 +168,19 @@ fun TrackingSettingsScreen(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(top = 16.dp),
             )
-            TextButton(onClick = viewModel::clearToken) { Text("Sign out") }
+            var confirmSignOut by remember { mutableStateOf(false) }
+            if (confirmSignOut) {
+                ConfirmDialog(
+                    title = "Sign out of AniList?",
+                    body = "Your access token is deleted from this device and progress stops " +
+                        "syncing. Your AniList lists themselves are not touched, and signing in " +
+                        "again restores tracking.",
+                    confirmLabel = "Sign out",
+                    onConfirm = viewModel::clearToken,
+                    onDismiss = { confirmSignOut = false },
+                )
+            }
+            TextButton(onClick = { confirmSignOut = true }) { Text("Sign out") }
         } else if (AniListAuth.isConfigured) {
             Button(
                 onClick = {

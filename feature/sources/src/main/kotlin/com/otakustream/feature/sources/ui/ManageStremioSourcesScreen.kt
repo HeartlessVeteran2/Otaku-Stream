@@ -35,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.ui.BackTopBar
+import com.otakustream.core.ui.ConfirmDialog
 
 @Composable
 fun ManageStremioSourcesScreen(
@@ -64,6 +65,23 @@ fun ManageStremioSourcesScreen(
     }
 
     var showAdvanced by remember(serverBaseUrl) { mutableStateOf(serverBaseUrl != null) }
+
+    // Removing an add-on takes its catalogs out of Home and its streams out of every episode, and
+    // the Remove button sits in a dense row beside a Switch — the two easiest controls in the app to
+    // confuse. Undo is not the right shape here either: the record is gone from the database and
+    // putting it back means re-fetching its manifest, so this asks before rather than apologises
+    // after.
+    var pendingRemove by remember { mutableStateOf<StremioAddonItem?>(null) }
+    pendingRemove?.let { item ->
+        ConfirmDialog(
+            title = "Remove ${item.record.name}?",
+            body = "Its catalogs disappear from Home and it stops answering for streams. You can " +
+                "install it again from the directory.",
+            confirmLabel = "Remove",
+            onConfirm = { viewModel.remove(item.record) },
+            onDismiss = { pendingRemove = null },
+        )
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -140,7 +158,7 @@ fun ManageStremioSourcesScreen(
                     onMoveUp = { viewModel.moveAddon(item, -1) },
                     onMoveDown = { viewModel.moveAddon(item, 1) },
                     onToggleCatalog = { catalog -> viewModel.toggleCatalogEnabled(item, catalog) },
-                    onRemove = { viewModel.remove(item.record) },
+                    onRemove = { pendingRemove = item },
                 )
             }
 

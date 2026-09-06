@@ -25,12 +25,16 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.sources.mangayomi.repo.MangayomiExtensionListing
 import com.otakustream.core.ui.BackTopBar
+import com.otakustream.core.ui.ConfirmDialog
 
 @Composable
 fun MangayomiExtensionsScreen(
@@ -40,6 +44,20 @@ fun MangayomiExtensionsScreen(
     viewModel: MangayomiExtensionsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
+
+    // Uninstalling drops the extension and its saved preferences, and getting it back means
+    // fetching it from the repository again — not an undo, so it asks.
+    var pendingUninstall by remember { mutableStateOf<MangayomiExtensionListing?>(null) }
+    pendingUninstall?.let { listing ->
+        ConfirmDialog(
+            title = "Uninstall ${listing.name}?",
+            body = "The extension and any preferences you set for it are removed. You can install " +
+                "it again from this list.",
+            confirmLabel = "Uninstall",
+            onConfirm = { viewModel.uninstall(listing) },
+            onDismiss = { pendingUninstall = null },
+        )
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -107,7 +125,7 @@ fun MangayomiExtensionsScreen(
                     isInstalling = uiState.installingId == listing.id,
                     canInstall = uiState.installingId == null,
                     onInstall = { viewModel.install(listing) },
-                    onUninstall = { viewModel.uninstall(listing) },
+                    onUninstall = { pendingUninstall = listing },
                     onConfigure = { onConfigure(listing.id) },
                 )
             }
