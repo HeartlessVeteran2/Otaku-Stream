@@ -3,35 +3,37 @@ package com.otakustream.feature.tracking
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.database.tracking.TrackingRepository
+import com.otakustream.core.ui.BackTopBar
+import com.otakustream.core.ui.ConfirmDialog
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -56,6 +58,9 @@ class TrackingSettingsViewModel @Inject constructor(
     private val _justSignedIn = MutableStateFlow(false)
     val justSignedIn: StateFlow<Boolean> = _justSignedIn.asStateFlow()
 
+    // The in-flight token validation, if any. See onOAuthToken and clearToken.
+    private var authJob: Job? = null
+
     // Set when a redirect is rejected, so the screen can say so instead of silently doing nothing.
     private val _signInRejected = MutableStateFlow(false)
     val signInRejected: StateFlow<Boolean> = _signInRejected.asStateFlow()
@@ -73,16 +78,32 @@ class TrackingSettingsViewModel @Inject constructor(
             _signInRejected.value = true
             return
         }
-        viewModelScope.launch {
+        // Held so signing out can cancel it. Between the redirect arriving and the token being
+        // stored there is a network round trip, and a sign-out landing in that window used to be
+        // overtaken by the validation finishing afterwards — the token saved, the user signed in
+        // again, having just asked not to be. Rare, but the one failure mode that matters for a
+        // credential is the one where destroying it does not take.
+        authJob?.cancel()
+        authJob = viewModelScope.launch {
             // 2. It has to be a token AniList actually honours. The nonce proves the redirect
             //    belongs to our sign-in; it says nothing about whether the token in it works. Asking
             //    who the token belongs to before storing it turns "signed in" into a statement the
             //    app has checked, rather than one it is repeating back from a URL.
-            val valid = runCatching { aniListClient.fetchViewer(token.trim()) }.isSuccess
+            val valid = runCatching { aniListClient.fetchViewer(token.trim()) }
+                // Cancellation is not a rejected sign-in, and runCatching catches Throwable. Signing
+                // out cancels this job while it is suspended in the fetch, and without this the
+                // cancellation was swallowed into valid = false — so the screen said "That sign-in
+                // couldn't be verified" to someone who had just chosen to sign out. Rethrowing also
+                // means the ensureActive() below is reachable, which in that path it was not.
+                .onFailure { failure -> if (failure is CancellationException) throw failure }
+                .isSuccess
             if (!valid) {
                 _signInRejected.value = true
                 return@launch
             }
+            // Belt and braces for the narrow window between the fetch returning and the save
+            // starting. Cancellation is cooperative, and the rethrow above covers the long part.
+            ensureActive()
             trackingRepository.saveToken(token.trim())
             _signInRejected.value = false
             _justSignedIn.value = true
@@ -95,6 +116,10 @@ class TrackingSettingsViewModel @Inject constructor(
     fun onRejectionShown() { _signInRejected.value = false }
 
     fun clearToken() {
+        // Before anything else: a sign-in still being validated must not be allowed to finish and
+        // store its token after the user has asked to be signed out.
+        authJob?.cancel()
+        authJob = null
         _justSignedIn.value = false
         viewModelScope.launch { trackingRepository.clearToken() }
     }
@@ -126,17 +151,19 @@ fun TrackingSettingsScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
-                title = { Text("AniList tracking") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-            )
+            BackTopBar(title = "AniList tracking", onBack = onBack)
         },
     ) { scaffoldPadding ->
-    Column(modifier = Modifier.fillMaxSize().padding(scaffoldPadding).padding(16.dp)) {
+    // verticalScroll, which this was missing: with the redirect-rejected message and the
+    // no-browser message both showing at a large font scale, the sign-in button below them was
+    // pushed off the bottom of a fixed Column with no way to reach it.
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(scaffoldPadding)
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+    ) {
         Text(
             text = "Sign in to sync your watch progress automatically.",
             style = MaterialTheme.typography.bodyMedium,
@@ -162,7 +189,19 @@ fun TrackingSettingsScreen(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(top = 16.dp),
             )
-            TextButton(onClick = viewModel::clearToken) { Text("Sign out") }
+            var confirmSignOut by remember { mutableStateOf(false) }
+            if (confirmSignOut) {
+                ConfirmDialog(
+                    title = "Sign out of AniList?",
+                    body = "Your access token is deleted from this device and progress stops " +
+                        "syncing. Your AniList lists themselves are not touched, and signing in " +
+                        "again restores tracking.",
+                    confirmLabel = "Sign out",
+                    onConfirm = viewModel::clearToken,
+                    onDismiss = { confirmSignOut = false },
+                )
+            }
+            TextButton(onClick = { confirmSignOut = true }) { Text("Sign out") }
         } else if (AniListAuth.isConfigured) {
             Button(
                 onClick = {

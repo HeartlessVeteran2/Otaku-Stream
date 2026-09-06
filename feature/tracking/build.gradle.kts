@@ -58,6 +58,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":core:ui"))
     api(project(":core:database"))
 
     implementation(libs.androidx.core.ktx)

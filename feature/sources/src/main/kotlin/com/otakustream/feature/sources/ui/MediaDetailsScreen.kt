@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import com.otakustream.core.ui.BackTopBar
 import com.otakustream.core.ui.CoverImage
 import com.otakustream.feature.sources.SourceFailure
 import com.otakustream.feature.sources.StreamOption
@@ -67,7 +68,10 @@ import com.otakustream.core.database.library.LIBRARY_STATUS_COMPLETED
 import com.otakustream.core.database.library.LIBRARY_STATUS_PLANNED
 import com.otakustream.core.database.library.LIBRARY_STATUS_WATCHING
 import com.otakustream.core.database.tracking.toTrackerSeason
+import com.otakustream.core.ui.ProvideTitleAccent
 import com.otakustream.core.ui.heroScrim
+import com.otakustream.core.ui.onTitleAccent
+import com.otakustream.core.ui.titleAccent
 import com.otakustream.feature.tracking.LinkAniListDialog
 
 // Which link the AniList dialog is being opened to create. A nullable holder rather than a bare
@@ -80,6 +84,10 @@ fun MediaDetailsScreen(
     sourceId: Long,
     mediaUrl: String,
     mediaTitle: String,
+    // The cover the catalog was already showing, handed over rather than re-derived. A scripted
+    // source returns the MediaItem it was given untouched, so without this its detail screen has no
+    // artwork at all — and nothing for the per-title accent to read.
+    seedCoverUrl: String? = null,
     onPlayVideo: (videoUrl: String) -> Unit,
     onOpenTracking: () -> Unit,
     onBack: () -> Unit = {},
@@ -100,7 +108,7 @@ fun MediaDetailsScreen(
     var linkTarget by remember { mutableStateOf<LinkTarget?>(null) }
 
     LaunchedEffect(sourceId, mediaUrl) {
-        viewModel.load(sourceId, mediaUrl, mediaTitle)
+        viewModel.load(sourceId, mediaUrl, mediaTitle, seedCoverUrl)
     }
 
     LaunchedEffect(uiState.resolvedVideoUrl) {
@@ -127,372 +135,381 @@ fun MediaDetailsScreen(
         visibleEpisodes.count { it.url in watchedEpisodeUrls }
     }
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        topBar = { BackTopBar(title = mediaTitle, onBack = onBack) },
-    ) { padding ->
-        // Held as a lambda rather than pulled out into a function with a parameter list.
-        //
-        // It reads a dozen pieces of hoisted state and calls back into the view model; passing
-        // all of that explicitly would be a long signature that has to be kept in step, and the
-        // only reason to do it would be reuse this file does not need. Capturing lexically means
-        // the phone and tablet layouts below are provably rendering the same header.
-        val header: @Composable () -> Unit = {
-            Column {
-                Box(modifier = Modifier.fillMaxWidth().height(280.dp).clip(MaterialTheme.shapes.large)) {
-                    CoverImage(
-                        url = uiState.details?.backgroundUrl ?: uiState.details?.media?.coverUrl,
-                        contentDescription = mediaTitle,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(heroScrim()),
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(12.dp),
-                    ) {
-                        Text(
-                            text = mediaTitle,
-                            style = MaterialTheme.typography.headlineLarge.copy(
-                                color = MaterialTheme.colorScheme.onBackground,
-                                // The scheme background, not black: this shadow exists to hold the
-                                // title apart from whatever the artwork is doing behind it, and in
-                                // the light scheme the text is dark — a black halo behind dark text
-                                // muddies it instead of separating it. Following the background
-                                // means the halo is always the opposite of the ink on top of it.
-                                shadow = Shadow(
-                                    color = MaterialTheme.colorScheme.background.copy(alpha = 0.6f),
-                                    blurRadius = 8f,
-                                ),
-                            ),
-                            modifier = Modifier.weight(1f),
+    // Keyed on the same image the hero draws, so the page's colour is the colour of the picture at
+    // the top of it rather than of a thumbnail you cannot see.
+    //
+    // One expression, used twice below, so the picture and the colour taken from it cannot
+    // disagree. Giving the accent the seed but not the hero meant that while details were loading
+    // the page took its colour from a poster the user could not see, under a placeholder icon.
+    val heroUrl = uiState.details?.backgroundUrl ?: uiState.details?.media?.coverUrl ?: seedCoverUrl
+    ProvideTitleAccent(coverUrl = heroUrl) {
+        Scaffold(
+            modifier = modifier.fillMaxSize(),
+            topBar = { BackTopBar(title = mediaTitle, onBack = onBack) },
+        ) { padding ->
+            // Held as a lambda rather than pulled out into a function with a parameter list.
+            //
+            // It reads a dozen pieces of hoisted state and calls back into the view model; passing
+            // all of that explicitly would be a long signature that has to be kept in step, and the
+            // only reason to do it would be reuse this file does not need. Capturing lexically means
+            // the phone and tablet layouts below are provably rendering the same header.
+            val header: @Composable () -> Unit = {
+                Column {
+                    Box(modifier = Modifier.fillMaxWidth().height(280.dp).clip(MaterialTheme.shapes.large)) {
+                        CoverImage(
+                            url = heroUrl,
+                            contentDescription = mediaTitle,
+                            modifier = Modifier.fillMaxSize(),
                         )
-                        IconButton(
-                            onClick = viewModel::toggleWatchlist,
-                            colors = IconButtonDefaults.iconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.5f),
-                            ),
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(heroScrim()),
+                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(12.dp),
                         ) {
-                            Icon(
-                                imageVector = if (inLibrary) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-                                contentDescription = if (inLibrary) "Remove from watchlist" else "Add to watchlist",
-                                tint = MaterialTheme.colorScheme.primary,
+                            Text(
+                                text = mediaTitle,
+                                style = MaterialTheme.typography.headlineLarge.copy(
+                                    color = MaterialTheme.colorScheme.onBackground,
+                                    // The scheme background, not black: this shadow exists to hold the
+                                    // title apart from whatever the artwork is doing behind it, and in
+                                    // the light scheme the text is dark — a black halo behind dark text
+                                    // muddies it instead of separating it. Following the background
+                                    // means the halo is always the opposite of the ink on top of it.
+                                    shadow = Shadow(
+                                        color = MaterialTheme.colorScheme.background.copy(alpha = 0.6f),
+                                        blurRadius = 8f,
+                                    ),
+                                ),
+                                modifier = Modifier.weight(1f),
                             )
-                        }
-                    }
-                }
-
-                // Watch-status selector for a saved title — moves it between the Library's buckets.
-                if (inLibrary) {
-                    LibraryStatusRow(
-                        status = libraryStatus,
-                        onSelect = viewModel::setLibraryStatus,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                }
-
-                trackerLink?.let { link ->
-                    // When the selected season has no link of its own, this row is showing the
-                    // whole-series link as a fallback. Say so, and offer to link this season
-                    // specifically — otherwise every season would silently report the same AniList entry
-                    // and push progress at it. Derived from the resolved link itself rather than from a
-                    // second "which seasons are linked" flow: the two are separate Room queries that
-                    // emit independently, so between emissions they'd disagree and this row would
-                    // describe a link it isn't showing.
-                    val isFallback = link.season != selectedSeason.toTrackerSeason()
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = if (isFallback) {
-                                "AniList (whole series): ${link.trackerTitle}"
-                            } else if (link.season > 0) {
-                                "AniList (season ${link.season}): ${link.trackerTitle}"
-                            } else {
-                                "AniList: ${link.trackerTitle}"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        TextButton(onClick = viewModel::unlinkTracker) { Text("Unlink") }
-                    }
-                    if (isFallback && hasTrackerToken) {
-                        TextButton(onClick = { linkTarget = LinkTarget(season = selectedSeason) }) {
-                            Text("Link season $selectedSeason separately")
-                        }
-                    }
-                    // The same status/score/progress editor as the AniList detail screen, so a linked
-                    // title is managed here without leaving for the AniList tab.
-                    AniListListControls(
-                        status = aniListEntry.status,
-                        progress = aniListEntry.progress,
-                        // Counted against whatever the resolved link actually covers. AniList models
-                        // each season as its own media entry, so a season link's progress is
-                        // season-relative and the series total would render "3 / 87" for episode 3
-                        // of a 12-episode season. The whole-series fallback is the opposite case and
-                        // genuinely does want the total. With no season data the two are the same
-                        // list, so this changes nothing for single-season titles.
-                        episodeCount = (if (isFallback) uiState.episodes.size else visibleEpisodes.size)
-                            .takeIf { it > 0 },
-                        score = aniListEntry.score,
-                        isSaving = aniListEntry.isSaving,
-                        saveError = aniListEntry.saveError,
-                        onSetStatus = viewModel::setAniListStatus,
-                        onSetScore = viewModel::setAniListScore,
-                        onSetProgress = viewModel::setAniListProgress,
-                    )
-                } ?: if (hasTrackerToken) {
-                    // The first link a title gets is deliberately the whole-series one (season = null),
-                    // even on a multi-season show with a season selected. Everything that looks up a
-                    // link without a season in hand — library status changes, sources with no season
-                    // data — resolves through that row, so creating only a season-N row here would
-                    // leave the title reading as unlinked everywhere else. Per-season links are then
-                    // added on top via "Link season N separately".
-                    TextButton(onClick = { linkTarget = LinkTarget(season = null) }) { Text("Link to AniList") }
-                } else {
-                    // Not signed in — a link dialog would only fail, so make this a tappable shortcut
-                    // straight to AniList sign-in instead of plain text telling the user to hunt for it.
-                    TextButton(onClick = onOpenTracking) { Text("Sign in to AniList to track this show") }
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                    Text(text = "Auto-play next episode", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                    Switch(checked = autoPlayEnabled, onCheckedChange = viewModel::setAutoPlayEnabled)
-                }
-
-                if (uiState.isLoading && uiState.details == null) {
-                    CircularProgressIndicator(modifier = Modifier.padding(16.dp))
-                }
-
-                uiState.details?.let { details ->
-                    if (details.imdbRating != null || details.runtime != null) {
-                        Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                            details.imdbRating?.let { rating ->
-                                Text(
-                                    text = "★ $rating",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.tertiary,
-                                    modifier = Modifier.padding(end = 12.dp),
+                            IconButton(
+                                onClick = viewModel::toggleWatchlist,
+                                colors = IconButtonDefaults.iconButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.5f),
+                                ),
+                            ) {
+                                Icon(
+                                    imageVector = if (inLibrary) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                                    contentDescription = if (inLibrary) "Remove from watchlist" else "Add to watchlist",
+                                    tint = titleAccent(),
                                 )
                             }
-                            details.runtime?.let { runtime ->
-                                Text(text = runtime, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+
+                    // Watch-status selector for a saved title — moves it between the Library's buckets.
+                    if (inLibrary) {
+                        LibraryStatusRow(
+                            status = libraryStatus,
+                            onSelect = viewModel::setLibraryStatus,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+
+                    trackerLink?.let { link ->
+                        // When the selected season has no link of its own, this row is showing the
+                        // whole-series link as a fallback. Say so, and offer to link this season
+                        // specifically — otherwise every season would silently report the same AniList entry
+                        // and push progress at it. Derived from the resolved link itself rather than from a
+                        // second "which seasons are linked" flow: the two are separate Room queries that
+                        // emit independently, so between emissions they'd disagree and this row would
+                        // describe a link it isn't showing.
+                        val isFallback = link.season != selectedSeason.toTrackerSeason()
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = if (isFallback) {
+                                    "AniList (whole series): ${link.trackerTitle}"
+                                } else if (link.season > 0) {
+                                    "AniList (season ${link.season}): ${link.trackerTitle}"
+                                } else {
+                                    "AniList: ${link.trackerTitle}"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            TextButton(onClick = viewModel::unlinkTracker) { Text("Unlink") }
+                        }
+                        if (isFallback && hasTrackerToken) {
+                            TextButton(onClick = { linkTarget = LinkTarget(season = selectedSeason) }) {
+                                Text("Link season $selectedSeason separately")
+                            }
+                        }
+                        // The same status/score/progress editor as the AniList detail screen, so a linked
+                        // title is managed here without leaving for the AniList tab.
+                        AniListListControls(
+                            status = aniListEntry.status,
+                            progress = aniListEntry.progress,
+                            // Counted against whatever the resolved link actually covers. AniList models
+                            // each season as its own media entry, so a season link's progress is
+                            // season-relative and the series total would render "3 / 87" for episode 3
+                            // of a 12-episode season. The whole-series fallback is the opposite case and
+                            // genuinely does want the total. With no season data the two are the same
+                            // list, so this changes nothing for single-season titles.
+                            episodeCount = (if (isFallback) uiState.episodes.size else visibleEpisodes.size)
+                                .takeIf { it > 0 },
+                            score = aniListEntry.score,
+                            isSaving = aniListEntry.isSaving,
+                            saveError = aniListEntry.saveError,
+                            onSetStatus = viewModel::setAniListStatus,
+                            onSetScore = viewModel::setAniListScore,
+                            onSetProgress = viewModel::setAniListProgress,
+                        )
+                    } ?: if (hasTrackerToken) {
+                        // The first link a title gets is deliberately the whole-series one (season = null),
+                        // even on a multi-season show with a season selected. Everything that looks up a
+                        // link without a season in hand — library status changes, sources with no season
+                        // data — resolves through that row, so creating only a season-N row here would
+                        // leave the title reading as unlinked everywhere else. Per-season links are then
+                        // added on top via "Link season N separately".
+                        TextButton(onClick = { linkTarget = LinkTarget(season = null) }) { Text("Link to AniList") }
+                    } else {
+                        // Not signed in — a link dialog would only fail, so make this a tappable shortcut
+                        // straight to AniList sign-in instead of plain text telling the user to hunt for it.
+                        TextButton(onClick = onOpenTracking) { Text("Sign in to AniList to track this show") }
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                        Text(text = "Auto-play next episode", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                        Switch(checked = autoPlayEnabled, onCheckedChange = viewModel::setAutoPlayEnabled)
+                    }
+
+                    if (uiState.isLoading && uiState.details == null) {
+                        CircularProgressIndicator(modifier = Modifier.padding(16.dp))
+                    }
+
+                    uiState.details?.let { details ->
+                        if (details.imdbRating != null || details.runtime != null) {
+                            Row(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                                details.imdbRating?.let { rating ->
+                                    Text(
+                                        text = "★ $rating",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.tertiary,
+                                        modifier = Modifier.padding(end = 12.dp),
+                                    )
+                                }
+                                details.runtime?.let { runtime ->
+                                    Text(text = runtime, style = MaterialTheme.typography.bodySmall)
+                                }
                             }
                         }
                     }
-                }
 
-                uiState.details?.description?.let { description ->
-                    Text(text = description, modifier = Modifier.padding(top = 8.dp))
-                }
+                    uiState.details?.description?.let { description ->
+                        Text(text = description, modifier = Modifier.padding(top = 8.dp))
+                    }
 
-                uiState.details?.cast?.takeIf { it.isNotEmpty() }?.let { cast ->
-                    Text(
-                        text = "Cast: ${cast.joinToString(", ")}",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                }
-
-                uiState.error?.let { error ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    ) {
+                    uiState.details?.cast?.takeIf { it.isNotEmpty() }?.let { cast ->
                         Text(
-                            text = error,
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.weight(1f),
+                            text = "Cast: ${cast.joinToString(", ")}",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(top = 8.dp),
                         )
-                        TextButton(onClick = viewModel::retryLoad) { Text("Retry") }
                     }
-                }
 
-                if (seasons.isNotEmpty()) {
-                    LazyRow(modifier = Modifier.padding(top = 16.dp)) {
-                        items(seasons, key = { it }) { season ->
-                            FilterChip(
-                                selected = season == selectedSeason,
-                                onClick = { viewModel.selectSeason(season) },
-                                label = { Text("Season $season") },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = MaterialTheme.colorScheme.tertiary,
-                                    selectedLabelColor = MaterialTheme.colorScheme.onTertiary,
-                                ),
-                                modifier = Modifier.padding(end = 8.dp),
-                            )
-                        }
-                    }
-                }
-
-                if (watchedCount > 0) {
-                    Text(
-                        text = "$watchedCount of ${visibleEpisodes.size} watched",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                }
-
-                if (!uiState.isLoading && visibleEpisodes.isEmpty()) {
-                    EmptyState(
-                        icon = Icons.Filled.Movie,
-                        title = "No episodes listed",
-                        message = "This source didn't return anything to play for this title.",
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-        }
-
-        // A LazyListScope builder, so the same rows are emitted into whichever list is used.
-        val episodeItems: LazyListScope.() -> Unit = {
-        items(visibleEpisodes, key = { it.url }) { episode ->
-            val watched = episode.url in watchedEpisodeUrls
-            val downloaded = episode.url in downloadedEpisodeUrls
-            val resolving = episode.url == uiState.resolvingEpisodeUrl
-            // While any episode is resolving, block taps so a second tap can't start a
-            // competing resolve (or re-trigger the one in flight).
-            val rowEnabled = uiState.resolvingEpisodeUrl == null
-            ListItem(
-                headlineContent = {
-                    Text(
-                        text = episode.name,
-                        // Watched episodes recede so the next unwatched one stands out.
-                        color = if (watched) {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
-                    )
-                },
-                trailingContent = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (resolving) {
-                            CircularProgressIndicator(
-                                strokeWidth = 2.dp,
-                                modifier = Modifier.size(20.dp),
-                            )
-                        } else if (watched) {
-                            Icon(
-                                imageVector = Icons.Filled.CheckCircle,
-                                contentDescription = "Watched",
-                                tint = MaterialTheme.colorScheme.tertiary,
-                            )
-                        }
-                        // Its own tap target beside the row rather than a long-press or a menu:
-                        // saving an episode for offline is a deliberate act, and a hidden gesture
-                        // would mean the feature exists but nobody finds it.
-                        IconButton(
-                            onClick = {
-                                if (downloaded) {
-                                    viewModel.cancelDownload(episode)
-                                } else {
-                                    viewModel.downloadEpisode(sourceId, episode)
-                                }
-                            },
-                            enabled = rowEnabled,
+                    uiState.error?.let { error ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                         ) {
-                            Icon(
-                                imageVector = if (downloaded) {
-                                    Icons.Filled.DownloadDone
-                                } else {
-                                    Icons.Filled.Download
-                                },
-                                contentDescription = if (downloaded) {
-                                    "Remove download"
-                                } else {
-                                    "Download episode"
-                                },
-                                tint = if (downloaded) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
+                            Text(
+                                text = error,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.weight(1f),
                             )
+                            TextButton(onClick = viewModel::retryLoad) { Text("Retry") }
                         }
                     }
-                },
-                modifier = Modifier.clickable(enabled = rowEnabled) {
-                    viewModel.playEpisode(sourceId, episode)
-                },
-            )
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        }
-        }
 
-        // Two panes once there is width for them, one column otherwise.
-        //
-        // BoxWithConstraints rather than WindowSizeClass: the decision is about the space this
-        // screen actually has, which is not the same as the window's size when the app is in
-        // split-screen or a freeform window. It also needs no extra dependency.
-        //
-        // On a tablet the single column wastes the width twice over — a 280 dp hero stretched to
-        // 1200 dp, and an episode list pushed below the fold that the user came here to use.
-        BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(padding)) {
-            if (maxWidth >= TWO_PANE_MIN_WIDTH) {
-                Row(modifier = Modifier.fillMaxSize()) {
-                    // The header scrolls independently: it is taller than a tablet screen once a
-                    // long synopsis and the AniList controls are in it, so a fixed pane would clip.
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .verticalScroll(rememberScrollState())
-                            .padding(16.dp),
-                    ) {
-                        header()
+                    if (seasons.isNotEmpty()) {
+                        LazyRow(modifier = Modifier.padding(top = 16.dp)) {
+                            items(seasons, key = { it }) { season ->
+                                FilterChip(
+                                    selected = season == selectedSeason,
+                                    onClick = { viewModel.selectSeason(season) },
+                                    label = { Text("Season $season") },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = titleAccent(),
+                                        selectedLabelColor = onTitleAccent(),
+                                    ),
+                                    modifier = Modifier.padding(end = 8.dp),
+                                )
+                            }
+                        }
                     }
-                    LazyColumn(
-                        modifier = Modifier.weight(1f).fillMaxHeight().padding(16.dp),
-                        content = episodeItems,
-                    )
+
+                    if (watchedCount > 0) {
+                        Text(
+                            text = "$watchedCount of ${visibleEpisodes.size} watched",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+
+                    if (!uiState.isLoading && visibleEpisodes.isEmpty()) {
+                        EmptyState(
+                            icon = Icons.Filled.Movie,
+                            title = "No episodes listed",
+                            message = "This source didn't return anything to play for this title.",
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
-            } else {
-                // One scrolling list for the whole screen, header included.
-                //
-                // This used to be a Column holding a 280 dp hero, a status row, the AniList
-                // controls, an unbounded synopsis, the cast line and the season chips, with the
-                // episode LazyColumn last and no weight. A Column hands each child the height it
-                // asks for in order and gives the last one whatever is left — which in landscape
-                // is nothing. The episode list, the entire point of the screen, measured to
-                // roughly zero and could not be reached or scrolled to. Folding the header into
-                // the list means it scrolls away instead of competing for height.
-                LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                    item { header() }
-                    episodeItems()
+            }
+
+            // A LazyListScope builder, so the same rows are emitted into whichever list is used.
+            val episodeItems: LazyListScope.() -> Unit = {
+            items(visibleEpisodes, key = { it.url }) { episode ->
+                val watched = episode.url in watchedEpisodeUrls
+                val downloaded = episode.url in downloadedEpisodeUrls
+                val resolving = episode.url == uiState.resolvingEpisodeUrl
+                // While any episode is resolving, block taps so a second tap can't start a
+                // competing resolve (or re-trigger the one in flight).
+                val rowEnabled = uiState.resolvingEpisodeUrl == null
+                ListItem(
+                    headlineContent = {
+                        Text(
+                            text = episode.name,
+                            // Watched episodes recede so the next unwatched one stands out.
+                            color = if (watched) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            },
+                        )
+                    },
+                    trailingContent = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (resolving) {
+                                CircularProgressIndicator(
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            } else if (watched) {
+                                Icon(
+                                    imageVector = Icons.Filled.CheckCircle,
+                                    contentDescription = "Watched",
+                                    tint = MaterialTheme.colorScheme.tertiary,
+                                )
+                            }
+                            // Its own tap target beside the row rather than a long-press or a menu:
+                            // saving an episode for offline is a deliberate act, and a hidden gesture
+                            // would mean the feature exists but nobody finds it.
+                            IconButton(
+                                onClick = {
+                                    if (downloaded) {
+                                        viewModel.cancelDownload(episode)
+                                    } else {
+                                        viewModel.downloadEpisode(sourceId, episode)
+                                    }
+                                },
+                                enabled = rowEnabled,
+                            ) {
+                                Icon(
+                                    imageVector = if (downloaded) {
+                                        Icons.Filled.DownloadDone
+                                    } else {
+                                        Icons.Filled.Download
+                                    },
+                                    contentDescription = if (downloaded) {
+                                        "Remove download"
+                                    } else {
+                                        "Download episode"
+                                    },
+                                    tint = if (downloaded) {
+                                        titleAccent()
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                )
+                            }
+                        }
+                    },
+                    modifier = Modifier.clickable(enabled = rowEnabled) {
+                        viewModel.playEpisode(sourceId, episode)
+                    },
+                )
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
+            }
+
+            // Two panes once there is width for them, one column otherwise.
+            //
+            // BoxWithConstraints rather than WindowSizeClass: the decision is about the space this
+            // screen actually has, which is not the same as the window's size when the app is in
+            // split-screen or a freeform window. It also needs no extra dependency.
+            //
+            // On a tablet the single column wastes the width twice over — a 280 dp hero stretched to
+            // 1200 dp, and an episode list pushed below the fold that the user came here to use.
+            BoxWithConstraints(modifier = Modifier.fillMaxSize().padding(padding)) {
+                if (maxWidth >= TWO_PANE_MIN_WIDTH) {
+                    Row(modifier = Modifier.fillMaxSize()) {
+                        // The header scrolls independently: it is taller than a tablet screen once a
+                        // long synopsis and the AniList controls are in it, so a fixed pane would clip.
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .verticalScroll(rememberScrollState())
+                                .padding(16.dp),
+                        ) {
+                            header()
+                        }
+                        LazyColumn(
+                            modifier = Modifier.weight(1f).fillMaxHeight().padding(16.dp),
+                            content = episodeItems,
+                        )
+                    }
+                } else {
+                    // One scrolling list for the whole screen, header included.
+                    //
+                    // This used to be a Column holding a 280 dp hero, a status row, the AniList
+                    // controls, an unbounded synopsis, the cast line and the season chips, with the
+                    // episode LazyColumn last and no weight. A Column hands each child the height it
+                    // asks for in order and gives the last one whatever is left — which in landscape
+                    // is nothing. The episode list, the entire point of the screen, measured to
+                    // roughly zero and could not be reached or scrolled to. Folding the header into
+                    // the list means it scrolls away instead of competing for height.
+                    LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                        item { header() }
+                        episodeItems()
+                    }
                 }
             }
         }
-    }
 
-    linkTarget?.let { target ->
-        LinkAniListDialog(
-            mediaUrl = mediaUrl,
-            sourceId = sourceId,
-            // Seed the search with the season, since AniList lists them as separate titles
-            // ("Show Season 2"), so the right entry is usually the first result. The whole-series
-            // link searches the plain title.
-            defaultQuery = target.season?.takeIf { it > 1 }?.let { "$mediaTitle Season $it" } ?: mediaTitle,
-            onDismiss = { linkTarget = null },
-            season = target.season,
-        )
-    }
+        linkTarget?.let { target ->
+            LinkAniListDialog(
+                mediaUrl = mediaUrl,
+                sourceId = sourceId,
+                // Seed the search with the season, since AniList lists them as separate titles
+                // ("Show Season 2"), so the right entry is usually the first result. The whole-series
+                // link searches the plain title.
+                defaultQuery = target.season?.takeIf { it > 1 }?.let { "$mediaTitle Season $it" } ?: mediaTitle,
+                onDismiss = { linkTarget = null },
+                season = target.season,
+            )
+        }
 
-    // Open while there is anything to show *or* anything still coming. The second half matters:
-    // the sheet opens on the first stream to arrive, and closing it the instant that list is
-    // momentarily empty would flicker it away between two sources answering.
-    if (uiState.pendingEpisode != null && (uiState.pendingStreams.isNotEmpty() || uiState.sourcesSearching > 0)) {
-        StreamPickerSheet(
-            choices = uiState.pendingStreams,
-            searching = uiState.sourcesSearching,
-            failures = uiState.streamFailures,
-            onSelect = viewModel::selectStream,
-            onDismiss = viewModel::dismissVideoPicker,
-        )
+        // Open while there is anything to show *or* anything still coming. The second half matters:
+        // the sheet opens on the first stream to arrive, and closing it the instant that list is
+        // momentarily empty would flicker it away between two sources answering.
+        if (uiState.pendingEpisode != null && (uiState.pendingStreams.isNotEmpty() || uiState.sourcesSearching > 0)) {
+            StreamPickerSheet(
+                choices = uiState.pendingStreams,
+                searching = uiState.sourcesSearching,
+                failures = uiState.streamFailures,
+                onSelect = viewModel::selectStream,
+                onDismiss = viewModel::dismissVideoPicker,
+            )
+        }
     }
 }
 
@@ -516,8 +533,8 @@ private fun LibraryStatusRow(
                 onClick = { onSelect(value) },
                 label = { Text(label) },
                 colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MaterialTheme.colorScheme.tertiary,
-                    selectedLabelColor = MaterialTheme.colorScheme.onTertiary,
+                    selectedContainerColor = titleAccent(),
+                    selectedLabelColor = onTitleAccent(),
                 ),
                 modifier = Modifier.padding(end = 8.dp),
             )

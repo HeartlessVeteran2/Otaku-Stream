@@ -2,6 +2,7 @@ package com.otakustream.app.navigation
 
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -22,6 +23,7 @@ import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
@@ -29,10 +31,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -60,6 +65,7 @@ import com.otakustream.app.ui.theme.OtakuStreamTheme
 import com.otakustream.app.ui.theme.ThemeMode
 import com.otakustream.core.player.ui.PlayerScreen
 import com.otakustream.core.sources.api.UiMessages
+import com.otakustream.core.ui.SectionHeader
 import com.otakustream.feature.library.LibraryScreen
 import com.otakustream.feature.sources.ui.AniListDetailScreen
 import com.otakustream.feature.sources.ui.AiringScheduleScreen
@@ -74,10 +80,10 @@ import com.otakustream.feature.sources.ui.MangayomiPreferencesScreen
 import com.otakustream.feature.sources.ui.ManageSourcesScreen
 import com.otakustream.feature.sources.ui.ManageStremioSourcesScreen
 import com.otakustream.feature.sources.ui.MediaDetailsScreen
-import com.otakustream.feature.sources.ui.SectionHeader
 import com.otakustream.feature.sources.ui.SourcesScreen
 import com.otakustream.feature.sources.ui.StremioAccountScreen
 import com.otakustream.feature.tracking.TrackingSettingsScreen
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 private const val ROUTE_PLAY = "play"
@@ -94,7 +100,7 @@ private const val ROUTE_BROWSE_STREMIO = "browse-stremio"
 private const val ROUTE_BROWSE_SOURCE_CATALOG = "browse-source-catalog"
 private const val ROUTE_ANYMEX_EXTENSIONS = "anymex-extensions"
 private const val ROUTE_ANYMEX_EXTENSION_PREFS = "anymex-extension-prefs/{sourceId}"
-private const val ROUTE_DETAILS = "details/{sourceId}?mediaUrl={mediaUrl}&title={title}"
+private const val ROUTE_DETAILS = "details/{sourceId}?mediaUrl={mediaUrl}&title={title}&coverUrl={coverUrl}"
 private const val ROUTE_ANILIST_DETAILS = "anilist/{mediaId}"
 private const val ROUTE_ANILIST_WATCH = "anilist-watch/{mediaId}?title={title}"
 private const val ROUTE_ANILIST_SEARCH = "anilist-search"
@@ -207,9 +213,38 @@ fun AppNavHost(
     val scope = rememberCoroutineScope()
     DisposableEffect(Unit) {
         UiMessages.setSink { message ->
+            // The undo runs on this scope, not the caller's. A ViewModel that removed something is
+            // routinely cleared the moment the user leaves the screen, while the snackbar offering
+            // to put it back is still on screen — undoing on a cancelled viewModelScope would do
+            // nothing while telling the user it had worked. This scope lives as long as the nav
+            // host, which is as long as there is a snackbar to tap.
             scope.launch {
-                snackbarHostState.currentSnackbarData?.dismiss()
-                snackbarHostState.showSnackbar(message)
+                // No dismiss of whatever is showing. SnackbarHostState already queues, and
+                // dismissing first completed a pending Undo *as dismissed* — so any second
+                // confirmation arriving in the four seconds after a removal ("Installed X") took
+                // the chance to undo it away without the user doing anything.
+                val result = snackbarHostState.showSnackbar(
+                    message = message.text,
+                    actionLabel = message.actionLabel,
+                    // Long, so there is time to notice a mis-tap and take it back. A plain
+                    // confirmation stays Short — it is telling you something, not asking.
+                    duration = if (message.action != null) SnackbarDuration.Long else SnackbarDuration.Short,
+                )
+                if (result == SnackbarResult.ActionPerformed) {
+                    // Guarded, because this scope belongs to the nav host: an exception here takes
+                    // the app down, and the ViewModel that would normally have caught it is
+                    // precisely the thing this design assumes is already gone. Failing quietly is
+                    // also wrong — the user asked for something back — so say so.
+                    runCatching { message.action?.invoke() }.onFailure { failure ->
+                        // Cancellation is not a failed undo. runCatching catches Throwable, so a
+                        // nav host going away mid-undo would otherwise be reported to the user as
+                        // an error and then try to draw a snackbar on the scope that just died.
+                        if (failure is CancellationException) throw failure
+                        // The user only gets "couldn't", so the reason has to go somewhere.
+                        Log.w("Undo", "Undo action failed", failure)
+                        snackbarHostState.showSnackbar("Couldn't undo that")
+                    }
+                }
             }
         }
         onDispose { UiMessages.setSink(null) }
@@ -257,7 +292,9 @@ fun AppNavHost(
                 PlayScreen(
                     onPlayVideo = { url -> navController.navigate("player?videoUrl=${Uri.encode(url)}") },
                     onBrowseAddons = { navController.navigate(ROUTE_BROWSE_STREMIO) },
-                    onMediaClick = { sourceId, mediaUrl, title -> navController.navigateToDetails(sourceId, mediaUrl, title) },
+                    onMediaClick = { sourceId, mediaUrl, title, coverUrl ->
+                        navController.navigateToDetails(sourceId, mediaUrl, title, coverUrl)
+                    },
                     onAniListClick = { mediaId, _ -> navController.navigate("anilist/$mediaId") },
                     onAniListSearch = { navController.navigate(ROUTE_ANILIST_SEARCH) },
                     onSeeSchedule = { navController.navigate(ROUTE_AIRING_SCHEDULE) },
@@ -265,14 +302,18 @@ fun AppNavHost(
             }
             composable(ROUTE_CATALOG) {
                 CatalogScreen(
-                    onMediaClick = { sourceId, mediaUrl, title -> navController.navigateToDetails(sourceId, mediaUrl, title) },
+                    onMediaClick = { sourceId, mediaUrl, title, coverUrl ->
+                        navController.navigateToDetails(sourceId, mediaUrl, title, coverUrl)
+                    },
                     onManageSourcesClick = { navController.navigate(ROUTE_SOURCES) },
                     onBrowseAddons = { navController.navigate(ROUTE_BROWSE_STREMIO) },
                 )
             }
             composable(ROUTE_LIBRARY) {
                 LibraryScreen(
-                    onMediaClick = { sourceId, mediaUrl, title -> navController.navigateToDetails(sourceId, mediaUrl, title) },
+                    onMediaClick = { sourceId, mediaUrl, title, coverUrl ->
+                        navController.navigateToDetails(sourceId, mediaUrl, title, coverUrl)
+                    },
                     onPlayDirect = { url -> navController.navigate("player?videoUrl=${Uri.encode(url)}") },
                 )
             }
@@ -362,6 +403,11 @@ fun AppNavHost(
                         nullable = true
                         defaultValue = ""
                     },
+                    navArgument("coverUrl") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = ""
+                    },
                 ),
             ) { entry ->
                 val args = entry.arguments
@@ -372,6 +418,10 @@ fun AppNavHost(
                     sourceId = args?.getLong("sourceId") ?: 0L,
                     mediaUrl = args?.getString("mediaUrl").orEmpty(),
                     mediaTitle = args?.getString("title").orEmpty(),
+                    // Blank rather than absent when the caller had no cover to pass; the screen
+                    // treats it as "no seed" and falls back to whatever the source's own details
+                    // carry, which is what every non-scripted source provides.
+                    seedCoverUrl = args?.getString("coverUrl")?.takeIf { it.isNotBlank() },
                     // The one entry point where an installed source chose the url.
                     onPlayVideo = { videoUrl ->
                         navController.navigate("player?videoUrl=${Uri.encode(videoUrl)}&fromSource=true")
@@ -407,12 +457,17 @@ fun AppNavHost(
                 AniListWatchScreen(
                     onBack = { navController.popBackStack() },
                     onBrowseAddons = { navController.navigate(ROUTE_BROWSE_STREMIO) },
-                    onOpenSource = { sourceId, mediaUrl, title ->
+                    onOpenSource = { sourceId, mediaUrl, title, coverUrl ->
                         // Replace the bridge in the back stack so returning from the source detail
                         // lands back on the AniList detail (and the bridge doesn't re-resolve the
                         // now-saved link into an immediate re-navigation loop).
+                        // The picked search result's own poster travels with it. Only a target
+                        // restored from an existing tracker link has none, because the link record
+                        // stores no artwork — there it stays null and the source's own details fill
+                        // the hero in, as they do everywhere else.
                         navController.navigate(
-                            "details/$sourceId?mediaUrl=${Uri.encode(mediaUrl)}&title=${Uri.encode(title)}",
+                            "details/$sourceId?mediaUrl=${Uri.encode(mediaUrl)}&title=${Uri.encode(title)}" +
+                                "&coverUrl=${Uri.encode(coverUrl.orEmpty())}",
                         ) {
                             popUpTo(ROUTE_ANILIST_WATCH) { inclusive = true }
                         }
@@ -471,22 +526,38 @@ fun AppNavHost(
     }
 }
 
-private fun NavHostController.navigateToDetails(sourceId: Long, mediaUrl: String, title: String) {
-    navigate("details/$sourceId?mediaUrl=${Uri.encode(mediaUrl)}&title=${Uri.encode(title)}")
+// The cover travels with the destination rather than being re-fetched there.
+//
+// Not decoration: a scripted source's getMediaDetails() returns the MediaItem it was handed
+// untouched, and the one built here has only a url and a title — so a detail screen reached from a
+// scripted source had no artwork at all, showing the placeholder film icon under a title the
+// catalog had just displayed over a poster. The catalog already holds the cover; passing it means
+// the hero has an image on every source type, and the per-title accent has something to read.
+private fun NavHostController.navigateToDetails(
+    sourceId: Long,
+    mediaUrl: String,
+    title: String,
+    coverUrl: String? = null,
+) {
+    navigate(
+        "details/$sourceId?mediaUrl=${Uri.encode(mediaUrl)}&title=${Uri.encode(title)}" +
+            "&coverUrl=${Uri.encode(coverUrl.orEmpty())}",
+    )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsScreen(
     onSourcesClick: () -> Unit,
     onTrackingClick: () -> Unit,
     onStremioAccountClick: () -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        Text(
-            text = "Settings",
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(start = 16.dp, top = 16.dp),
-        )
+    // Same fake-title problem the Library tab had: a Text styled like a title, with its own padding,
+    // instead of the TopAppBar every other screen uses. The scroll container moves inside so the
+    // bar stays put while the list moves under it.
+    Column(modifier = Modifier.fillMaxSize()) {
+        TopAppBar(title = { Text("Settings") })
+        Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         SectionHeader("Content")
         ListItem(
             headlineContent = { Text("Sources") },
@@ -541,6 +612,7 @@ private fun SettingsScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
         )
+        }
     }
 }
 

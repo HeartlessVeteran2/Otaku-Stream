@@ -20,10 +20,16 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.otakustream.core.database.scripted.ScriptedSourceRecord
+import com.otakustream.core.ui.BackTopBar
+import com.otakustream.core.ui.ConfirmDialog
 
 @Composable
 fun ManageSourcesScreen(
@@ -33,6 +39,20 @@ fun ManageSourcesScreen(
     viewModel: ManageSourcesViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
+
+    // Same reasoning as the add-on list: gone means re-fetching the script from its URL, which is
+    // not an undo, so it asks first.
+    var pendingRemove by remember { mutableStateOf<ScriptedSourceRecord?>(null) }
+    pendingRemove?.let { record ->
+        ConfirmDialog(
+            title = "Remove ${record.name}?",
+            body = "This source stops appearing in Browse and stops answering for episodes. You " +
+                "can add it again from its script link.",
+            confirmLabel = "Remove",
+            onConfirm = { viewModel.remove(record) },
+            onDismiss = { pendingRemove = null },
+        )
+    }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -114,7 +134,7 @@ fun ManageSourcesScreen(
                     headlineContent = { Text(record.name) },
                     supportingContent = { Text(record.scriptUrl) },
                     trailingContent = {
-                        TextButton(onClick = { viewModel.remove(record) }) {
+                        TextButton(onClick = { pendingRemove = record }) {
                             Text("Remove")
                         }
                     },

@@ -10,7 +10,20 @@ interface LibraryRepository {
     fun observeInLibrary(mediaUrl: String): Flow<Boolean>
     fun observeStatus(mediaUrl: String): Flow<String?>
     suspend fun add(entry: LibraryEntry)
+
+    // Restores an entry only if its mediaUrl is free. Returns whether it was actually inserted, so
+    // a caller undoing a removal can tell "put back" from "someone saved it again first".
+    suspend fun addIfAbsent(entry: LibraryEntry): Boolean
     suspend fun remove(mediaUrl: String)
+
+    // Deletes a row and hands back exactly what was deleted, in one transaction.
+    //
+    // Undo needs the two to be the same thing. Reading the entry and then deleting it are separate
+    // suspending calls, so a save or a status change landing between them means the row that was
+    // removed is not the row the snackbar is holding — and undoing then restores the older
+    // snapshot, silently reverting the change that happened in between. Returns null when there
+    // was nothing to delete.
+    suspend fun removeAndReturn(mediaUrl: String): LibraryEntry?
     suspend fun setStatus(mediaUrl: String, status: String)
 
     fun observeHistory(): Flow<List<WatchHistoryEntry>>
@@ -29,7 +42,15 @@ class LibraryRepositoryImpl @Inject constructor(
     override fun observeInLibrary(mediaUrl: String): Flow<Boolean> = libraryDao.observeInLibrary(mediaUrl)
     override fun observeStatus(mediaUrl: String): Flow<String?> = libraryDao.observeStatus(mediaUrl)
     override suspend fun add(entry: LibraryEntry) = libraryDao.upsert(entry)
+    override suspend fun addIfAbsent(entry: LibraryEntry): Boolean =
+        libraryDao.insertIfAbsent(entry) != -1L
     override suspend fun remove(mediaUrl: String) = libraryDao.delete(mediaUrl)
+
+    override suspend fun removeAndReturn(mediaUrl: String): LibraryEntry? = database.withTransaction {
+        val entry = libraryDao.get(mediaUrl)
+        libraryDao.delete(mediaUrl)
+        entry
+    }
     override suspend fun setStatus(mediaUrl: String, status: String) = libraryDao.setStatus(mediaUrl, status)
 
     override fun observeHistory(): Flow<List<WatchHistoryEntry>> = historyDao.observeRecent()

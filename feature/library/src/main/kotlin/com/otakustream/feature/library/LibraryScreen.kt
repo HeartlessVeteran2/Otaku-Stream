@@ -21,13 +21,17 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -38,6 +42,7 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -67,6 +72,7 @@ import com.otakustream.core.database.library.WatchHistoryEntry
 import com.otakustream.core.download.DownloadProgress
 import com.otakustream.core.sources.api.PendingPlayback
 import com.otakustream.core.sources.api.Video
+import com.otakustream.core.ui.ConfirmDialog
 import com.otakustream.core.ui.CoverImage
 import com.otakustream.core.ui.EmptyState
 import com.otakustream.feature.library.local.LocalVideosViewModel
@@ -79,9 +85,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
-    onMediaClick: (sourceId: Long, mediaUrl: String, title: String) -> Unit,
+    onMediaClick: (sourceId: Long, mediaUrl: String, title: String, coverUrl: String?) -> Unit,
     onPlayDirect: (url: String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: LibraryViewModel = hiltViewModel(),
@@ -94,20 +101,45 @@ fun LibraryScreen(
 
     // Direct plays (local files, pasted links) have no details page — route them straight back
     // into the player; catalog entries open their details as before.
-    val onEntryClick: (Long, String, String) -> Unit = { sourceId, mediaUrl, title ->
-        if (sourceId == DIRECT_PLAY_SOURCE_ID) onPlayDirect(mediaUrl) else onMediaClick(sourceId, mediaUrl, title)
+    val onEntryClick: (Long, String, String, String?) -> Unit = { sourceId, mediaUrl, title, coverUrl ->
+        if (sourceId == DIRECT_PLAY_SOURCE_ID) {
+            onPlayDirect(mediaUrl)
+        } else {
+            onMediaClick(sourceId, mediaUrl, title, coverUrl)
+        }
     }
 
+    // A real TopAppBar rather than a Text styled to look like one. Two of the four tabs did that —
+    // with different padding from each other — so the app's title bar changed height and alignment
+    // depending on which tab you were on. It is also where a search field and a sort menu can go.
     Column(modifier = modifier.fillMaxSize()) {
-        Text(
-            text = "Library",
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 8.dp),
-        )
+        TopAppBar(title = { Text("Library") })
         TabRow(selectedTabIndex = selectedTab) {
             Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Watchlist") })
             Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("History") })
-            Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("Downloads") })
+            Tab(
+                selected = selectedTab == 2,
+                onClick = { selectedTab = 2 },
+                text = {
+                    // A download running or failed was visible nowhere outside this tab, so the
+                    // only way to learn one had failed was to come looking. The badge counts both:
+                    // in flight and needing attention are the two states worth leaving the tab for.
+                    val active = uiState.downloads.count { row ->
+                        // A null progress is the "Not started" the row itself draws in the error
+                        // colour: the metadata was written and the download never began. Leaving it
+                        // out of the count meant the one state you cannot see from anywhere else
+                        // was also the one the badge stayed silent about.
+                        row.isPending ||
+                            row.progress == null ||
+                            row.progress.state == DownloadProgress.State.FAILED
+                    }
+                    if (active > 0) {
+                        BadgedBox(badge = { Badge { Text(active.toString()) } }) { Text("Downloads") }
+                    } else {
+                        Text("Downloads")
+                    }
+                },
+            )
             Tab(selected = selectedTab == 3, onClick = { selectedTab = 3 }, text = { Text("On device") })
         }
 
@@ -131,7 +163,7 @@ private val LIBRARY_STATUS_SECTIONS = listOf(
 private fun WatchlistTab(
     uiState: LibraryUiState,
     viewModel: LibraryViewModel,
-    onMediaClick: (Long, String, String) -> Unit,
+    onMediaClick: (Long, String, String, String?) -> Unit,
 ) {
     // One section per non-empty status bucket. Unmigrated rows (status not one of the known values)
     // fall back into "Plan to watch" so nothing is ever hidden. Remembered and hoisted above the
@@ -152,7 +184,7 @@ private fun WatchlistTab(
                 )
             }
             items(uiState.continueWatching, key = { "cw-${it.id}" }) { entry ->
-                HistoryRow(entry) { onMediaClick(entry.sourceId, entry.mediaUrl, entry.mediaTitle) }
+                HistoryRow(entry) { onMediaClick(entry.sourceId, entry.mediaUrl, entry.mediaTitle, entry.coverUrl) }
             }
         }
 
@@ -183,7 +215,7 @@ private fun WatchlistTab(
                         currentStatus = entry.status,
                         onSetStatus = { viewModel.setStatus(entry.mediaUrl, it) },
                         onRemove = { viewModel.removeFromWatchlist(entry.mediaUrl) },
-                        onClick = { onMediaClick(entry.sourceId, entry.mediaUrl, entry.title) },
+                        onClick = { onMediaClick(entry.sourceId, entry.mediaUrl, entry.title, entry.coverUrl) },
                     )
                 }
             }
@@ -237,7 +269,7 @@ private fun WatchlistRow(
 private fun HistoryTab(
     uiState: LibraryUiState,
     viewModel: LibraryViewModel,
-    onMediaClick: (Long, String, String) -> Unit,
+    onMediaClick: (Long, String, String, String?) -> Unit,
 ) {
     // Clearing history is not undoable and the button sits directly above the list it destroys, so
     // it asks first. It is also the only destructive action on this screen with no other route back
@@ -279,7 +311,7 @@ private fun HistoryTab(
             }
         }
         items(uiState.history, key = { it.id }) { entry ->
-            HistoryRow(entry) { onMediaClick(entry.sourceId, entry.mediaUrl, entry.mediaTitle) }
+            HistoryRow(entry) { onMediaClick(entry.sourceId, entry.mediaUrl, entry.mediaTitle, entry.coverUrl) }
         }
     }
 }
@@ -426,6 +458,19 @@ private fun DownloadsTab(
         )
         return
     }
+    // Deleting a download deletes bytes, so it asks. Everything else in this file that removes
+    // something restores it from the database instead, and offers Undo.
+    var pendingDelete by remember { mutableStateOf<DownloadRow?>(null) }
+    pendingDelete?.let { row ->
+        ConfirmDialog(
+            title = "Delete download?",
+            body = "\"${row.entry.mediaTitle}\" will be removed from this device. Watching it again " +
+                "means downloading it again.",
+            confirmLabel = "Delete",
+            onConfirm = { viewModel.removeDownload(row) },
+            onDismiss = { pendingDelete = null },
+        )
+    }
     LazyColumn(modifier = Modifier.fillMaxSize()) {
         items(uiState.downloads, key = { it.entry.videoUrl }) { row ->
             val progress = row.progress
@@ -510,7 +555,21 @@ private fun DownloadsTab(
                                 )
                             }
                         }
-                        IconButton(onClick = { viewModel.removeDownload(row) }) {
+                        // A failed row now has a way forward as well as a way out. It was the
+                        // only state in the app whose sole affordance was to throw the thing away.
+                        //
+                        // A null progress counts as failed here. It means the row is in the
+                        // database but Media3 has no download for it — the enqueue never took, or
+                        // its state was lost — so it will never make progress on its own and Retry
+                        // is exactly what it needs. The tab's badge already counts these rows as
+                        // wanting attention, so hiding Retry left the badge pointing at a row whose
+                        // only button was Delete.
+                        if (progress == null || progress.state == DownloadProgress.State.FAILED) {
+                            IconButton(onClick = { viewModel.retryDownload(row) }) {
+                                Icon(Icons.Filled.Refresh, contentDescription = "Retry download")
+                            }
+                        }
+                        IconButton(onClick = { pendingDelete = row }) {
                             Icon(Icons.Filled.Delete, contentDescription = "Delete download")
                         }
                     }

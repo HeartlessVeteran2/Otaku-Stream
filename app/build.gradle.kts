@@ -73,6 +73,7 @@ dependencies {
     implementation(project(":core:player"))
     implementation(project(":core:network"))
     implementation(project(":core:download"))
+    implementation(project(":core:ui"))
     implementation(project(":core:sources-api"))
     implementation(project(":core:sources-mangayomi"))
     implementation(project(":core:torrent"))

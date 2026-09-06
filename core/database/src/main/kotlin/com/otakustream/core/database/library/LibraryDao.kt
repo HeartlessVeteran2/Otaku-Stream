@@ -2,6 +2,7 @@ package com.otakustream.core.database.library
 
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
@@ -20,11 +21,25 @@ interface LibraryDao {
     @Query("SELECT status FROM library_entries WHERE mediaUrl = :mediaUrl")
     suspend fun getStatus(mediaUrl: String): String?
 
+    // One row, for the caller that needs the entry itself rather than a column of it. Reading the
+    // whole table through observeAll() to find one mediaUrl works and is what removeFromWatchlist
+    // used to do, but it materialises every saved title to keep one of them.
+    @Query("SELECT * FROM library_entries WHERE mediaUrl = :mediaUrl")
+    suspend fun get(mediaUrl: String): LibraryEntry?
+
     @Query("UPDATE library_entries SET status = :status WHERE mediaUrl = :mediaUrl")
     suspend fun setStatus(mediaUrl: String, status: String)
 
     @Upsert
     suspend fun upsert(entry: LibraryEntry)
+
+    // Insert only if nothing holds this mediaUrl, reported by the rowid (-1 when the conflict
+    // clause dropped it). For undoing a removal: a read-then-upsert leaves a window in which the
+    // title is saved again between the check and the write, and the restore then overwrites the
+    // newer entry — and whatever status was just set — with a snapshot from before the delete.
+    // SQLite does the check and the insert in one statement; nothing can interleave.
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(entry: LibraryEntry): Long
 
     @Query("DELETE FROM library_entries WHERE mediaUrl = :mediaUrl")
     suspend fun delete(mediaUrl: String)

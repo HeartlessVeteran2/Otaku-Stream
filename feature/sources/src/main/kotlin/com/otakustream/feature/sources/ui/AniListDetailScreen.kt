@@ -1,5 +1,9 @@
 package com.otakustream.feature.sources.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.runtime.getValue
+import com.otakustream.core.ui.BackTopBar
 import com.otakustream.core.ui.CoverImage
 
 import androidx.compose.foundation.layout.Arrangement
@@ -18,42 +22,32 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.otakustream.core.ui.LoadingState
+import com.otakustream.core.ui.ProvideTitleAccent
+import com.otakustream.core.ui.heroScrim
+import com.otakustream.core.ui.onTitleAccent
+import com.otakustream.core.ui.titleAccent
 
-// AniList anime detail. Phase 3 renders read-only metadata; the list controls and a working Watch
-// action arrive in later phases. Kept intentionally simple so it's a real, tappable payoff for the
-// discovery rails without pulling Phase 5/6 scope forward.
+// AniList anime detail: the page a discovery rail opens onto. Metadata, your list controls when
+// signed in, and a Watch action that hands off to the source search.
+//
+// (The comment that used to sit here said the list controls and Watch "arrive in later phases".
+// Both shipped; it was describing an app that no longer existed.)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AniListDetailScreen(
@@ -69,19 +63,12 @@ fun AniListDetailScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
-                title = { Text(uiState.media?.displayTitle ?: "Details", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-            )
+            BackTopBar(title = uiState.media?.displayTitle ?: "Details", onBack = onBack)
         },
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when {
-                uiState.isLoading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                uiState.isLoading -> LoadingState()
                 uiState.error != null -> {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -116,127 +103,140 @@ private fun DetailContent(
     onSetProgress: (Int) -> Unit,
 ) {
     val media = uiState.media ?: return
-    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        if (media.bannerImageUrl != null) {
-            CoverImage(
-                url = media.bannerImageUrl,
-                contentDescription = media.displayTitle,
-                modifier = Modifier.fillMaxWidth().height(160.dp),
-            )
-        }
-
-        Row(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            CoverImage(
-                url = media.coverImageUrl,
-                contentDescription = media.displayTitle,
-                modifier = Modifier.width(110.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(8.dp)),
-            )
-            Spacer(modifier = Modifier.width(16.dp))
-            Column {
-                Text(media.displayTitle, style = MaterialTheme.typography.titleLarge)
-                media.romajiTitle?.takeIf { it != media.displayTitle }?.let {
-                    Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    // The cover rather than the banner: a banner is a wide crop of a scene and is often a sky or a
+    // wall, where the cover is the image the show was sold with and is the one carrying its colour.
+    ProvideTitleAccent(coverUrl = media.coverImageUrl) {
+        Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            if (media.bannerImageUrl != null) {
+                Box(modifier = Modifier.fillMaxWidth().height(160.dp)) {
+                    CoverImage(
+                        url = media.bannerImageUrl,
+                        contentDescription = media.displayTitle,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    // The banner used to stop at a hard horizontal edge against the page. The shared
+                    // hero scrim dissolves it instead, and carries a trace of this title's colour.
+                    Box(modifier = Modifier.fillMaxSize().background(heroScrim()))
                 }
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = listOfNotNull(
-                        media.format,
-                        media.episodes?.let { "$it eps" },
-                        media.seasonYear?.let { year -> media.season?.let { "${it.lowercase().replaceFirstChar(Char::uppercase)} $year" } ?: "$year" },
-                        media.averageScore?.let { "★ $it%" },
-                    ).joinToString(" • "),
-                    style = MaterialTheme.typography.bodySmall,
+            }
+
+            Row(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                CoverImage(
+                    url = media.coverImageUrl,
+                    contentDescription = media.displayTitle,
+                    modifier = Modifier.width(110.dp).aspectRatio(2f / 3f).clip(RoundedCornerShape(8.dp)),
                 )
-                media.nextAiringEpisode?.let { ep ->
+                Spacer(modifier = Modifier.width(16.dp))
+                Column {
+                    Text(media.displayTitle, style = MaterialTheme.typography.titleLarge)
+                    media.romajiTitle?.takeIf { it != media.displayTitle }?.let {
+                        Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        "Next: episode $ep",
+                        text = listOfNotNull(
+                            media.format,
+                            media.episodes?.let { "$it eps" },
+                            media.seasonYear?.let { year -> media.season?.let { "${it.lowercase().replaceFirstChar(Char::uppercase)} $year" } ?: "$year" },
+                            media.averageScore?.let { "★ $it%" },
+                        ).joinToString(" • "),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.tertiary,
                     )
+                    media.nextAiringEpisode?.let { ep ->
+                        Text(
+                            "Next: episode $ep",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.tertiary,
+                        )
+                    }
                 }
             }
-        }
 
-        // Watch is wired up in Phase 6 (cross-source match + play). Shown disabled so the intended
-        // flow is visible without promising behavior that isn't built yet.
-        Button(
-            onClick = { onWatch(media.id, media.displayTitle) },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-        ) {
-            Text("Watch")
-        }
-
-        // Your-list controls (signed in) or a prompt to connect AniList (signed out).
-        if (uiState.isSignedIn) {
-            AniListListControls(
-                status = uiState.listStatus,
-                progress = uiState.listProgress,
-                episodeCount = uiState.media?.episodes,
-                score = uiState.listScore,
-                isSaving = uiState.isSaving,
-                saveError = uiState.saveError,
-                onSetStatus = onSetStatus,
-                onSetScore = onSetScore,
-                onSetProgress = onSetProgress,
-            )
-        } else {
-            TextButton(
-                onClick = onOpenTracking,
-                modifier = Modifier.padding(horizontal = 8.dp),
+            // The page's primary action, in the show's own colour. The label is computed from that
+            // colour rather than taken from the theme — see onTitleAccent().
+            Button(
+                onClick = { onWatch(media.id, media.displayTitle) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = titleAccent(),
+                    contentColor = onTitleAccent(),
+                ),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             ) {
-                Text("Sign in to AniList to track your progress and score")
+                Text("Watch")
             }
-        }
 
-        if (media.genres.isNotEmpty()) {
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-            ) {
-                items(media.genres, key = { it }) { genre ->
-                    AssistChip(onClick = {}, label = { Text(genre) })
+            // Your-list controls (signed in) or a prompt to connect AniList (signed out).
+            if (uiState.isSignedIn) {
+                AniListListControls(
+                    status = uiState.listStatus,
+                    progress = uiState.listProgress,
+                    episodeCount = uiState.media?.episodes,
+                    score = uiState.listScore,
+                    isSaving = uiState.isSaving,
+                    saveError = uiState.saveError,
+                    onSetStatus = onSetStatus,
+                    onSetScore = onSetScore,
+                    onSetProgress = onSetProgress,
+                )
+            } else {
+                TextButton(
+                    onClick = onOpenTracking,
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                ) {
+                    Text("Sign in to AniList to track your progress and score")
                 }
             }
-        }
 
-        media.description?.takeIf { it.isNotBlank() }?.let { description ->
-            Text(
-                text = remember(description) { stripHtml(description) },
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-            )
-        }
-
-        if (media.relations.isNotEmpty()) {
-            RailHeading("Related")
-            LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp)) {
-                items(media.relations, key = { "rel-${it.media.id}" }) { relation ->
-                    AniListPosterTile(
-                        title = relation.media.displayTitle,
-                        coverUrl = relation.media.coverImageUrl,
-                        subtitle = relation.relationType?.replace('_', ' ')?.lowercase()
-                            ?.replaceFirstChar(Char::uppercase),
-                        onClick = { onOpenAniList(relation.media.id, relation.media.displayTitle) },
-                    )
+            if (media.genres.isNotEmpty()) {
+                LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
+                ) {
+                    items(media.genres, key = { it }) { genre ->
+                        AssistChip(onClick = {}, label = { Text(genre) })
+                    }
                 }
             }
-        }
 
-        if (media.recommendations.isNotEmpty()) {
-            RailHeading("Recommended")
-            LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp)) {
-                items(media.recommendations, key = { "rec-${it.id}" }) { rec ->
-                    AniListPosterTile(
-                        title = rec.displayTitle,
-                        coverUrl = rec.coverImageUrl,
-                        subtitle = null,
-                        onClick = { onOpenAniList(rec.id, rec.displayTitle) },
-                    )
+            media.description?.takeIf { it.isNotBlank() }?.let { description ->
+                Text(
+                    text = remember(description) { stripHtml(description) },
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
+
+            if (media.relations.isNotEmpty()) {
+                RailHeading("Related")
+                LazyRow(contentPadding = RailPadding, horizontalArrangement = RailSpacing) {
+                    items(media.relations, key = { "rel-${it.media.id}" }) { relation ->
+                        AniListPosterTile(
+                            title = relation.media.displayTitle,
+                            coverUrl = relation.media.coverImageUrl,
+                            subtitle = relation.relationType?.replace('_', ' ')?.lowercase()
+                                ?.replaceFirstChar(Char::uppercase),
+                            onClick = { onOpenAniList(relation.media.id, relation.media.displayTitle) },
+                        )
+                    }
                 }
             }
-        }
 
-        Spacer(modifier = Modifier.height(24.dp))
+            if (media.recommendations.isNotEmpty()) {
+                RailHeading("Recommended")
+                LazyRow(contentPadding = RailPadding, horizontalArrangement = RailSpacing) {
+                    items(media.recommendations, key = { "rec-${it.id}" }) { rec ->
+                        AniListPosterTile(
+                            title = rec.displayTitle,
+                            coverUrl = rec.coverImageUrl,
+                            subtitle = null,
+                            onClick = { onOpenAniList(rec.id, rec.displayTitle) },
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+        }
     }
 }
 
