@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.rememberScrollState
@@ -123,10 +124,16 @@ fun AppNavHost(
     pendingMagnetName: String? = null,
     onMagnetConfirmed: () -> Unit = {},
     onMagnetDismissed: () -> Unit = {},
+    onPlayerVisibilityChanged: (Boolean) -> Unit = {},
 ) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
+    // The activity styles the system bars from this: the player renders in the dark scheme whatever
+    // the app is set to, so in a light app its transparent status bar would otherwise draw dark
+    // icons over black video.
+    val onPlayer = currentRoute == ROUTE_PLAYER
+    LaunchedEffect(onPlayer) { onPlayerVisibilityChanged(onPlayer) }
     val showBottomBar = currentRoute == ROUTE_PLAY || currentRoute == ROUTE_CATALOG ||
         currentRoute == ROUTE_LIBRARY || currentRoute == ROUTE_SETTINGS
 
@@ -529,9 +536,12 @@ private fun ThemeModeRow(viewModel: AppearanceViewModel = hiltViewModel()) {
     ListItem(
         headlineContent = { Text("Theme") },
         supportingContent = {
+            // Scrollable rather than a fixed Row: at a large font scale three chips do not fit a
+            // narrow window, and a clipped chip is an option the user cannot reach. Same bug, same
+            // fix as the add-on directory's filter row.
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(top = 8.dp),
+                modifier = Modifier.padding(top = 8.dp).horizontalScroll(rememberScrollState()),
             ) {
                 ThemeMode.entries.forEach { option ->
                     FilterChip(

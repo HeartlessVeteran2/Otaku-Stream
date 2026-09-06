@@ -18,12 +18,16 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.otakustream.app.navigation.AppNavHost
+import com.otakustream.app.R
 import com.otakustream.app.ui.theme.AppearancePrefs
 import com.otakustream.app.ui.theme.OtakuStreamTheme
+import com.otakustream.app.ui.theme.applyAppNightMode
 import com.otakustream.app.ui.theme.isDark
+import com.otakustream.app.ui.theme.storedThemeMode
 import com.otakustream.core.player.PlayerController
 import com.otakustream.core.torrent.MagnetLinks
 import dagger.Lazy
@@ -36,6 +40,23 @@ import javax.inject.Inject
 private const val TRANSPARENT = android.graphics.Color.TRANSPARENT
 private const val NAV_BAR_LIGHT_SCRIM = 0xE6FFFFFF.toInt()
 private const val NAV_BAR_DARK_SCRIM = 0x801B1B1B.toInt()
+
+// Status and navigation bar icon styling for a resolved scheme. Called once before the first frame
+// and again whenever the answer changes, so the two paths cannot drift apart.
+private fun ComponentActivity.applySystemBarStyle(dark: Boolean) {
+    enableEdgeToEdge(
+        statusBarStyle = if (dark) {
+            SystemBarStyle.dark(TRANSPARENT)
+        } else {
+            SystemBarStyle.light(TRANSPARENT, TRANSPARENT)
+        },
+        navigationBarStyle = if (dark) {
+            SystemBarStyle.dark(NAV_BAR_DARK_SCRIM)
+        } else {
+            SystemBarStyle.light(NAV_BAR_LIGHT_SCRIM, NAV_BAR_DARK_SCRIM)
+        },
+    )
+}
 
 private val MIN_PIP_ASPECT_RATIO = 1 / 2.39
 private val MAX_PIP_ASPECT_RATIO = 2.39
@@ -87,8 +108,21 @@ class MainActivity : ComponentActivity() {
         // Must run before super.onCreate: swaps the Splash theme for the app theme and keeps the
         // system splash on screen until the first frame instead of flashing a blank window.
         installSplashScreen()
+
+        // Everything in this block has to happen before the window is themed, which is why the mode
+        // is read straight off disk rather than through appearancePrefs — Hilt injects fields
+        // inside super.onCreate(), by which point the first frame's colour is already decided.
+        //
+        // Without it the startup frames follow the *phone's* night setting: forcing Light on a dark
+        // phone painted a dark window and dark-scheme system bar icons for a frame before Compose
+        // drew the light scheme underneath them.
+        val startupMode = storedThemeMode(this)
+        val startupDark = startupMode.isDark(resources.configuration)
+        applyAppNightMode(this, startupMode)
+        setTheme(if (startupDark) R.style.Theme_OtakuStream_Dark else R.style.Theme_OtakuStream_Light)
+
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        applySystemBarStyle(dark = startupDark)
         // Only consume the launch intent on a fresh start — on an activity recreation
         // (e.g. process-death restore) the nav state is already restored, so re-reading it
         // would spuriously re-navigate to the player/install screen.
@@ -100,33 +134,15 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             val themeMode by appearancePrefs.themeMode.collectAsState()
-            val dark = themeMode.isDark()
-            // enableEdgeToEdge() was already called above with its default auto style, which
-            // follows the *system* setting. That is the wrong answer for someone who has forced
-            // light while their phone is dark: the bars would draw light icons over a light app.
-            // Re-applying it with the resolved mode keeps the status and navigation bar icons
-            // legible against whichever scheme is actually on screen.
-            //
-            // Keyed on the resolved mode rather than run on every recomposition — each call
-            // re-registers a window listener, and the answer only changes when the setting or the
-            // system does.
-            LaunchedEffect(dark) {
-                enableEdgeToEdge(
-                    statusBarStyle = if (dark) {
-                        SystemBarStyle.dark(TRANSPARENT)
-                    } else {
-                        SystemBarStyle.light(TRANSPARENT, TRANSPARENT)
-                    },
-                    // The navigation bar keeps the scrims androidx uses by default. Below API 29
-                    // the platform cannot draw three-button navigation icons over arbitrary
-                    // content, so a transparent bar there is an unreadable one — and minSdk is 24.
-                    navigationBarStyle = if (dark) {
-                        SystemBarStyle.dark(NAV_BAR_DARK_SCRIM)
-                    } else {
-                        SystemBarStyle.light(NAV_BAR_LIGHT_SCRIM, NAV_BAR_DARK_SCRIM)
-                    },
-                )
-            }
+            // The player draws its own dark scheme whatever the app is set to, so the bars have to
+            // follow the destination and not just the theme. Light app + player = dark status bar
+            // icons over black video, which is unreadable.
+            var playerVisible by remember { mutableStateOf(false) }
+            val barsDark = themeMode.isDark() || playerVisible
+            // Keyed on the resolved answer rather than run on every recomposition — each call
+            // re-registers a window listener, and the answer only changes when the setting, the
+            // system, or the destination does.
+            LaunchedEffect(barsDark) { applySystemBarStyle(dark = barsDark) }
             OtakuStreamTheme(themeMode = themeMode) {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     AppNavHost(
@@ -145,6 +161,7 @@ class MainActivity : ComponentActivity() {
                             pendingMagnet = null
                         },
                         onMagnetDismissed = { pendingMagnet = null },
+                        onPlayerVisibilityChanged = { playerVisible = it },
                     )
                 }
             }

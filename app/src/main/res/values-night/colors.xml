@@ -1,5 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- DarkBackground in Color.kt. -->
-    <color name="window_background">#0D0F13</color>
+    <color name="window_background">@color/window_background_dark</color>
 </resources>
