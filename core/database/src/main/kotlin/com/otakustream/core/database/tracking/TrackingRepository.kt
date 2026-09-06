@@ -14,6 +14,7 @@ interface TrackingRepository {
     suspend fun getLink(mediaUrl: String, season: Int = TRACKER_SEASON_WHOLE_SERIES): TrackerLink?
     fun observeLink(mediaUrl: String, season: Int = TRACKER_SEASON_WHOLE_SERIES): Flow<TrackerLink?>
     suspend fun getLinkByTrackerId(trackerMediaId: Long): TrackerLink?
+    suspend fun getLinksByTrackerId(trackerMediaId: Long): List<TrackerLink>
     suspend fun saveLink(link: TrackerLink)
     suspend fun removeLink(mediaUrl: String, season: Int = TRACKER_SEASON_WHOLE_SERIES)
 
@@ -34,6 +35,8 @@ class TrackingRepositoryImpl @Inject constructor(
     override fun observeLink(mediaUrl: String, season: Int): Flow<TrackerLink?> = dao.observeLink(mediaUrl, season)
     override suspend fun getLinkByTrackerId(trackerMediaId: Long): TrackerLink? =
         dao.getLinkByTrackerId(trackerMediaId)
+    override suspend fun getLinksByTrackerId(trackerMediaId: Long): List<TrackerLink> =
+        dao.getLinksByTrackerId(trackerMediaId)
     override suspend fun saveLink(link: TrackerLink) = dao.upsertLink(link)
     override suspend fun removeLink(mediaUrl: String, season: Int) = dao.deleteLink(mediaUrl, season)
 
