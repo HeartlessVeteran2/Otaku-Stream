@@ -24,6 +24,7 @@ import coil.imageLoader
 import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.request.SuccessResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -140,12 +141,30 @@ private object AccentCache {
             // Checked again under the lock: between the fast path above and here, another caller's
             // extraction may have finished and filled the cache.
             entries.get(cacheKey)?.let { return it.argb?.let(::Color) }
-            inFlight.getOrPut(cacheKey) { scope.async { extract(context, url, against, cacheKey) } }
+            inFlight.getOrPut(cacheKey) {
+                // The application context, not the caller's.
+                //
+                // The job outlives whoever started it — that is the point of it — so capturing the
+                // Activity here would hold a destroyed one alive for the length of a network fetch
+                // and a decode every time someone opened a details screen and immediately left.
+                // Moving the work off the caller's scope is what created that: while it ran on the
+                // caller, the capture died with the caller.
+                val appContext = context.applicationContext
+                scope.async { extract(appContext, url, against, cacheKey) }
+            }
         }
         // The shared job is never cancelled by a caller leaving, but it can still fail; a caller
         // that gets nothing renders on the theme colour, which is the same as a poster with no
         // usable colour in it.
-        return runCatching { work.await() }.getOrNull()?.let(::Color)
+        //
+        // Cancellation is not one of those failures and must not be swallowed. await() throws
+        // CancellationException when *this* caller is cancelled — navigating away, or the cover
+        // changing under it — and letting runCatching turn that into null would resume a composition
+        // effect that has been cancelled and have it publish an answer nobody is waiting for.
+        return runCatching { work.await() }
+            .onFailure { if (it is CancellationException) throw it }
+            .getOrNull()
+            ?.let(::Color)
     }
 
     private suspend fun extract(context: Context, url: String, against: Int, cacheKey: String): Int? {
