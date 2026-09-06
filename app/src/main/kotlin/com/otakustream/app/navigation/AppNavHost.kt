@@ -91,7 +91,7 @@ private const val ROUTE_BROWSE_STREMIO = "browse-stremio"
 private const val ROUTE_BROWSE_SOURCE_CATALOG = "browse-source-catalog"
 private const val ROUTE_ANYMEX_EXTENSIONS = "anymex-extensions"
 private const val ROUTE_ANYMEX_EXTENSION_PREFS = "anymex-extension-prefs/{sourceId}"
-private const val ROUTE_DETAILS = "details/{sourceId}?mediaUrl={mediaUrl}&title={title}"
+private const val ROUTE_DETAILS = "details/{sourceId}?mediaUrl={mediaUrl}&title={title}&coverUrl={coverUrl}"
 private const val ROUTE_ANILIST_DETAILS = "anilist/{mediaId}"
 private const val ROUTE_ANILIST_WATCH = "anilist-watch/{mediaId}?title={title}"
 private const val ROUTE_ANILIST_SEARCH = "anilist-search"
@@ -240,7 +240,9 @@ fun AppNavHost(
                 PlayScreen(
                     onPlayVideo = { url -> navController.navigate("player?videoUrl=${Uri.encode(url)}") },
                     onBrowseAddons = { navController.navigate(ROUTE_BROWSE_STREMIO) },
-                    onMediaClick = { sourceId, mediaUrl, title -> navController.navigateToDetails(sourceId, mediaUrl, title) },
+                    onMediaClick = { sourceId, mediaUrl, title, coverUrl ->
+                        navController.navigateToDetails(sourceId, mediaUrl, title, coverUrl)
+                    },
                     onAniListClick = { mediaId, _ -> navController.navigate("anilist/$mediaId") },
                     onAniListSearch = { navController.navigate(ROUTE_ANILIST_SEARCH) },
                     onSeeSchedule = { navController.navigate(ROUTE_AIRING_SCHEDULE) },
@@ -248,14 +250,18 @@ fun AppNavHost(
             }
             composable(ROUTE_CATALOG) {
                 CatalogScreen(
-                    onMediaClick = { sourceId, mediaUrl, title -> navController.navigateToDetails(sourceId, mediaUrl, title) },
+                    onMediaClick = { sourceId, mediaUrl, title, coverUrl ->
+                        navController.navigateToDetails(sourceId, mediaUrl, title, coverUrl)
+                    },
                     onManageSourcesClick = { navController.navigate(ROUTE_SOURCES) },
                     onBrowseAddons = { navController.navigate(ROUTE_BROWSE_STREMIO) },
                 )
             }
             composable(ROUTE_LIBRARY) {
                 LibraryScreen(
-                    onMediaClick = { sourceId, mediaUrl, title -> navController.navigateToDetails(sourceId, mediaUrl, title) },
+                    onMediaClick = { sourceId, mediaUrl, title, coverUrl ->
+                        navController.navigateToDetails(sourceId, mediaUrl, title, coverUrl)
+                    },
                     onPlayDirect = { url -> navController.navigate("player?videoUrl=${Uri.encode(url)}") },
                 )
             }
@@ -345,6 +351,11 @@ fun AppNavHost(
                         nullable = true
                         defaultValue = ""
                     },
+                    navArgument("coverUrl") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = ""
+                    },
                 ),
             ) { entry ->
                 val args = entry.arguments
@@ -355,6 +366,10 @@ fun AppNavHost(
                     sourceId = args?.getLong("sourceId") ?: 0L,
                     mediaUrl = args?.getString("mediaUrl").orEmpty(),
                     mediaTitle = args?.getString("title").orEmpty(),
+                    // Blank rather than absent when the caller had no cover to pass; the screen
+                    // treats it as "no seed" and falls back to whatever the source's own details
+                    // carry, which is what every non-scripted source provides.
+                    seedCoverUrl = args?.getString("coverUrl")?.takeIf { it.isNotBlank() },
                     // The one entry point where an installed source chose the url.
                     onPlayVideo = { videoUrl ->
                         navController.navigate("player?videoUrl=${Uri.encode(videoUrl)}&fromSource=true")
@@ -394,6 +409,9 @@ fun AppNavHost(
                         // Replace the bridge in the back stack so returning from the source detail
                         // lands back on the AniList detail (and the bridge doesn't re-resolve the
                         // now-saved link into an immediate re-navigation loop).
+                        // No cover to seed: the bridge matched an AniList title to a source
+                        // result and carries only what it needed to identify it. Stremio and
+                        // Mangayomi fill this in from their own detail responses.
                         navController.navigate(
                             "details/$sourceId?mediaUrl=${Uri.encode(mediaUrl)}&title=${Uri.encode(title)}",
                         ) {
@@ -454,8 +472,23 @@ fun AppNavHost(
     }
 }
 
-private fun NavHostController.navigateToDetails(sourceId: Long, mediaUrl: String, title: String) {
-    navigate("details/$sourceId?mediaUrl=${Uri.encode(mediaUrl)}&title=${Uri.encode(title)}")
+// The cover travels with the destination rather than being re-fetched there.
+//
+// Not decoration: a scripted source's getMediaDetails() returns the MediaItem it was handed
+// untouched, and the one built here has only a url and a title — so a detail screen reached from a
+// scripted source had no artwork at all, showing the placeholder film icon under a title the
+// catalog had just displayed over a poster. The catalog already holds the cover; passing it means
+// the hero has an image on every source type, and the per-title accent has something to read.
+private fun NavHostController.navigateToDetails(
+    sourceId: Long,
+    mediaUrl: String,
+    title: String,
+    coverUrl: String? = null,
+) {
+    navigate(
+        "details/$sourceId?mediaUrl=${Uri.encode(mediaUrl)}&title=${Uri.encode(title)}" +
+            "&coverUrl=${Uri.encode(coverUrl.orEmpty())}",
+    )
 }
 
 @Composable

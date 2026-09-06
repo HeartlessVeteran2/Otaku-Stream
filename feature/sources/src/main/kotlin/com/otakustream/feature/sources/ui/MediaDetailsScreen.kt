@@ -80,6 +80,10 @@ fun MediaDetailsScreen(
     sourceId: Long,
     mediaUrl: String,
     mediaTitle: String,
+    // The cover the catalog was already showing, handed over rather than re-derived. A scripted
+    // source returns the MediaItem it was given untouched, so without this its detail screen has no
+    // artwork at all — and nothing for the per-title accent to read.
+    seedCoverUrl: String? = null,
     onPlayVideo: (videoUrl: String) -> Unit,
     onOpenTracking: () -> Unit,
     onBack: () -> Unit = {},
@@ -100,7 +104,7 @@ fun MediaDetailsScreen(
     var linkTarget by remember { mutableStateOf<LinkTarget?>(null) }
 
     LaunchedEffect(sourceId, mediaUrl) {
-        viewModel.load(sourceId, mediaUrl, mediaTitle)
+        viewModel.load(sourceId, mediaUrl, mediaTitle, seedCoverUrl)
     }
 
     LaunchedEffect(uiState.resolvedVideoUrl) {
@@ -129,7 +133,9 @@ fun MediaDetailsScreen(
 
     // Keyed on the same image the hero draws, so the page's colour is the colour of the picture at
     // the top of it rather than of a thumbnail you cannot see.
-    ProvideTitleAccent(coverUrl = uiState.details?.backgroundUrl ?: uiState.details?.media?.coverUrl) {
+    ProvideTitleAccent(
+        coverUrl = uiState.details?.backgroundUrl ?: uiState.details?.media?.coverUrl ?: seedCoverUrl,
+    ) {
         Scaffold(
             modifier = modifier.fillMaxSize(),
             topBar = { BackTopBar(title = mediaTitle, onBack = onBack) },

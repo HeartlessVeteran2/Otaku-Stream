@@ -51,7 +51,7 @@ import com.otakustream.feature.tracking.formatCountdown
 // and the Popular/Latest rails fanned out across every installed source.
 @Composable
 fun HomeContent(
-    onMediaClick: (sourceId: Long, mediaUrl: String, title: String) -> Unit,
+    onMediaClick: (sourceId: Long, mediaUrl: String, title: String, coverUrl: String?) -> Unit,
     onPlayDirect: (url: String) -> Unit,
     onBrowseAddons: () -> Unit,
     onAniListClick: (mediaId: Long, title: String) -> Unit,
@@ -152,7 +152,12 @@ fun HomeContent(
                                 if (entry.sourceId == DIRECT_PLAY_SOURCE_ID) {
                                     onPlayDirect(entry.mediaUrl)
                                 } else {
-                                    onMediaClick(entry.sourceId, entry.mediaUrl, entry.mediaTitle)
+                                    onMediaClick(
+                                        entry.sourceId,
+                                        entry.mediaUrl,
+                                        entry.mediaTitle,
+                                        entry.coverUrl,
+                                    )
                                 }
                             },
                         )
@@ -318,13 +323,13 @@ private fun AniListEntryRail(entries: List<AniListListEntry>, onAniListClick: (L
 }
 
 @Composable
-private fun CatalogRail(entries: List<CatalogEntry>, onMediaClick: (Long, String, String) -> Unit) {
+private fun CatalogRail(entries: List<CatalogEntry>, onMediaClick: (Long, String, String, String?) -> Unit) {
     LazyRow {
         items(entries, key = { "${it.sourceId}:${it.media.url}" }) { entry ->
             PosterTile(
                 title = entry.media.title,
                 coverUrl = entry.media.coverUrl,
-                onClick = { onMediaClick(entry.sourceId, entry.media.url, entry.media.title) },
+                onClick = { onMediaClick(entry.sourceId, entry.media.url, entry.media.title, entry.media.coverUrl) },
             )
         }
     }

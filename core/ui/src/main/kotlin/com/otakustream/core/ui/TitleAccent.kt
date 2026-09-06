@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.palette.graphics.Palette
 import coil.imageLoader
+import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.request.SuccessResult
 import kotlinx.coroutines.Dispatchers
@@ -72,8 +73,10 @@ fun ProvideTitleAccent(coverUrl: String?, content: @Composable () -> Unit) {
     }
     LaunchedEffect(coverUrl, against) {
         if (coverUrl.isNullOrBlank()) return@LaunchedEffect
-        // peek() already answered from cache; nothing to do but wait for a repaint.
-        if (AccentCache.contains(coverUrl, against)) return@LaunchedEffect
+        // Unconditional, and resolve() answers from the cache when it can. The earlier version
+        // asked "is it cached?" and returned without assigning when it was — which dropped the
+        // answer whenever another screen filled that key between this composition and this effect
+        // running, leaving the page on the theme colour with the accent sitting in the cache.
         extracted = AccentCache.resolve(context, coverUrl, against)
     }
 
@@ -100,21 +103,32 @@ private object AccentCache {
 
     private class Entry(val argb: Int?)
 
-    fun contains(url: String?, against: Int): Boolean =
-        url != null && entries.get(key(url, against)) != null
-
     fun peek(url: String?, against: Int): Color? {
         if (url.isNullOrBlank()) return null
         return entries.get(key(url, against))?.argb?.let(::Color)
     }
 
     suspend fun resolve(context: Context, url: String, against: Int): Color? {
-        val argb = withContext(Dispatchers.IO) {
-            // Every step here can fail on a bad image or a dead host, and none of them is worth
-            // reporting: an accent that cannot be worked out is just a page in the theme colour.
-            runCatching { bitmapFor(context, url)?.let { pickAccent(it.candidates(), against) } }.getOrNull()
+        val cacheKey = key(url, against)
+        entries.get(cacheKey)?.let { return it.argb?.let(::Color) }
+
+        // The two ways this comes back empty are not the same and must not be cached the same way.
+        //
+        // A bitmap we could not fetch is a dead host, a flaky connection, a decode that ran out of
+        // memory — all transient, all worth trying again next time the page is opened. Storing that
+        // as "this poster has no accent" would freeze a temporary failure in for the life of the
+        // cache entry, so a missing bitmap returns without recording anything.
+        val bitmap = withContext(Dispatchers.IO) {
+            runCatching { bitmapFor(context, url) }.getOrNull()
+        } ?: return null
+
+        // Having looked at the pixels, the answer is final: a grey poster will be grey every time,
+        // so a null here is a real result and gets cached like any other. Without that, every visit
+        // to a monochrome cover would decode it again to learn the same thing.
+        val argb = withContext(Dispatchers.Default) {
+            runCatching { pickAccent(bitmap.candidates(), against) }.getOrNull()
         }
-        entries.put(key(url, against), Entry(argb))
+        entries.put(cacheKey, Entry(argb))
         return argb?.let(::Color)
     }
 
@@ -129,6 +143,13 @@ private object AccentCache {
             // A poster's colours do not need its resolution. Decoding to 128px is roughly a
             // hundredth of the pixels and gives the quantiser the same answer.
             .size(SAMPLE_SIZE)
+            // Not kept in Coil's memory cache. This is a second, smaller decode of an image the
+            // screen is also displaying at full size — allowHardware(false) alone already makes it
+            // a separate entry — and it is read exactly once, since the answer is then cached here
+            // as a single Int. Keeping it would evict real poster bitmaps to store something
+            // nothing will ask for again. The network fetch is still shared: the disk cache is
+            // untouched, so this costs a decode, not a download.
+            .memoryCachePolicy(CachePolicy.DISABLED)
             .build()
         val result = context.imageLoader.execute(request)
         return ((result as? SuccessResult)?.drawable as? BitmapDrawable)?.bitmap
