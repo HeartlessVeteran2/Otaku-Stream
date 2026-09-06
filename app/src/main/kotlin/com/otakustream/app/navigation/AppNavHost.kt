@@ -38,10 +38,13 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -126,16 +129,30 @@ fun AppNavHost(
     pendingMagnetName: String? = null,
     onMagnetConfirmed: () -> Unit = {},
     onMagnetDismissed: () -> Unit = {},
-    onPlayerVisibilityChanged: (Boolean) -> Unit = {},
+    // Whether the app's own scheme is dark. Combined with the destination below to decide the
+    // system bar icon style, which the activity applies.
+    appThemeIsDark: Boolean = true,
+    onSystemBarsDarkChanged: (Boolean) -> Unit = {},
 ) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-    // The activity styles the system bars from this: the player renders in the dark scheme whatever
-    // the app is set to, so in a light app its transparent status bar would otherwise draw dark
-    // icons over black video.
-    val onPlayer = currentRoute == ROUTE_PLAYER
-    LaunchedEffect(onPlayer) { onPlayerVisibilityChanged(onPlayer) }
+    // The player renders in the dark scheme whatever the app is set to, so in a light app its
+    // transparent status bar would otherwise draw dark icons over black video.
+    //
+    // SideEffect, not LaunchedEffect: this runs in the apply phase of the same composition that
+    // puts the player on screen, before that frame is drawn. A LaunchedEffect would dispatch a
+    // coroutine after the composition committed, leaving the bars a frame behind the video.
+    // Guarded on the last value applied because SideEffect runs on every recomposition and each
+    // call re-registers a window listener.
+    val barsDark = appThemeIsDark || currentRoute == ROUTE_PLAYER
+    var appliedBarsDark by remember { mutableStateOf<Boolean?>(null) }
+    SideEffect {
+        if (appliedBarsDark != barsDark) {
+            appliedBarsDark = barsDark
+            onSystemBarsDarkChanged(barsDark)
+        }
+    }
     val showBottomBar = currentRoute == ROUTE_PLAY || currentRoute == ROUTE_CATALOG ||
         currentRoute == ROUTE_LIBRARY || currentRoute == ROUTE_SETTINGS
 

@@ -14,11 +14,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.otakustream.app.navigation.AppNavHost
@@ -137,12 +135,12 @@ class MainActivity : ComponentActivity() {
             // The player draws its own dark scheme whatever the app is set to, so the bars have to
             // follow the destination and not just the theme. Light app + player = dark status bar
             // icons over black video, which is unreadable.
-            var playerVisible by remember { mutableStateOf(false) }
-            val barsDark = themeMode.isDark() || playerVisible
-            // Keyed on the resolved answer rather than run on every recomposition — each call
-            // re-registers a window listener, and the answer only changes when the setting, the
-            // system, or the destination does.
-            LaunchedEffect(barsDark) { applySystemBarStyle(dark = barsDark) }
+            //
+            // Decided inside the nav host, where the route is known, and applied from there. Doing
+            // it here — the route reported up into state, a recomposition, then an effect — put
+            // two coroutine hops between the player appearing and the bars matching it, so the
+            // first frame of a video still carried the light-scheme icons. That is the same
+            // one-frame flash this whole change exists to remove, moved rather than fixed.
             OtakuStreamTheme(themeMode = themeMode) {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     AppNavHost(
@@ -161,7 +159,8 @@ class MainActivity : ComponentActivity() {
                             pendingMagnet = null
                         },
                         onMagnetDismissed = { pendingMagnet = null },
-                        onPlayerVisibilityChanged = { playerVisible = it },
+                        appThemeIsDark = themeMode.isDark(),
+                        onSystemBarsDarkChanged = ::applySystemBarStyle,
                     )
                 }
             }
