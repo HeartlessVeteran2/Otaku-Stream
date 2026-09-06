@@ -84,8 +84,20 @@ class LibraryViewModel @Inject constructor(
     // connection, possibly not available any more — would be a lie, so the screen asks first.
     fun removeDownload(row: DownloadRow) {
         viewModelScope.launch {
-            episodeDownloads.remove(row.entry.videoUrl)
-            downloadRepository.forget(row.entry.videoUrl)
+            // The metadata row goes only once the bytes are confirmed gone, not alongside the
+            // request to delete them. Deleting it first meant a removal that never completed left
+            // the file in the download cache with nothing pointing at it — invisible in this list,
+            // which is built by joining these rows against Media3's index, and therefore
+            // unreclaimable through the app.
+            //
+            // Keeping the row on failure is the recoverable direction: the download stays listed,
+            // the Remove button stays live, and pressing it again succeeds straight away once the
+            // service has caught up.
+            if (episodeDownloads.removeAndAwait(row.entry.videoUrl)) {
+                downloadRepository.forget(row.entry.videoUrl)
+            } else {
+                UiMessages.show("Couldn't finish removing that download. It's still listed — try again.")
+            }
         }
     }
 

@@ -2,6 +2,7 @@ package com.otakustream.core.sources.stremio
 
 import com.otakustream.core.database.stremio.StremioAddonRecord
 import com.otakustream.core.database.stremio.StremioRepository
+import com.otakustream.core.network.await
 import com.otakustream.core.sources.api.SourceHttpException
 import com.otakustream.core.sources.api.stableSourceId
 import com.otakustream.core.sources.stremio.model.parseManifest
@@ -31,13 +32,21 @@ class StremioAddonInstaller @Inject constructor(
     suspend fun installFromUrl(manifestUrl: String, priority: Int = 0): List<StremioVideoSource> = withContext(Dispatchers.IO) {
         val normalizedUrl = normalizeStremioManifestUrl(manifestUrl)
         val request = Request.Builder().url(normalizedUrl).build()
-        val content = httpClient.newCall(request).execute().use { response ->
+        // await(), not execute(): installing is a suspend call made from a ViewModel scope, and a
+        // blocking execute() could not be interrupted when the user left the screen — the request
+        // ran on regardless, holding a thread and a connection nothing was waiting for.
+        val content = httpClient.newCall(request).await().use { response ->
             if (!response.isSuccessful) throw SourceHttpException(response.code)
             response.body?.string() ?: error("Empty manifest body")
         }
         val sources = buildSources(normalizedUrl, content)
         val manifest = parseManifest(content)
-        stremioRepository.saveAddon(
+        // KeepingUserSettings, because this is also the re-install path — the directory's "Install"
+        // button on an add-on that is already there, and the retry after a failed manifest fetch.
+        // A plain save carried this call's `priority` and the record's default `enabled = true`, so
+        // re-adding an add-on you had switched off switched it back on, and re-adding one you had
+        // moved to the bottom sent it back to the end of the queue.
+        stremioRepository.saveAddonKeepingUserSettings(
             StremioAddonRecord(manifestUrl = normalizedUrl, manifestJson = content, name = manifest.name, priority = priority),
         )
         registerProviderIfAny(normalizedUrl, content)

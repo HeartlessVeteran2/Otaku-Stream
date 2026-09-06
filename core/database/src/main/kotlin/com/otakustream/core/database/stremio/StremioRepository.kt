@@ -18,9 +18,16 @@ interface StremioRepository {
     fun observeAddons(): Flow<List<StremioAddonRecord>>
     suspend fun getAllAddons(): List<StremioAddonRecord>
     suspend fun saveAddon(record: StremioAddonRecord)
+
+    // Saves a refreshed manifest without overwriting the two fields the user owns — see
+    // StremioDao.upsertAddonKeepingUserSettings.
+    suspend fun saveAddonKeepingUserSettings(record: StremioAddonRecord)
     suspend fun deleteAddon(manifestUrl: String)
     suspend fun setAddonEnabled(manifestUrl: String, enabled: Boolean)
-    suspend fun setAddonPriority(manifestUrl: String, priority: Int)
+
+    // Renumbers the whole list in one transaction. Replaces the pairwise priority swap, which could
+    // not survive a cancellation and could not break an existing tie.
+    suspend fun setAddonOrder(manifestUrlsInOrder: List<String>)
 
     fun observeCatalogToggles(manifestUrl: String): Flow<List<StremioCatalogToggle>>
     suspend fun setCatalogEnabled(manifestUrl: String, type: String, id: String, enabled: Boolean)
@@ -40,21 +47,16 @@ class StremioRepositoryImpl @Inject constructor(
 
     override suspend fun getAllAddons(): List<StremioAddonRecord> = dao.getAllAddons().map { it.toRecord() }
 
-    override suspend fun saveAddon(record: StremioAddonRecord) = dao.upsertAddon(
-        StremioAddonEntity(
-            manifestUrl = record.manifestUrl,
-            manifestJson = record.manifestJson,
-            name = record.name,
-            enabled = record.enabled,
-            priority = record.priority,
-        ),
-    )
+    override suspend fun saveAddon(record: StremioAddonRecord) = dao.upsertAddon(record.toEntity())
+
+    override suspend fun saveAddonKeepingUserSettings(record: StremioAddonRecord) =
+        dao.upsertAddonKeepingUserSettings(record.toEntity())
 
     override suspend fun deleteAddon(manifestUrl: String) = dao.deleteAddon(manifestUrl)
 
     override suspend fun setAddonEnabled(manifestUrl: String, enabled: Boolean) = dao.setAddonEnabled(manifestUrl, enabled)
 
-    override suspend fun setAddonPriority(manifestUrl: String, priority: Int) = dao.setAddonPriority(manifestUrl, priority)
+    override suspend fun setAddonOrder(manifestUrlsInOrder: List<String>) = dao.setAddonOrder(manifestUrlsInOrder)
 
     override fun observeCatalogToggles(manifestUrl: String): Flow<List<StremioCatalogToggle>> =
         dao.observeCatalogToggles(manifestUrl).map { list -> list.map { it.toToggle() } }
@@ -70,6 +72,14 @@ class StremioRepositoryImpl @Inject constructor(
     override suspend fun saveServerBaseUrl(baseUrl: String) = dao.upsertServerConfig(StremioServerConfigEntity(baseUrl = baseUrl))
     override suspend fun clearServerBaseUrl() = dao.clearServerConfig()
 }
+
+private fun StremioAddonRecord.toEntity() = StremioAddonEntity(
+    manifestUrl = manifestUrl,
+    manifestJson = manifestJson,
+    name = name,
+    enabled = enabled,
+    priority = priority,
+)
 
 private fun StremioAddonEntity.toRecord() =
     StremioAddonRecord(manifestUrl = manifestUrl, manifestJson = manifestJson, name = name, enabled = enabled, priority = priority)

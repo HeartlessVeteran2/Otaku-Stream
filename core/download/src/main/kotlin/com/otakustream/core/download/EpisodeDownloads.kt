@@ -11,6 +11,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -67,7 +69,20 @@ class EpisodeDownloads @Inject constructor(
         )
     }
 
-    fun remove(url: String) {
+    // Asks the service to delete the download, then waits for the index to agree that it is gone.
+    //
+    // The wait is the point. sendRemoveDownload posts an Intent and returns; the deletion happens
+    // later, in the service. The caller used to delete its own metadata row on the next line, so if
+    // the removal never completed — the process dying first, the service failing — the bytes stayed
+    // in the download cache with nothing left pointing at them. The Downloads list is built by
+    // joining the app's rows against Media3's index, so an orphan like that is invisible in the UI
+    // and unreachable by the only button that could delete it: the storage is simply gone until the
+    // app's data is cleared.
+    //
+    // Returns whether it is confirmed gone. On false the caller must keep its row, which leaves the
+    // download listed and the Remove button live — and a second press then succeeds immediately,
+    // because a download that is already absent from the index satisfies this on the first check.
+    suspend fun removeAndAwait(url: String, timeoutMs: Long = REMOVE_TIMEOUT_MS): Boolean {
         downloadHeaders.forget(url)
         DownloadService.sendRemoveDownload(
             context,
@@ -75,7 +90,43 @@ class EpisodeDownloads @Inject constructor(
             url,
             /* foreground = */ false,
         )
+        return withTimeoutOrNull(timeoutMs) {
+            changes().first { isAbsentFromIndex(url) }
+            true
+        } ?: false
     }
+
+    // Ticks once immediately and then on every change the manager reports. The tick carries no
+    // payload on purpose: the index is the authority for "is it actually gone", and onDownloadRemoved
+    // would never fire for a download that was already absent when the removal was requested.
+    private fun changes(): Flow<Unit> = callbackFlow {
+        val listener = object : DownloadManager.Listener {
+            override fun onDownloadChanged(
+                downloadManager: DownloadManager,
+                download: Download,
+                finalException: Exception?,
+            ) {
+                trySend(Unit)
+            }
+
+            override fun onDownloadRemoved(downloadManager: DownloadManager, download: Download) {
+                trySend(Unit)
+            }
+
+            override fun onIdle(downloadManager: DownloadManager) {
+                trySend(Unit)
+            }
+        }
+        downloadManager.addListener(listener)
+        trySend(Unit)
+        awaitClose { downloadManager.removeListener(listener) }
+    }
+
+    // getDownload reads SQLite and declares IOException. A read that fails tells us nothing about
+    // whether the download is gone, and answering "yes" on no evidence is what strands the bytes —
+    // so an unreadable index counts as still present and the caller keeps its row.
+    private fun isAbsentFromIndex(url: String): Boolean =
+        runCatching { downloadManager.downloadIndex.getDownload(url) }.getOrElse { return false } == null
 
     // Media3 models pause as a manual stop reason on the individual download rather than as a
     // separate state, so "paused" here and STOP_REASON_PAUSED below are the same thing.
@@ -153,5 +204,10 @@ class EpisodeDownloads @Inject constructor(
     private companion object {
         // Any non-zero value means "stopped by us". Media3 reserves 0 for "not stopped".
         const val STOP_REASON_PAUSED = 1
+
+        // Long enough for the service to start and unlink a file, short enough that a user who
+        // tapped Remove is not left watching a spinner. Exceeding it is not an error — it means the
+        // row stays and can be removed again.
+        const val REMOVE_TIMEOUT_MS = 10_000L
     }
 }

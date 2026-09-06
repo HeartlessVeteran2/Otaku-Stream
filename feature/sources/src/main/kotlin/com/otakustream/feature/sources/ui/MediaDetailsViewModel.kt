@@ -1,5 +1,6 @@
 package com.otakustream.feature.sources.ui
 
+import com.otakustream.core.sources.api.UiMessages
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -346,9 +347,22 @@ class MediaDetailsViewModel @Inject constructor(
     }
 
     private suspend fun clearDownloadsFor(episodeUrl: String) {
+        // Same ordering rule as LibraryViewModel.removeDownload, and for the same reason: this row
+        // is the app's only handle on the downloaded bytes, so it is deleted once the removal is
+        // confirmed rather than alongside the request for it. Dropping it first stranded the file
+        // in the download cache with nothing left able to reach it.
+        var unconfirmed = 0
         downloadRepository.entriesForEpisode(episodeUrl).forEach { entry ->
-            episodeDownloads.remove(entry.videoUrl)
-            downloadRepository.forget(entry.videoUrl)
+            if (episodeDownloads.removeAndAwait(entry.videoUrl)) {
+                downloadRepository.forget(entry.videoUrl)
+            } else {
+                unconfirmed++
+            }
+        }
+        // One message however many rows an episode had, and only when something is genuinely left
+        // behind — where the user can still get at it.
+        if (unconfirmed > 0) {
+            UiMessages.show("Couldn't finish removing this download. It's still in Library › Downloads.")
         }
     }
 

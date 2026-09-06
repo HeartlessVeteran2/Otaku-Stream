@@ -143,11 +143,18 @@ class ManageStremioSourcesViewModel @Inject constructor(
         val index = list.indexOfFirst { it.record.manifestUrl == item.record.manifestUrl }
         val targetIndex = index + direction
         if (index < 0 || targetIndex !in list.indices) return
-        val other = list[targetIndex]
-        viewModelScope.launch {
-            stremioRepository.setAddonPriority(item.record.manifestUrl, other.record.priority)
-            stremioRepository.setAddonPriority(other.record.manifestUrl, item.record.priority)
-        }
+        // The whole new order, written as 0..n-1 in one transaction, rather than swapping the
+        // pair's two priority values with two separate writes.
+        //
+        // The swap had two failure modes and the second one was permanent. Two unbatched writes can
+        // be cancelled between, leaving both rows on the same priority — and once two rows tie,
+        // swapping their priorities changes nothing, so those buttons never work again. Ties also
+        // arrived without any crash at all: "Add by URL" installs with the default priority of 0,
+        // so a user who added their add-ons that way had every row at 0 and the arrows did nothing
+        // from the first tap.
+        val reordered = list.mapTo(mutableListOf()) { it.record.manifestUrl }
+            .apply { add(targetIndex, removeAt(index)) }
+        viewModelScope.launch { stremioRepository.setAddonOrder(reordered) }
     }
 
     fun toggleCatalogEnabled(item: StremioAddonItem, catalog: StremioCatalogItem) {
