@@ -89,8 +89,9 @@ class ThemeTest {
 
 private const val MIN_TEXT_CONTRAST = 4.5
 
-// The intended tables, stated here independently of Theme.kt. Order matches allRoles() so a role
-// added to one and not the other fails on the key comparison rather than silently going unchecked.
+// The intended tables, stated here independently of Theme.kt. A role added to one and not the other
+// fails on assertRoles' key comparison rather than silently going unchecked — that comparison is
+// over sets, so the order these are written in is presentation only and nothing depends on it.
 private fun darkRoles(): Map<String, Color> = linkedMapOf(
     "primary" to DarkPrimary,
     "onPrimary" to DarkOnPrimary,

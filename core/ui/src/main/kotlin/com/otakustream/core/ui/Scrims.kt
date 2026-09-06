@@ -21,18 +21,24 @@ import androidx.compose.ui.graphics.lerp
 
 // Bottom-anchored wash behind a title caption on a poster tile.
 //
-// Three stops, not two. A straight transparent-to-opaque ramp puts most of its opacity in the
-// bottom fifth, which leaves the first line of a two-line title sitting on almost-clear art and
-// unreadable against a busy poster. Pushing the mid-stop up to 55% at 40% of the height covers the
-// text and still fades out before the ramp becomes a visible band.
+// Four stops, front-loaded, because of where this is actually drawn: every caller sizes the scrim
+// box to the caption itself, not to the poster, so the box is only as tall as the text plus 8dp of
+// padding. A straight transparent-to-opaque ramp — or even a midpoint at 40% — leaves the first
+// line of a two-line title sitting on nearly clear artwork, which is exactly where a busy poster
+// makes it unreadable. Reaching half opacity by 15% of the height puts the ramp above the text
+// rather than through it.
+//
+// Tuned for that caption-sized box. Stretching this brush over a whole tile would read as a heavy
+// wash over the artwork instead of a gradient; heroScrim() is the one for a tall box.
 @Composable
 @ReadOnlyComposable
 fun posterScrim(): Brush {
     val base = MaterialTheme.colorScheme.background
     return Brush.verticalGradient(
         0f to Color.Transparent,
-        0.4f to base.copy(alpha = 0.55f),
-        1f to base.copy(alpha = 0.92f),
+        0.15f to base.copy(alpha = 0.5f),
+        0.5f to base.copy(alpha = 0.8f),
+        1f to base.copy(alpha = 0.95f),
     )
 }
 

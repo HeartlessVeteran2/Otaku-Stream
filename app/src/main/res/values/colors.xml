@@ -5,9 +5,12 @@
          than following the in-app scheme. -->
     <color name="ic_launcher_background">#0B1220</color>
 
-    <!-- The window background behind Compose, and the splash. Matches the light scheme's
-         background (LightBackground in Color.kt); values-night carries the dark one. These are
-         what the frames between the splash dismissing and Compose's first draw are painted with,
-         so a mismatch here shows up as a flash of the wrong colour on every cold start. -->
-    <color name="window_background">#FCFAF7</color>
+    <!-- The two scheme backgrounds (LightBackground and DarkBackground in Color.kt), named so
+         MainActivity can pick one directly by the stored Appearance mode. -->
+    <color name="window_background_light">#FCFAF7</color>
+    <color name="window_background_dark">#0D0F13</color>
+
+    <!-- The qualifier-driven default, for the splash and for the frame before setTheme() runs.
+         values-night carries the dark one. -->
+    <color name="window_background">@color/window_background_light</color>
 </resources>

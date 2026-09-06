@@ -103,6 +103,4 @@ dependencies {
     // The theme's colour tables are plain Kotlin values, so ThemeTest asserts role coverage and
     // contrast on the JVM with no device and no Robolectric.
     testImplementation(libs.junit)
-    testImplementation(platform(libs.androidx.compose.bom))
-    testImplementation(libs.androidx.material3)
 }
