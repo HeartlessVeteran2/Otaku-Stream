@@ -9,18 +9,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -30,6 +24,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.ui.BackTopBar
+import com.otakustream.core.ui.LoadingState
 
 // Search AniList's catalog directly, then open a title's AniList detail (and Watch from there).
 @OptIn(ExperimentalMaterial3Api::class)
@@ -59,10 +54,7 @@ fun AniListSearchScreen(
             )
 
             when {
-                uiState.isSearching -> Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier.fillMaxWidth().padding(32.dp),
-                ) { CircularProgressIndicator() }
+                uiState.isSearching -> LoadingState()
                 // A failed search was a dead end: the message sat there and the only way to try
                 // again was to edit the query, which is not what the user wants to change. Almost
                 // every failure here is a dropped connection, so offer the one action that fixes it.

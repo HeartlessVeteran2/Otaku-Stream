@@ -51,10 +51,11 @@ fun SectionHeader(title: String) {
     )
 }
 
-// A centred spinner filling whatever it is given.
+// A centred spinner filling whatever it is given: the "this screen has nothing yet" state, as
+// opposed to the small inline spinner that sits next to a button while one row installs.
 //
-// Open-coded in roughly twenty screens, each with its own idea of the surrounding Box and padding.
-// Worth one name so that when the app grows a skeleton loader, there is one place to grow it.
+// Several screens open-coded this shape, each with its own surrounding Box and padding. Worth one
+// name so that when the app grows a skeleton loader, there is one place to grow it.
 @Composable
 fun LoadingState(modifier: Modifier = Modifier) {
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
