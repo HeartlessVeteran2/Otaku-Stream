@@ -28,7 +28,15 @@ data class WatchResultGroup(
 )
 
 // Where the bridge hands off once a source result is chosen (or an existing mapping is found).
-data class WatchTarget(val sourceId: Long, val mediaUrl: String, val title: String)
+// coverUrl is nullable because only one of the two ways to reach a target has one: a fresh pick
+// comes from a search result, which carries its poster, while a target restored from an existing
+// tracker link is rebuilt from the link record, which stores no artwork.
+data class WatchTarget(
+    val sourceId: Long,
+    val mediaUrl: String,
+    val title: String,
+    val coverUrl: String? = null,
+)
 
 data class AniListWatchUiState(
     val query: String = "",
@@ -125,7 +133,7 @@ class AniListWatchViewModel @Inject constructor(
                     sourceId = sourceId,
                 ),
             )
-            _uiState.value = _uiState.value.copy(navigateTo = WatchTarget(sourceId, item.url, item.title))
+            _uiState.value = _uiState.value.copy(navigateTo = WatchTarget(sourceId, item.url, item.title, item.coverUrl))
         }
     }
 

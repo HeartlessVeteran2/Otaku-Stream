@@ -122,12 +122,18 @@ private object AccentCache {
             runCatching { bitmapFor(context, url) }.getOrNull()
         } ?: return null
 
-        // Having looked at the pixels, the answer is final: a grey poster will be grey every time,
-        // so a null here is a real result and gets cached like any other. Without that, every visit
-        // to a monochrome cover would decode it again to learn the same thing.
-        val argb = withContext(Dispatchers.Default) {
-            runCatching { pickAccent(bitmap.candidates(), against) }.getOrNull()
+        // Same distinction one level down. Quantising can throw — an OOM on a large bitmap, a
+        // recycled one — and that is a failure to look, not a poster with no colour in it, so it
+        // must not be recorded either. Only a run that completed produces a cacheable answer.
+        //
+        // A completed run that found nothing *is* cacheable: a grey poster will be grey every time,
+        // and without recording that, every visit to a monochrome cover would decode it again to
+        // learn the same thing.
+        val extraction = withContext(Dispatchers.Default) {
+            runCatching { pickAccent(bitmap.candidates(), against) }
         }
+        if (extraction.isFailure) return null
+        val argb = extraction.getOrNull()
         entries.put(cacheKey, Entry(argb))
         return argb?.let(::Color)
     }

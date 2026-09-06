@@ -45,7 +45,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 fun AniListWatchScreen(
     onBack: () -> Unit,
     onBrowseAddons: () -> Unit,
-    onOpenSource: (sourceId: Long, mediaUrl: String, title: String) -> Unit,
+    onOpenSource: (sourceId: Long, mediaUrl: String, title: String, coverUrl: String?) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: AniListWatchViewModel = hiltViewModel(),
 ) {
@@ -54,7 +54,7 @@ fun AniListWatchScreen(
     // When the bridge resolves a target (an existing mapping, or a fresh pick), hand off.
     LaunchedEffect(uiState.navigateTo) {
         uiState.navigateTo?.let { target ->
-            onOpenSource(target.sourceId, target.mediaUrl, target.title)
+            onOpenSource(target.sourceId, target.mediaUrl, target.title, target.coverUrl)
             viewModel.consumeNavigation()
         }
     }

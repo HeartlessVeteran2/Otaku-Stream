@@ -133,9 +133,11 @@ fun MediaDetailsScreen(
 
     // Keyed on the same image the hero draws, so the page's colour is the colour of the picture at
     // the top of it rather than of a thumbnail you cannot see.
-    ProvideTitleAccent(
-        coverUrl = uiState.details?.backgroundUrl ?: uiState.details?.media?.coverUrl ?: seedCoverUrl,
-    ) {
+    // One expression, used twice below, so the picture and the colour taken from it cannot
+    // disagree. Giving the accent the seed but not the hero meant that while details were loading
+    // the page took its colour from a poster the user could not see, under a placeholder icon.
+    val heroUrl = uiState.details?.backgroundUrl ?: uiState.details?.media?.coverUrl ?: seedCoverUrl
+    ProvideTitleAccent(coverUrl = heroUrl) {
         Scaffold(
             modifier = modifier.fillMaxSize(),
             topBar = { BackTopBar(title = mediaTitle, onBack = onBack) },
@@ -150,7 +152,7 @@ fun MediaDetailsScreen(
                 Column {
                     Box(modifier = Modifier.fillMaxWidth().height(280.dp).clip(MaterialTheme.shapes.large)) {
                         CoverImage(
-                            url = uiState.details?.backgroundUrl ?: uiState.details?.media?.coverUrl,
+                            url = heroUrl,
                             contentDescription = mediaTitle,
                             modifier = Modifier.fillMaxSize(),
                         )
