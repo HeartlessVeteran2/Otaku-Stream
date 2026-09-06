@@ -112,4 +112,34 @@ class SourceFailureTest {
         assertFalse(emptyList<SourceFailure>().allOffline())
         assertEquals("", emptyList<SourceFailure>().headline())
     }
+
+    // Pooled resolution asks several sources for one episode, and a source that lists the show but
+    // not the episode has to say so — otherwise it is indistinguishable from one that was never
+    // asked.
+    @Test
+    fun `a missing episode reads as a sentence, not a float`() {
+        assertEquals(
+            "Zoro — has no episode 12",
+            SourceFailure(1L, "Zoro", FailureReason.NoSuchEpisode(12f)).describe(),
+        )
+        assertEquals(
+            "Zoro — has no episode 12.5",
+            SourceFailure(1L, "Zoro", FailureReason.NoSuchEpisode(12.5f)).describe(),
+        )
+    }
+
+    // The detail line is read at a glance, and an eight-source pool can have eight things to say
+    // about one episode. Past the first few names the count is the only part still informative.
+    @Test
+    fun `detail names a few sources and counts the rest`() {
+        val failures = (1..5).map { SourceFailure(it.toLong(), "Source$it", FailureReason.Offline) }
+        assertEquals(
+            "Source1 — could not be reached — check your connection; " +
+                "Source2 — could not be reached — check your connection; " +
+                "Source3 — could not be reached — check your connection; and 2 more",
+            failures.detail(),
+        )
+        assertEquals("Source1 — could not be reached — check your connection", failures.take(1).detail())
+        assertEquals("", emptyList<SourceFailure>().detail())
+    }
 }

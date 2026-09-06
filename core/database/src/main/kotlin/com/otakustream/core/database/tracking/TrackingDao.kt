@@ -35,6 +35,16 @@ interface TrackingDao {
     @Query("SELECT * FROM tracker_links WHERE trackerMediaId = :trackerMediaId ORDER BY rowid DESC LIMIT 1")
     suspend fun getLinkByTrackerId(trackerMediaId: Long): TrackerLink?
 
+    // Every title linked to one AniList entry, newest link first — the join that lets the app treat
+    // the same show in four different sources as one show.
+    //
+    // Deliberately not the LIMIT 1 above, and the reason is the whole point: that query answers
+    // "which title do I reopen for this AniList id", where exactly one answer is wanted and the most
+    // recent link is the best guess. This one answers "who else has this show", where every answer
+    // matters — each row is a source that can contribute streams for the episode being played.
+    @Query("SELECT * FROM tracker_links WHERE trackerMediaId = :trackerMediaId ORDER BY rowid DESC")
+    suspend fun getLinksByTrackerId(trackerMediaId: Long): List<TrackerLink>
+
     @Upsert
     suspend fun upsertLink(link: TrackerLink)
 
