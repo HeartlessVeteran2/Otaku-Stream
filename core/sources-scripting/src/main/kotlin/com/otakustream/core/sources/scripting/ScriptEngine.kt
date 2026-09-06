@@ -35,14 +35,61 @@ private object SandboxedContextFactory : ContextFactory() {
         // because the setter throws once a context is executing.
         optimizationLevel = -1
         setClassShutter(DenyAllClassShutter)
+        // Ask Rhino to call observeInstructionCount every so often, which is the only way to take a
+        // running script's execution back off it.
+        instructionObserverThreshold = INSTRUCTION_OBSERVER_THRESHOLD
+    }
+
+    // Aborts a script that has been running too long.
+    //
+    // This is what stops one bad extension disabling its source for the life of the process. Every
+    // ScriptedVideoSource entry point holds a mutex across a *blocking* Rhino call, and cancelling
+    // the coroutine cannot interrupt one — so `withTimeoutOrNull` around the call returned on
+    // schedule while the interpreter kept running, the lock was never released, and every later
+    // search or episode resolve for that source blocked forever. The source reported "timed out"
+    // on everything, permanently, and retrying could not help because the retry queued behind the
+    // same lock.
+    //
+    // A wall-clock deadline rather than an instruction budget: what matters is how long the user
+    // has been waiting, and instruction counts differ by orders of magnitude between a tight loop
+    // and one doing real parsing work. Throwing unwinds the interpreter, which releases the mutex.
+    override fun observeInstructionCount(context: Context, instructionCount: Int) {
+        val deadline = context.getThreadLocal(DEADLINE_KEY) as? Long ?: return
+        if (System.nanoTime() > deadline) {
+            throw ScriptTimeoutException()
+        }
     }
 }
+
+// A script that ran past its deadline. Distinct from a script that threw, because the two mean
+// different things to the user: one source is broken, the other is stuck.
+class ScriptTimeoutException : RuntimeException(
+    "The source script took too long and was stopped.",
+)
+
+// Roughly how often Rhino checks in. Small enough that a runaway loop is caught within
+// milliseconds of the deadline, large enough that the check is not a measurable share of the work.
+private const val INSTRUCTION_OBSERVER_THRESHOLD = 10_000
+
+private const val DEADLINE_KEY = "otaku.script.deadline"
+
+// How long any one script call may run. Generous: a catalog page can legitimately parse a large
+// document. It exists to bound the pathological case, not to police slow-but-working sources.
+private const val SCRIPT_DEADLINE_MS = 15_000L
 
 class ScriptEngine @Inject constructor(
     private val httpBridge: HttpBridge,
 ) {
+    // Overridable so the timeout tests don't have to spend the real deadline three times over to
+    // prove a runaway script is stopped. Not injected: nothing in the app should be choosing a
+    // different value, and a constructor default would put it in Hilt's graph for no reason.
+    internal var deadlineMs: Long = SCRIPT_DEADLINE_MS
+
     fun load(source: String, scriptName: String): ScriptScope {
         val context = SandboxedContextFactory.enterContext()
+        // Top-level script bodies get the same deadline: an extension whose *load* never returns
+        // wedges the install, not just a call.
+        context.putThreadLocal(DEADLINE_KEY, System.nanoTime() + deadlineMs * NANOS_PER_MS)
         try {
             // initSafeStandardObjects, not initStandardObjects. The latter installs Rhino's Java
             // interop into the scope — `Packages`, `java`, `javax`, `org`, `com`, `net`,
@@ -68,6 +115,9 @@ class ScriptEngine @Inject constructor(
 
     fun call(scope: ScriptScope, functionName: String, vararg args: Any?): String {
         val context = SandboxedContextFactory.enterContext()
+        // Per-call, on the Context, because a Context is per-thread and one script call is what is
+        // being bounded — not the engine's lifetime.
+        context.putThreadLocal(DEADLINE_KEY, System.nanoTime() + deadlineMs * NANOS_PER_MS)
         try {
             val function = scope.scriptable.get(functionName, scope.scriptable) as? Function
                 ?: error("Script does not define function '$functionName'")
@@ -113,3 +163,5 @@ class ScriptEngine @Inject constructor(
         }
     }
 }
+
+private const val NANOS_PER_MS = 1_000_000L
