@@ -1,14 +1,10 @@
 package com.otakustream.feature.sources.ui
 
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -16,7 +12,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Extension
@@ -31,13 +26,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.database.library.DIRECT_PLAY_SOURCE_ID
 import com.otakustream.core.database.library.WatchHistoryEntry
-import com.otakustream.core.ui.CoverImage
 import com.otakustream.core.ui.EmptyState
 import com.otakustream.core.ui.PosterTile
 import com.otakustream.feature.tracking.AniListListEntry
@@ -144,7 +136,7 @@ fun HomeContent(
         if (continueWatching.isNotEmpty()) {
             item(key = "local-continue") {
                 RailHeader("Continue watching")
-                LazyRow {
+                LazyRow(contentPadding = RailPadding, horizontalArrangement = RailSpacing) {
                     items(continueWatching, key = { "cw-${it.id}" }) { entry ->
                         ContinueWatchingTile(
                             entry = entry,
@@ -258,7 +250,7 @@ private fun AiringSoonRail(days: List<AiringDay>, onAniListClick: (Long, String)
     // it: one instant for every tile, and not one frozen at first composition.
     val nowMs by rememberTickingNow()
     val upcoming = remember(days) { days.flatMap { it.items }.take(AIRING_SOON_CAP) }
-    LazyRow {
+    LazyRow(contentPadding = RailPadding, horizontalArrangement = RailSpacing) {
         items(upcoming, key = { "soon-${it.media.id}" }) { item ->
             AniListPosterTile(
                 title = item.media.displayTitle,
@@ -277,7 +269,7 @@ private const val AIRING_SOON_CAP = 20
 // For a long-running show "947 episodes behind" is a reason to give up; "Ep 51" is a thing to tap.
 @Composable
 private fun ReadyToWatchRail(ready: List<ReadyToWatch>, onAniListClick: (Long, String) -> Unit) {
-    LazyRow {
+    LazyRow(contentPadding = RailPadding, horizontalArrangement = RailSpacing) {
         items(ready, key = { "rtw-${it.media.id}" }) { item ->
             AniListPosterTile(
                 title = item.media.displayTitle,
@@ -295,7 +287,7 @@ private fun ReadyToWatchRail(ready: List<ReadyToWatch>, onAniListClick: (Long, S
 
 @Composable
 private fun AniListMediaRail(media: List<AniListMedia>, onAniListClick: (Long, String) -> Unit) {
-    LazyRow {
+    LazyRow(contentPadding = RailPadding, horizontalArrangement = RailSpacing) {
         items(media, key = { "al-${it.id}" }) { item ->
             AniListPosterTile(
                 title = item.displayTitle,
@@ -309,7 +301,7 @@ private fun AniListMediaRail(media: List<AniListMedia>, onAniListClick: (Long, S
 
 @Composable
 private fun AniListEntryRail(entries: List<AniListListEntry>, onAniListClick: (Long, String) -> Unit) {
-    LazyRow {
+    LazyRow(contentPadding = RailPadding, horizontalArrangement = RailSpacing) {
         items(entries, key = { "ale-${it.media.id}" }) { entry ->
             val total = entry.media.episodes
             AniListPosterTile(
@@ -324,13 +316,13 @@ private fun AniListEntryRail(entries: List<AniListListEntry>, onAniListClick: (L
 
 @Composable
 private fun CatalogRail(entries: List<CatalogEntry>, onMediaClick: (Long, String, String, String?) -> Unit) {
-    LazyRow {
+    LazyRow(contentPadding = RailPadding, horizontalArrangement = RailSpacing) {
         items(entries, key = { "${it.sourceId}:${it.media.url}" }) { entry ->
             PosterTile(
                 title = entry.media.title,
                 coverUrl = entry.media.coverUrl,
                 onClick = { onMediaClick(entry.sourceId, entry.media.url, entry.media.title, entry.media.coverUrl) },
-                modifier = Modifier.padding(start = 16.dp).width(RAIL_TILE_WIDTH),
+                modifier = Modifier.width(RailTileWidth),
             )
         }
     }
@@ -342,10 +334,6 @@ private fun ContinueWatchingTile(entry: WatchHistoryEntry, onClick: () -> Unit) 
         title = entry.mediaTitle,
         coverUrl = entry.coverUrl,
         onClick = onClick,
-        modifier = Modifier.padding(start = 16.dp).width(RAIL_TILE_WIDTH),
+        modifier = Modifier.width(RailTileWidth),
     )
 }
-
-// Every rail tile is this wide. A poster is 2:3, so the height follows; 120dp puts three and a bit
-// on a phone, which is the width that reads as "scroll me" rather than "this is the whole row".
-private val RAIL_TILE_WIDTH = 120.dp

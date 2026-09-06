@@ -37,11 +37,16 @@ import androidx.compose.ui.unit.dp
 fun PosterTile(
     title: String,
     coverUrl: String?,
-    onClick: () -> Unit,
+    // Null for a tile that is genuinely not tappable. Passing an empty lambda instead would still
+    // attach clickable, so the tile would ripple under a finger, do nothing, and be announced to
+    // TalkBack as something you can activate — the Stremio account library, which is read-only by
+    // design, did exactly that.
+    onClick: (() -> Unit)?,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     titleStyle: TextStyle? = null,
-    // Drawn over the artwork, above the scrim. BoxScope so a badge can align itself to a corner.
+    // Drawn last, so genuinely over everything including the caption scrim. BoxScope so a badge can
+    // align itself to a corner.
     badges: @Composable BoxScope.() -> Unit = {},
 ) {
     val shape = MaterialTheme.shapes.medium
@@ -50,7 +55,7 @@ fun PosterTile(
             .aspectRatio(POSTER_ASPECT)
             .clip(shape)
             .border(1.dp, MaterialTheme.colorScheme.outline, shape)
-            .clickable(onClick = onClick)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             // One accessible node for the whole tile. Without this a tile is three: the poster, the
             // title, and the subtitle — so TalkBack read every rail entry's title twice (the image
             // was labelled with it, and so was the caption underneath) and then read "Ep 5/12" as a
@@ -62,7 +67,6 @@ fun PosterTile(
         // it sits under. The caption is the one that stays, because it is also what a sighted user
         // reads.
         CoverImage(url = coverUrl, contentDescription = null, modifier = Modifier.fillMaxSize())
-        badges()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -87,6 +91,10 @@ fun PosterTile(
                 )
             }
         }
+        // Last, because a Box draws its children in order and the parameter promises badges sit on
+        // top. Drawing them before the caption happened to look right only because the one caller
+        // anchors to the top corners; a bottom-corner badge would have disappeared under the scrim.
+        badges()
     }
 }
 
