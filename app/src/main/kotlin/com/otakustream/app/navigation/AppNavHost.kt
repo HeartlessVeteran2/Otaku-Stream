@@ -217,7 +217,10 @@ fun AppNavHost(
             // nothing while telling the user it had worked. This scope lives as long as the nav
             // host, which is as long as there is a snackbar to tap.
             scope.launch {
-                snackbarHostState.currentSnackbarData?.dismiss()
+                // No dismiss of whatever is showing. SnackbarHostState already queues, and
+                // dismissing first completed a pending Undo *as dismissed* — so any second
+                // confirmation arriving in the four seconds after a removal ("Installed X") took
+                // the chance to undo it away without the user doing anything.
                 val result = snackbarHostState.showSnackbar(
                     message = message.text,
                     actionLabel = message.actionLabel,
@@ -225,7 +228,15 @@ fun AppNavHost(
                     // confirmation stays Short — it is telling you something, not asking.
                     duration = if (message.action != null) SnackbarDuration.Long else SnackbarDuration.Short,
                 )
-                if (result == SnackbarResult.ActionPerformed) message.action?.invoke()
+                if (result == SnackbarResult.ActionPerformed) {
+                    // Guarded, because this scope belongs to the nav host: an exception here takes
+                    // the app down, and the ViewModel that would normally have caught it is
+                    // precisely the thing this design assumes is already gone. Failing quietly is
+                    // also wrong — the user asked for something back — so say so.
+                    runCatching { message.action?.invoke() }.onFailure {
+                        snackbarHostState.showSnackbar("Couldn't undo that")
+                    }
+                }
             }
         }
         onDispose { UiMessages.setSink(null) }

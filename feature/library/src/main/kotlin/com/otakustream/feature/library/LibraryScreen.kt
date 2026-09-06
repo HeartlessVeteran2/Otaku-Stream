@@ -125,7 +125,13 @@ fun LibraryScreen(
                     // only way to learn one had failed was to come looking. The badge counts both:
                     // in flight and needing attention are the two states worth leaving the tab for.
                     val active = uiState.downloads.count { row ->
-                        row.isPending || row.progress?.state == DownloadProgress.State.FAILED
+                        // A null progress is the "Not started" the row itself draws in the error
+                        // colour: the metadata was written and the download never began. Leaving it
+                        // out of the count meant the one state you cannot see from anywhere else
+                        // was also the one the badge stayed silent about.
+                        row.isPending ||
+                            row.progress == null ||
+                            row.progress.state == DownloadProgress.State.FAILED
                     }
                     if (active > 0) {
                         BadgedBox(badge = { Badge { Text(active.toString()) } }) { Text("Downloads") }

@@ -31,6 +31,8 @@ import com.otakustream.core.database.tracking.TrackingRepository
 import com.otakustream.core.ui.BackTopBar
 import com.otakustream.core.ui.ConfirmDialog
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -55,6 +57,9 @@ class TrackingSettingsViewModel @Inject constructor(
     private val _justSignedIn = MutableStateFlow(false)
     val justSignedIn: StateFlow<Boolean> = _justSignedIn.asStateFlow()
 
+    // The in-flight token validation, if any. See onOAuthToken and clearToken.
+    private var authJob: Job? = null
+
     // Set when a redirect is rejected, so the screen can say so instead of silently doing nothing.
     private val _signInRejected = MutableStateFlow(false)
     val signInRejected: StateFlow<Boolean> = _signInRejected.asStateFlow()
@@ -72,7 +77,13 @@ class TrackingSettingsViewModel @Inject constructor(
             _signInRejected.value = true
             return
         }
-        viewModelScope.launch {
+        // Held so signing out can cancel it. Between the redirect arriving and the token being
+        // stored there is a network round trip, and a sign-out landing in that window used to be
+        // overtaken by the validation finishing afterwards — the token saved, the user signed in
+        // again, having just asked not to be. Rare, but the one failure mode that matters for a
+        // credential is the one where destroying it does not take.
+        authJob?.cancel()
+        authJob = viewModelScope.launch {
             // 2. It has to be a token AniList actually honours. The nonce proves the redirect
             //    belongs to our sign-in; it says nothing about whether the token in it works. Asking
             //    who the token belongs to before storing it turns "signed in" into a statement the
@@ -82,6 +93,10 @@ class TrackingSettingsViewModel @Inject constructor(
                 _signInRejected.value = true
                 return@launch
             }
+            // Cancellation is cooperative, and fetchViewer above is where this coroutine spends its
+            // time. Checking here means a cancel that arrived during it stops the save rather than
+            // being noticed only at the next suspension point, which is the save.
+            ensureActive()
             trackingRepository.saveToken(token.trim())
             _signInRejected.value = false
             _justSignedIn.value = true
@@ -94,6 +109,10 @@ class TrackingSettingsViewModel @Inject constructor(
     fun onRejectionShown() { _signInRejected.value = false }
 
     fun clearToken() {
+        // Before anything else: a sign-in still being validated must not be allowed to finish and
+        // store its token after the user has asked to be signed out.
+        authJob?.cancel()
+        authJob = null
         _justSignedIn.value = false
         viewModelScope.launch { trackingRepository.clearToken() }
     }

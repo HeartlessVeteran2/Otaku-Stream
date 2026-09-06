@@ -75,8 +75,11 @@ fun ManageStremioSourcesScreen(
     pendingRemove?.let { item ->
         ConfirmDialog(
             title = "Remove ${item.record.name}?",
+            // Not "from the directory": an add-on installed by pasting a manifest URL may not be
+            // listed there at all, and telling someone to look for it where it isn't is worse than
+            // saying nothing.
             body = "Its catalogs disappear from Home and it stops answering for streams. You can " +
-                "install it again from the directory.",
+                "install it again with its manifest URL, or from the directory if it is listed there.",
             confirmLabel = "Remove",
             onConfirm = { viewModel.remove(item.record) },
             onDismiss = { pendingRemove = null },

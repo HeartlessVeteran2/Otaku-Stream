@@ -21,7 +21,16 @@ object UiMessages {
         val text: String,
         val actionLabel: String? = null,
         val action: (suspend () -> Unit)? = null,
-    )
+    ) {
+        init {
+            // The two are meaningless apart: an action with no label draws no button, so the
+            // lambda can never run, and a label with no action draws a button that does nothing.
+            // Both are silent failures at a call site that believes it offered an undo.
+            require((actionLabel.isNullOrBlank()) == (action == null)) {
+                "A snackbar action needs a label and a label needs an action"
+            }
+        }
+    }
 
     private val lock = Any()
 

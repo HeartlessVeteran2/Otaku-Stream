@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.otakustream.core.database.download.DownloadEntry
 import com.otakustream.core.database.download.DownloadRepository
+import com.otakustream.core.download.DownloadHeaders
 import com.otakustream.core.download.DownloadProgress
 import com.otakustream.core.download.EpisodeDownloads
 import com.otakustream.core.database.library.LibraryEntry
@@ -21,7 +22,6 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
-import org.json.JSONObject
 
 data class LibraryUiState(
     val watchlist: List<LibraryEntry> = emptyList(),
@@ -99,19 +99,11 @@ class LibraryViewModel @Inject constructor(
         episodeDownloads.start(
             url = entry.videoUrl,
             isM3U8 = entry.isM3U8,
-            headers = parseHeaders(entry.headersJson),
+            // The same decoder the download's own data source uses, not a second copy of it: a
+            // retry that parsed headers differently from the request it is re-issuing would fail
+            // in ways the first attempt did not.
+            headers = DownloadHeaders.decode(entry.headersJson),
         )
-    }
-
-    // Stored as the JSON the source handed over. Unreadable JSON means retrying without headers,
-    // which is what the download would have done before they were recorded at all — better than
-    // refusing to retry.
-    private fun parseHeaders(json: String?): Map<String, String> {
-        if (json.isNullOrBlank()) return emptyMap()
-        return runCatching {
-            val obj = JSONObject(json)
-            obj.keys().asSequence().associateWith { obj.getString(it) }
-        }.getOrDefault(emptyMap())
     }
 
     fun pauseDownload(row: DownloadRow) = episodeDownloads.pause(row.entry.videoUrl)
@@ -131,7 +123,14 @@ class LibraryViewModel @Inject constructor(
             UiMessages.showUndoable("Removed ${removed.title}") {
                 // Runs on the snackbar host's scope, not this one — see UiMessages.Message. The
                 // repository is a singleton, so it does not care that this ViewModel may be gone.
-                libraryRepository.add(removed)
+                //
+                // Only if it is still gone. add() is an upsert, so undoing after the title has been
+                // saved again would overwrite the newer entry — and with it whatever status the
+                // user had just set — with the snapshot taken before the delete. Nothing to undo is
+                // the right outcome there.
+                if (libraryRepository.observeLibrary().first().none { it.mediaUrl == removed.mediaUrl }) {
+                    libraryRepository.add(removed)
+                }
             }
         }
     }

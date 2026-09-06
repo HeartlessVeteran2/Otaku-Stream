@@ -45,15 +45,18 @@ fun MangayomiExtensionsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    // Uninstalling drops the extension and its saved preferences, and getting it back means
-    // fetching it from the repository again — not an undo, so it asks.
+    // Removing drops the extension and its saved preferences, and getting it back means fetching
+    // it from the repository again — not an undo, so it asks.
+    //
+    // Worded "Remove" to match the button that opens it, and the sibling screens. The row said
+    // Remove and the dialog said Uninstall, which is two names for one action on one screen.
     var pendingUninstall by remember { mutableStateOf<MangayomiExtensionListing?>(null) }
     pendingUninstall?.let { listing ->
         ConfirmDialog(
-            title = "Uninstall ${listing.name}?",
+            title = "Remove ${listing.name}?",
             body = "The extension and any preferences you set for it are removed. You can install " +
                 "it again from this list.",
-            confirmLabel = "Uninstall",
+            confirmLabel = "Remove",
             onConfirm = { viewModel.uninstall(listing) },
             onDismiss = { pendingUninstall = null },
         )
