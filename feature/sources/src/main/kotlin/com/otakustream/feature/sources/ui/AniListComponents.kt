@@ -1,12 +1,8 @@
 package com.otakustream.feature.sources.ui
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import com.otakustream.core.ui.PosterTile
 
 // AniList rails hand the shared tile a subtitle line: progress, a relation label, or a countdown
@@ -33,9 +29,3 @@ fun AniListPosterTile(
         modifier = modifier.width(RailTileWidth),
     )
 }
-
-// The rail metrics, in one place, because two files lay out rails of these tiles and a rail that
-// disagrees with its tiles about spacing is exactly the bug this replaced.
-internal val RailTileWidth = 120.dp
-internal val RailPadding = PaddingValues(horizontal = 16.dp)
-internal val RailSpacing = Arrangement.spacedBy(12.dp)

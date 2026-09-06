@@ -55,43 +55,50 @@ fun AniListSearchScreen(
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
             )
 
-            when {
-                uiState.isSearching -> LoadingState()
-                // A failed search was a dead end: the message sat there and the only way to try
-                // again was to edit the query, which is not what the user wants to change. Almost
-                // every failure here is a dropped connection, so offer the one action that fixes it.
-                uiState.error != null -> Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
-                    modifier = Modifier.fillMaxSize().padding(32.dp),
-                ) {
-                    Text(uiState.error!!, color = MaterialTheme.colorScheme.error)
-                    OutlinedButton(onClick = viewModel::retry) { Text("Try again") }
-                }
-                uiState.results.isEmpty() && uiState.query.isBlank() -> CenterMessage(
-                    "Search for an anime to get started.",
-                )
-                uiState.results.isEmpty() -> CenterMessage(
-                    "No results for “${uiState.query}”. Try another spelling.",
-                )
-                // The shared tile directly, not the rail wrapper: a grid cell decides its own
-                // width, and a tile that forces a rail's 120dp inside a 110dp cell is fighting the
-                // layout it is in. The grid owns the spacing too, which is what stopped the tiles
-                // touching once they no longer padded themselves.
-                else -> LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 110.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    items(uiState.results, key = { it.id }) { media ->
-                        PosterTile(
-                            title = media.displayTitle,
-                            coverUrl = media.coverImageUrl,
-                            onClick = { onOpenAniList(media.id, media.displayTitle) },
-                            modifier = Modifier.fillMaxWidth(),
-                        )
+            // Weighted, and wrapping the whole `when` rather than one branch of it. Every branch
+            // below fills its parent, and as a plain second child of this Column each was measured
+            // against the *full* screen height starting under the text field — so the spinner
+            // centred itself below the fold and the results grid ran off the bottom. weight(1f)
+            // hands them the height that is actually left.
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                when {
+                    uiState.isSearching -> LoadingState()
+                    // A failed search was a dead end: the message sat there and the only way to try
+                    // again was to edit the query, which is not what the user wants to change. Almost
+                    // every failure here is a dropped connection, so offer the one action that fixes it.
+                    uiState.error != null -> Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+                        modifier = Modifier.fillMaxSize().padding(32.dp),
+                    ) {
+                        Text(uiState.error!!, color = MaterialTheme.colorScheme.error)
+                        OutlinedButton(onClick = viewModel::retry) { Text("Try again") }
+                    }
+                    uiState.results.isEmpty() && uiState.query.isBlank() -> CenterMessage(
+                        "Search for an anime to get started.",
+                    )
+                    uiState.results.isEmpty() -> CenterMessage(
+                        "No results for “${uiState.query}”. Try another spelling.",
+                    )
+                    // The shared tile directly, not the rail wrapper: a grid cell decides its own
+                    // width, and a tile that forces a rail's 120dp inside a 110dp cell is fighting the
+                    // layout it is in. The grid owns the spacing too, which is what stopped the tiles
+                    // touching once they no longer padded themselves.
+                    else -> LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 110.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        items(uiState.results, key = { it.id }) { media ->
+                            PosterTile(
+                                title = media.displayTitle,
+                                coverUrl = media.coverImageUrl,
+                                onClick = { onOpenAniList(media.id, media.displayTitle) },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
                     }
                 }
             }
