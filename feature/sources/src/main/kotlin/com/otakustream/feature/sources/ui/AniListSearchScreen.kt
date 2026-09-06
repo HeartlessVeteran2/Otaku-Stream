@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.otakustream.core.ui.BackTopBar
 
 // Search AniList's catalog directly, then open a title's AniList detail (and Watch from there).
 @OptIn(ExperimentalMaterial3Api::class)
@@ -44,14 +45,7 @@ fun AniListSearchScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
-                title = { Text("Search AniList") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-            )
+            BackTopBar(title = "Search AniList", onBack = onBack)
         },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {

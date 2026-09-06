@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.sources.mangayomi.repo.MangayomiExtensionListing
+import com.otakustream.core.ui.BackTopBar
 
 @Composable
 fun MangayomiExtensionsScreen(

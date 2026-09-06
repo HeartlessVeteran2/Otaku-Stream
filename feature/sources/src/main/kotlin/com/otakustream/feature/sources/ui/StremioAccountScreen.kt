@@ -1,5 +1,6 @@
 package com.otakustream.feature.sources.ui
 
+import com.otakustream.core.ui.BackTopBar
 import com.otakustream.core.ui.CoverImage
 
 import androidx.compose.foundation.layout.Arrangement
@@ -40,6 +41,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.otakustream.core.ui.PosterTile
 
 // Sign in to a Stremio account and sync the library. Logged out: email/password. Logged in: your
 // Stremio library (read-only here — it isn't tied to a specific installed add-on) plus a one-tap
@@ -56,14 +58,7 @@ fun StremioAccountScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
-                title = { Text("Stremio account") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-            )
+            BackTopBar(title = "Stremio account", onBack = onBack)
         },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
@@ -193,25 +188,19 @@ private fun LoggedInContent(uiState: StremioAccountUiState, viewModel: StremioAc
                     modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
                 ) {
                     items(uiState.library, key = { it.mediaUrl }) { item ->
-                        Column(modifier = Modifier.padding(8.dp)) {
-                            // aspectRatio gives the tile a real height: CoverImage's image uses
-                            // matchParentSize, so a width-only modifier measures to 0 height once
-                            // the poster loads.
-                            CoverImage(
-                                url = item.poster,
-                                contentDescription = item.name,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .aspectRatio(2f / 3f)
-                                    .clip(RoundedCornerShape(8.dp)),
-                            )
-                            Text(
-                                text = item.name,
-                                style = MaterialTheme.typography.bodySmall,
-                                maxLines = 2,
-                                modifier = Modifier.padding(top = 4.dp),
-                            )
-                        }
+                        // The shared tile, not a fourth hand-rolled one. This grid had drifted to a
+                        // different corner radius, no border and a caption below the poster rather
+                        // than over it, so the same saved library looked like a different app here.
+                        //
+                        // The tiles are not tappable, which the copy below the grid says: this
+                        // screen shows what your Stremio account holds, and nothing here knows
+                        // which installed source could play it.
+                        PosterTile(
+                            title = item.name,
+                            coverUrl = item.poster,
+                            onClick = {},
+                            modifier = Modifier.padding(8.dp).fillMaxWidth(),
+                        )
                     }
                 }
             }

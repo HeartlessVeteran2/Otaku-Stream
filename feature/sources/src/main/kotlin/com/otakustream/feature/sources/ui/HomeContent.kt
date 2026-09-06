@@ -39,7 +39,7 @@ import com.otakustream.core.database.library.DIRECT_PLAY_SOURCE_ID
 import com.otakustream.core.database.library.WatchHistoryEntry
 import com.otakustream.core.ui.CoverImage
 import com.otakustream.core.ui.EmptyState
-import com.otakustream.core.ui.posterScrim
+import com.otakustream.core.ui.PosterTile
 import com.otakustream.feature.tracking.AniListListEntry
 import com.otakustream.feature.tracking.AniListMedia
 import com.otakustream.feature.tracking.AiringDay
@@ -330,6 +330,7 @@ private fun CatalogRail(entries: List<CatalogEntry>, onMediaClick: (Long, String
                 title = entry.media.title,
                 coverUrl = entry.media.coverUrl,
                 onClick = { onMediaClick(entry.sourceId, entry.media.url, entry.media.title, entry.media.coverUrl) },
+                modifier = Modifier.padding(start = 16.dp).width(RAIL_TILE_WIDTH),
             )
         }
     }
@@ -337,41 +338,14 @@ private fun CatalogRail(entries: List<CatalogEntry>, onMediaClick: (Long, String
 
 @Composable
 private fun ContinueWatchingTile(entry: WatchHistoryEntry, onClick: () -> Unit) {
-    PosterTile(title = entry.mediaTitle, coverUrl = entry.coverUrl, onClick = onClick)
+    PosterTile(
+        title = entry.mediaTitle,
+        coverUrl = entry.coverUrl,
+        onClick = onClick,
+        modifier = Modifier.padding(start = 16.dp).width(RAIL_TILE_WIDTH),
+    )
 }
 
-// Same poster-box treatment as the Catalog grid's MediaCard, sized for a horizontal rail.
-@Composable
-private fun PosterTile(title: String, coverUrl: String?, onClick: () -> Unit) {
-    val shape = MaterialTheme.shapes.medium
-    Box(
-        modifier = Modifier
-            .padding(start = 16.dp)
-            .width(120.dp)
-            .aspectRatio(2f / 3f)
-            .clip(shape)
-            .border(1.dp, MaterialTheme.colorScheme.outline, shape)
-            .clickable(onClick = onClick),
-    ) {
-        CoverImage(
-            url = coverUrl,
-            contentDescription = title,
-            modifier = Modifier.fillMaxSize(),
-        )
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .background(posterScrim())
-                .padding(8.dp),
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onBackground,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
+// Every rail tile is this wide. A poster is 2:3, so the height follows; 120dp puts three and a bit
+// on a phone, which is the width that reads as "scroll me" rather than "this is the whole row".
+private val RAIL_TILE_WIDTH = 120.dp

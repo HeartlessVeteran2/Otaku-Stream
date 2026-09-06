@@ -2,7 +2,7 @@ package com.otakustream.feature.sources.ui
 
 import com.otakustream.core.ui.CoverImage
 import com.otakustream.core.ui.EmptyState
-import com.otakustream.core.ui.posterScrim
+import com.otakustream.core.ui.PosterTile
 import com.otakustream.feature.sources.SourceFailure
 import com.otakustream.feature.sources.allOffline
 import com.otakustream.feature.sources.describe
@@ -324,21 +324,14 @@ private fun MediaCard(
     onToggleSave: () -> Unit,
     onClick: () -> Unit,
 ) {
-    val shape = MaterialTheme.shapes.medium
-    Box(
-        modifier = Modifier
-            .padding(8.dp)
-            .fillMaxWidth()
-            .aspectRatio(2f / 3f)
-            .clip(shape)
-            .border(1.dp, MaterialTheme.colorScheme.outline, shape)
-            .clickable(onClick = onClick),
+    PosterTile(
+        title = title,
+        coverUrl = coverUrl,
+        onClick = onClick,
+        // A grid cell is wider than a rail tile, so the caption gets the larger body size.
+        titleStyle = MaterialTheme.typography.bodyMedium,
+        modifier = Modifier.padding(8.dp).fillMaxWidth(),
     ) {
-        CoverImage(
-            url = coverUrl,
-            contentDescription = title,
-            modifier = Modifier.fillMaxSize(),
-        )
         // Quick save/remove without opening the details page; the filled bookmark is the confirmation.
         Surface(
             color = MaterialTheme.colorScheme.background.copy(alpha = 0.5f),
@@ -373,21 +366,6 @@ private fun MediaCard(
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                 )
             }
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .background(posterScrim())
-                .padding(8.dp),
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onBackground,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }

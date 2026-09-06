@@ -2,6 +2,7 @@ package com.otakustream.feature.sources.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.material3.ButtonDefaults
+import com.otakustream.core.ui.BackTopBar
 import com.otakustream.core.ui.CoverImage
 
 import androidx.compose.foundation.layout.Arrangement
@@ -77,14 +78,7 @@ fun AniListDetailScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
-                title = { Text(uiState.media?.displayTitle ?: "Details", maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-            )
+            BackTopBar(title = uiState.media?.displayTitle ?: "Details", onBack = onBack)
         },
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {

@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.sources.stremio.model.AddonListOrigin
 import com.otakustream.core.sources.stremio.model.OfficialAddonListing
+import com.otakustream.core.ui.BackTopBar
 import com.otakustream.core.ui.CoverImage
 
 @Composable

@@ -1,5 +1,6 @@
 package com.otakustream.feature.sources.ui
 
+import com.otakustream.core.ui.BackTopBar
 import com.otakustream.core.ui.CoverImage
 import com.otakustream.core.ui.EmptyState
 
@@ -62,14 +63,7 @@ fun AniListWatchScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
-                title = { Text("Find a source") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-            )
+            BackTopBar(title = "Find a source", onBack = onBack)
         },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {

@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
@@ -33,6 +34,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -57,6 +59,7 @@ import com.otakustream.app.ui.theme.OtakuStreamTheme
 import com.otakustream.app.ui.theme.ThemeMode
 import com.otakustream.core.player.ui.PlayerScreen
 import com.otakustream.core.sources.api.UiMessages
+import com.otakustream.core.ui.SectionHeader
 import com.otakustream.feature.library.LibraryScreen
 import com.otakustream.feature.sources.ui.AniListDetailScreen
 import com.otakustream.feature.sources.ui.AiringScheduleScreen
@@ -71,7 +74,6 @@ import com.otakustream.feature.sources.ui.MangayomiPreferencesScreen
 import com.otakustream.feature.sources.ui.ManageSourcesScreen
 import com.otakustream.feature.sources.ui.ManageStremioSourcesScreen
 import com.otakustream.feature.sources.ui.MediaDetailsScreen
-import com.otakustream.feature.sources.ui.SectionHeader
 import com.otakustream.feature.sources.ui.SourcesScreen
 import com.otakustream.feature.sources.ui.StremioAccountScreen
 import com.otakustream.feature.tracking.TrackingSettingsScreen
@@ -491,18 +493,19 @@ private fun NavHostController.navigateToDetails(
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsScreen(
     onSourcesClick: () -> Unit,
     onTrackingClick: () -> Unit,
     onStremioAccountClick: () -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        Text(
-            text = "Settings",
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(start = 16.dp, top = 16.dp),
-        )
+    // Same fake-title problem the Library tab had: a Text styled like a title, with its own padding,
+    // instead of the TopAppBar every other screen uses. The scroll container moves inside so the
+    // bar stays put while the list moves under it.
+    Column(modifier = Modifier.fillMaxSize()) {
+        TopAppBar(title = { Text("Settings") })
+        Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         SectionHeader("Content")
         ListItem(
             headlineContent = { Text("Sources") },
@@ -557,6 +560,7 @@ private fun SettingsScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
         )
+        }
     }
 }
 

@@ -34,6 +34,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import com.otakustream.core.database.skip.SkipSegmentType
 import com.otakustream.core.player.PlaybackProgress
@@ -72,14 +75,24 @@ fun PlayerControlsOverlay(
     ) {
         val highlightColor = MaterialTheme.colorScheme.tertiary
         Box(modifier = Modifier.fillMaxWidth()) {
+            val shownPositionMs = (draftPositionMs ?: progress.positionMs.toFloat())
+                .coerceIn(0f, durationMs.toFloat().coerceAtLeast(1f))
             Slider(
-                value = (draftPositionMs ?: progress.positionMs.toFloat()).coerceIn(0f, durationMs.toFloat().coerceAtLeast(1f)),
+                value = shownPositionMs,
                 onValueChange = { draftPositionMs = it },
                 onValueChangeFinished = {
                     draftPositionMs?.let { onSeekTo(it.toLong()) }
                     draftPositionMs = null
                 },
                 valueRange = 0f..durationMs.toFloat().coerceAtLeast(1f),
+                // Unlabelled, this announced a bare percentage — "47 percent" tells you nothing
+                // about where you are in an episode. stateDescription replaces it with the times
+                // the sighted user is reading off the labels underneath.
+                modifier = Modifier.semantics {
+                    contentDescription = "Seek"
+                    stateDescription =
+                        "${formatDurationMs(shownPositionMs.toLong())} of ${formatDurationMs(durationMs)}"
+                },
                 colors = SliderDefaults.colors(
                     thumbColor = MaterialTheme.colorScheme.tertiary,
                     activeTrackColor = MaterialTheme.colorScheme.primary,
