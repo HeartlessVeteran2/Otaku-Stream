@@ -6,6 +6,10 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import com.otakustream.core.ui.CoverImage
+import com.otakustream.feature.sources.SourceFailure
+import com.otakustream.feature.sources.StreamOption
+import com.otakustream.feature.sources.detail
+import java.util.Locale
 import com.otakustream.core.ui.EmptyState
 
 import androidx.compose.foundation.background
@@ -65,7 +69,6 @@ import com.otakustream.core.database.library.LIBRARY_STATUS_COMPLETED
 import com.otakustream.core.database.library.LIBRARY_STATUS_PLANNED
 import com.otakustream.core.database.library.LIBRARY_STATUS_WATCHING
 import com.otakustream.core.database.tracking.toTrackerSeason
-import com.otakustream.core.sources.api.Video
 import com.otakustream.feature.tracking.LinkAniListDialog
 
 // Which link the AniList dialog is being opened to create. A nullable holder rather than a bare
@@ -472,10 +475,15 @@ fun MediaDetailsScreen(
         )
     }
 
-    if (uiState.pendingVideoChoices.isNotEmpty()) {
+    // Open while there is anything to show *or* anything still coming. The second half matters:
+    // the sheet opens on the first stream to arrive, and closing it the instant that list is
+    // momentarily empty would flicker it away between two sources answering.
+    if (uiState.pendingEpisode != null && (uiState.pendingStreams.isNotEmpty() || uiState.sourcesSearching > 0)) {
         StreamPickerSheet(
-            choices = uiState.pendingVideoChoices,
-            onSelect = viewModel::selectVideo,
+            choices = uiState.pendingStreams,
+            searching = uiState.sourcesSearching,
+            failures = uiState.streamFailures,
+            onSelect = viewModel::selectStream,
             onDismiss = viewModel::dismissVideoPicker,
         )
     }
@@ -512,41 +520,128 @@ private fun LibraryStatusRow(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun StreamPickerSheet(choices: List<Video>, onSelect: (Video) -> Unit, onDismiss: () -> Unit) {
+private fun StreamPickerSheet(
+    choices: List<StreamOption>,
+    searching: Int,
+    failures: List<SourceFailure>,
+    onSelect: (StreamOption) -> Unit,
+    onDismiss: () -> Unit,
+) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         LazyColumn(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
             item {
-                Text(text = "Pick a quality", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
+                Column(modifier = Modifier.padding(bottom = 8.dp)) {
+                    Text(text = "Pick a stream", style = MaterialTheme.typography.titleMedium)
+                    // Says the list is still growing, and how much by. Without it, three streams
+                    // from a fast add-on look like the whole answer, and the user takes a 480p
+                    // release while the 1080p is still in flight.
+                    if (searching > 0) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
+                            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
+                            Text(
+                                text = if (searching == 1) "Searching 1 more source…" else "Searching $searching sources…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 8.dp),
+                            )
+                        }
+                    }
+                }
             }
             // ListItem rows, not radio buttons. The radios were hardcoded `selected = false`, and
-            // there was no way to make them ever look selected: selectVideo clears
-            // pendingVideoChoices in the same state update, so the sheet is gone before a selection
+            // there was no way to make them ever look selected: selectStream clears
+            // pendingStreams in the same state update, so the sheet is gone before a selection
             // could render. A radio group promises a persistent choice this sheet does not have —
             // each row is a one-shot action, so it looks like one now.
-            itemsIndexed(choices) { index, video ->
+            itemsIndexed(choices, key = { _, option -> option.video.url }) { index, option ->
                 ListItem(
-                    headlineContent = { Text(text = prettyQuality(video.quality, index)) },
+                    headlineContent = { Text(text = streamHeadline(option, index)) },
+                    // Where it came from and what it costs, which is the whole reason several
+                    // sources are pooled into one list: two 1080p entries are only distinguishable
+                    // by this line.
+                    supportingContent = { Text(text = streamDetail(option)) },
                     // Role.Button: the radios carried a control role for screen readers, and plain
                     // clickable text does not. Button, not RadioButton — these are one-shot actions,
                     // not a persistent choice.
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable(role = Role.Button) { onSelect(video) },
+                        .clickable(role = Role.Button) { onSelect(option) },
                 )
+            }
+            // Kept at the bottom rather than replacing the list. A source failing while three
+            // others succeeded is worth knowing and is not worth interrupting the choice for.
+            if (failures.isNotEmpty()) {
+                item {
+                    Text(
+                        text = failures.detail(),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 12.dp),
+                    )
+                }
             }
         }
     }
 }
 
-// Source quality strings are free-form (often "720p", sometimes a filename or opaque token).
-// Trim/tidy it; fall back to a simple ordinal when it's blank or unhelpfully long.
-private fun prettyQuality(raw: String, index: Int): String {
-    val trimmed = raw.trim()
+// The line the user reads first: resolution if the stream said one, else whatever it called itself.
+//
+// Resolution is put first because it is what "better" means here and because it is the one field
+// that is comparable across sources — every add-on writes its quality string differently, and half
+// of them write a filename.
+private fun streamHeadline(option: StreamOption, index: Int): String {
+    val resolution = option.metadata.resolution?.let { "${it}p" }
+    val group = option.metadata.releaseGroup
     return when {
-        trimmed.isEmpty() || trimmed.length > 40 -> "Stream ${index + 1}"
-        else -> trimmed
+        resolution != null && group != null -> "$resolution · $group"
+        resolution != null -> resolution
+        else -> prettyQuality(option.video.quality, index)
     }
 }
+
+// Source, then size, then seeders — dropping whatever the stream didn't say rather than printing
+// a dash for it. A row that reads "Torrentio" is honest about knowing nothing else; one that reads
+// "Torrentio · — · —" just looks broken.
+private fun streamDetail(option: StreamOption): String = buildList {
+    add(option.sourceName)
+    option.metadata.sizeBytes?.let { add(formatSize(it)) }
+    // Only for torrents. A direct HTTP stream has no seeders and never will, so a blank there is
+    // not missing information.
+    if (option.isTorrent) {
+        option.metadata.seeders?.let { add(if (it == 1) "1 seeder" else "$it seeders") }
+    }
+}.joinToString(" · ")
+
+// Binary units, one decimal place, which is how every indexer that reports a size writes it.
+private fun formatSize(bytes: Long): String {
+    val kib = 1024.0
+    return when {
+        bytes >= kib * kib * kib -> String.format(Locale.US, "%.1f GB", bytes / (kib * kib * kib))
+        bytes >= kib * kib -> String.format(Locale.US, "%.0f MB", bytes / (kib * kib))
+        else -> String.format(Locale.US, "%.0f KB", bytes / kib)
+    }
+}
+
+// Source quality strings are free-form: "720p" from one add-on, an add-on name and a resolution on
+// two lines from another, a whole release filename from a third.
+//
+// The first line, truncated — not an ordinal. "Stream 3" was fine when the list arrived complete
+// and in one order; a pooled list is appended to and re-sorted as each source answers, so an
+// index-derived label renames rows while the user is reading them. The first line is stable and
+// says more: for a Stremio add-on it is the add-on's own name, and for a filename it is the part
+// with the show and episode in it.
+private fun prettyQuality(raw: String, index: Int): String {
+    val firstLine = raw.lineSequence().map { it.trim() }.firstOrNull { it.isNotEmpty() }.orEmpty()
+    return when {
+        firstLine.isEmpty() -> "Stream ${index + 1}"
+        firstLine.length > MAX_QUALITY_LABEL -> firstLine.take(MAX_QUALITY_LABEL - 1).trimEnd() + "…"
+        else -> firstLine
+    }
+}
+
+// Two lines on a phone at the default font scale; past that the row grows and the list stops being
+// scannable, which is the only thing this label is for.
+private const val MAX_QUALITY_LABEL = 48
 
 // Below this, a second pane would be too narrow for either half to be usable — the hero would be
 // letterboxed and episode titles would wrap to three lines. Chosen against the width the screen
