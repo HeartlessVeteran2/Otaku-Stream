@@ -7,6 +7,7 @@ import android.os.Build
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -86,7 +87,14 @@ class AppearancePrefs @Inject constructor(
 
     // A scope of its own because this outlives any screen: the write must finish even if the
     // settings screen that started it is gone by the time the disk gets to it.
-    private val writeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    //
+    // limitedParallelism(1), so the writes are a queue rather than a race. Plain Dispatchers.IO
+    // would run two taps' commits concurrently and let them land in either order — System then
+    // Dark could persist as System while the app showed Dark, and the setting would silently undo
+    // itself on the next launch. That is the same failure the switch to commit() was meant to
+    // remove, so leaving the ordering open would have half-fixed it.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val writeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
 
     fun setThemeMode(mode: ThemeMode) {
         // In-memory first, so the UI turns over on the same frame as the tap. The flow is the only
