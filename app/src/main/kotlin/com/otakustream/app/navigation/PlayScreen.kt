@@ -54,6 +54,8 @@ import com.otakustream.feature.sources.ui.HomeContent
 fun PlayScreen(
     onPlayVideo: (String) -> Unit,
     onBrowseAddons: () -> Unit,
+    onBrowseExtensions: () -> Unit,
+    onOpenSources: () -> Unit,
     onMediaClick: (sourceId: Long, mediaUrl: String, title: String, coverUrl: String?) -> Unit,
     onAniListClick: (mediaId: Long, title: String) -> Unit,
     onAniListSearch: () -> Unit,
@@ -116,10 +118,15 @@ fun PlayScreen(
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Play link")
                 }
-                OutlinedButton(onClick = onBrowseAddons, modifier = Modifier.weight(1f)) {
+                // Sources, not Add-ons. This was the only permanent "get more to watch"
+                // affordance on the Play tab and it went straight to the Stremio directory — so
+                // the app's most visible answer to "where do sources come from" never mentioned
+                // that JavaScript extensions exist. The Sources screen lists both directories plus
+                // what is already installed, which is the question this button is actually asked.
+                OutlinedButton(onClick = onOpenSources, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Filled.Extension, contentDescription = null)
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Add-ons")
+                    Text("Sources")
                 }
             }
 
@@ -127,6 +134,7 @@ fun PlayScreen(
                 onMediaClick = onMediaClick,
                 onPlayDirect = onPlayVideo,
                 onBrowseAddons = onBrowseAddons,
+                onBrowseExtensions = onBrowseExtensions,
                 onAniListClick = onAniListClick,
                 onSeeSchedule = onSeeSchedule,
             )

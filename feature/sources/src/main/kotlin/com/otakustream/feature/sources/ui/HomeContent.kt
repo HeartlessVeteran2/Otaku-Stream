@@ -14,7 +14,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -30,7 +29,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.database.library.DIRECT_PLAY_SOURCE_ID
 import com.otakustream.core.database.library.WatchHistoryEntry
-import com.otakustream.core.ui.EmptyState
 import com.otakustream.core.ui.PosterTile
 import com.otakustream.feature.tracking.AniListListEntry
 import com.otakustream.feature.tracking.AniListMedia
@@ -46,6 +44,7 @@ fun HomeContent(
     onMediaClick: (sourceId: Long, mediaUrl: String, title: String, coverUrl: String?) -> Unit,
     onPlayDirect: (url: String) -> Unit,
     onBrowseAddons: () -> Unit,
+    onBrowseExtensions: () -> Unit,
     onAniListClick: (mediaId: Long, title: String) -> Unit,
     onSeeSchedule: () -> Unit,
     modifier: Modifier = Modifier,
@@ -69,6 +68,23 @@ fun HomeContent(
     // scrolled to. Each rail is one item with its header, so a header can never be stranded on
     // screen without its row.
     LazyColumn(modifier = modifier.fillMaxSize()) {
+        // First item, above everything, and shown whatever else is on screen.
+        //
+        // It used to be emitted after the AniList rails — about 660dp of posters down, off the
+        // bottom of every phone — and suppressed entirely when Continue Watching had anything in
+        // it, so a user with watch history and no sources never saw it at all. Both are the same
+        // mistake: the rails above it are AniList metadata that renders perfectly with zero sources
+        // installed, so the app looks finished until you tap something and nothing can play it.
+        // Having history makes that *more* likely to confuse, not less.
+        if (!uiState.hasAnySources && uiState.hasLoadedOnce) {
+            item(key = "no-sources") {
+                NoSourcesBanner(
+                    onBrowseAddons = onBrowseAddons,
+                    onBrowseExtensions = onBrowseExtensions,
+                )
+            }
+        }
+
         // Leads the screen, above Continue Watching, because it answers the question someone opens
         // a seasonal-anime app to ask: has anything I follow dropped? Continue Watching lists
         // everything in progress whether or not there is a new episode, so on its own it cannot
@@ -159,19 +175,8 @@ fun HomeContent(
         }
 
         when {
-            !uiState.hasAnySources && uiState.hasLoadedOnce -> {
-                if (continueWatching.isEmpty()) {
-                    item(key = "no-sources") {
-                        EmptyState(
-                            icon = Icons.Filled.Extension,
-                            title = "Nothing here yet",
-                            message = "Install an add-on to fill your home with things to watch.",
-                            actionLabel = "Browse add-ons",
-                            onAction = onBrowseAddons,
-                        )
-                    }
-                }
-            }
+            // The no-sources case is handled at the top of the list, not here — see the banner above.
+            !uiState.hasAnySources && uiState.hasLoadedOnce -> Unit
             uiState.isLoading && !uiState.hasLoadedOnce -> {
                 item(key = "sources-loading") {
                     Box(

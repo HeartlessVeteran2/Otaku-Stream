@@ -305,6 +305,8 @@ fun AppNavHost(
                 PlayScreen(
                     onPlayVideo = { url -> navController.navigate("player?videoUrl=${Uri.encode(url)}") },
                     onBrowseAddons = { navController.navigate(ROUTE_BROWSE_STREMIO) },
+                    onBrowseExtensions = { navController.navigate(ROUTE_ANYMEX_EXTENSIONS) },
+                    onOpenSources = { navController.navigate(ROUTE_SOURCES) },
                     onMediaClick = { sourceId, mediaUrl, title, coverUrl ->
                         navController.navigateToDetails(sourceId, mediaUrl, title, coverUrl)
                     },
@@ -320,6 +322,7 @@ fun AppNavHost(
                     },
                     onManageSourcesClick = { navController.navigate(ROUTE_SOURCES) },
                     onBrowseAddons = { navController.navigate(ROUTE_BROWSE_STREMIO) },
+                    onBrowseExtensions = { navController.navigate(ROUTE_ANYMEX_EXTENSIONS) },
                 )
             }
             composable(ROUTE_LIBRARY) {
