@@ -64,6 +64,9 @@ data class StremioStream(
     val infoHash: String?,
     val fileIdx: Int?,
     val name: String?,
+    // The add-on's second line about this release: filename, size, seeder count, indexer. The
+    // protocol renamed this field from `title` to `description`, and add-ons did not all follow —
+    // Torrentio, the one that matters most here, still writes `title` — so both are read.
     val description: String?,
     val trackers: List<String> = emptyList(),
 )
@@ -197,7 +200,10 @@ fun parseStreamResponse(json: String): StremioStreamResponse {
             infoHash = entry.stringOrNull("infoHash"),
             fileIdx = entry.intOrNull("fileIdx"),
             name = entry.stringOrNull("name"),
-            description = entry.stringOrNull("description"),
+            // `description` is the current field name and `title` the one it replaced. Preferring
+            // the new one means an add-on that sets both (some set `title` for old clients) is read
+            // the way it intends.
+            description = entry.stringOrNull("description") ?: entry.stringOrNull("title"),
             trackers = entry.parseTrackerSources(),
         )
     }
