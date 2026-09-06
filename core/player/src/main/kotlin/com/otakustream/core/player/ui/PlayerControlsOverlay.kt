@@ -1,5 +1,8 @@
 package com.otakustream.core.player.ui
 
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -70,6 +73,21 @@ fun PlayerControlsOverlay(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            // Any press anywhere on the controls restarts the auto-hide countdown.
+            //
+            // Wiring onInteraction into individual handlers covered the scrubber and the play
+            // button and missed the rest — the track sheet, the segment-marking buttons, and
+            // trailingControls, which is a lambda the caller supplies and this file cannot reach
+            // into at all. Observing the press instead covers every control, present and future.
+            //
+            // requireUnconsumed = false and nothing consumed here: this only watches, so the
+            // buttons and the slider underneath still receive the same gesture.
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    onInteraction()
+                }
+            }
             .background(
                 // Black, not colorScheme.background: this sits over video and the player is
                 // always rendered in the dark scheme, so naming the colour is more honest than

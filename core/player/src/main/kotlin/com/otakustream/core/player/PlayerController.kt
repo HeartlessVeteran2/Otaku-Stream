@@ -503,6 +503,16 @@ class PlayerController @Inject constructor(
         // video on disposal), and the foreground-service flag had been reset. The refusal has no
         // reason to be late: isUsable is a synchronous property read.
         if (TorrentUri.isTorrentUrl(url) && !torrentEngine.isUsable) {
+            // Recorded even though nothing will play, so Retry has something to retry.
+            //
+            // Refusing before any state is mutated is right, but it left currentMediaUrl unset on
+            // the very first play of a session — and retryCurrent() reads exactly that, so the
+            // Retry button under "Torrent playback is turned off" did nothing at all. Turning the
+            // setting on and pressing Retry is the obvious next move, and it has to work.
+            //
+            // Only this field: the session and chain stay where they are, so a screen holding the
+            // previous chain still owns whatever is genuinely playing.
+            currentMediaUrl = url
             _uiState.value = _uiState.value.copy(
                 error = torrentRefusalMessage(
                     isAvailable = torrentEngine.isAvailable,
