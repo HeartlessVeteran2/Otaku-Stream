@@ -208,7 +208,7 @@ private fun DetailContent(
 
             if (media.relations.isNotEmpty()) {
                 RailHeading("Related")
-                LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp)) {
+                LazyRow(contentPadding = RailPadding, horizontalArrangement = RailSpacing) {
                     items(media.relations, key = { "rel-${it.media.id}" }) { relation ->
                         AniListPosterTile(
                             title = relation.media.displayTitle,
@@ -223,7 +223,7 @@ private fun DetailContent(
 
             if (media.recommendations.isNotEmpty()) {
                 RailHeading("Recommended")
-                LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp)) {
+                LazyRow(contentPadding = RailPadding, horizontalArrangement = RailSpacing) {
                     items(media.recommendations, key = { "rec-${it.id}" }) { rec ->
                         AniListPosterTile(
                             title = rec.displayTitle,

@@ -3,6 +3,7 @@ package com.otakustream.feature.sources.ui
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -25,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.ui.BackTopBar
 import com.otakustream.core.ui.LoadingState
+import com.otakustream.core.ui.PosterTile
 
 // Search AniList's catalog directly, then open a title's AniList detail (and Watch from there).
 @OptIn(ExperimentalMaterial3Api::class)
@@ -72,16 +74,23 @@ fun AniListSearchScreen(
                 uiState.results.isEmpty() -> CenterMessage(
                     "No results for “${uiState.query}”. Try another spelling.",
                 )
+                // The shared tile directly, not the rail wrapper: a grid cell decides its own
+                // width, and a tile that forces a rail's 120dp inside a 110dp cell is fighting the
+                // layout it is in. The grid owns the spacing too, which is what stopped the tiles
+                // touching once they no longer padded themselves.
                 else -> LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 110.dp),
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                    modifier = Modifier.fillMaxSize(),
                 ) {
                     items(uiState.results, key = { it.id }) { media ->
-                        AniListPosterTile(
+                        PosterTile(
                             title = media.displayTitle,
                             coverUrl = media.coverImageUrl,
-                            subtitle = null,
                             onClick = { onOpenAniList(media.id, media.displayTitle) },
+                            modifier = Modifier.fillMaxWidth(),
                         )
                     }
                 }
