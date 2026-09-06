@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.otakustream.core.player.PlayerUiState
 import com.otakustream.core.player.TrackInfo
@@ -67,7 +68,9 @@ fun TrackSelectionSheet(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(onClick = onLoadSubtitleFile)
+                    // Role.Button: these are clickable Rows, so without it a screen reader
+                    // announces the text and gives no indication it can be activated.
+                    .clickable(onClick = onLoadSubtitleFile, role = Role.Button)
                     .padding(vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -78,7 +81,9 @@ fun TrackSelectionSheet(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(onClick = onOpenSubtitleStyle)
+                    // Role.Button: these are clickable Rows, so without it a screen reader
+                    // announces the text and gives no indication it can be activated.
+                    .clickable(onClick = onOpenSubtitleStyle, role = Role.Button)
                     .padding(vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {

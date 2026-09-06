@@ -1,20 +1,19 @@
 package com.otakustream.feature.sources.ui
 
-import com.otakustream.core.ui.CoverImage
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import com.otakustream.core.ui.EmptyState
-import com.otakustream.core.ui.posterScrim
+import com.otakustream.core.ui.PosterTile
 import com.otakustream.feature.sources.SourceFailure
 import com.otakustream.feature.sources.allOffline
 import com.otakustream.feature.sources.describe
 import com.otakustream.feature.sources.headline
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -55,14 +54,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -324,21 +320,14 @@ private fun MediaCard(
     onToggleSave: () -> Unit,
     onClick: () -> Unit,
 ) {
-    val shape = MaterialTheme.shapes.medium
-    Box(
-        modifier = Modifier
-            .padding(8.dp)
-            .fillMaxWidth()
-            .aspectRatio(2f / 3f)
-            .clip(shape)
-            .border(1.dp, MaterialTheme.colorScheme.outline, shape)
-            .clickable(onClick = onClick),
+    PosterTile(
+        title = title,
+        coverUrl = coverUrl,
+        onClick = onClick,
+        // A grid cell is wider than a rail tile, so the caption gets the larger body size.
+        titleStyle = MaterialTheme.typography.bodyMedium,
+        modifier = Modifier.padding(8.dp).fillMaxWidth(),
     ) {
-        CoverImage(
-            url = coverUrl,
-            contentDescription = title,
-            modifier = Modifier.fillMaxSize(),
-        )
         // Quick save/remove without opening the details page; the filled bookmark is the confirmation.
         Surface(
             color = MaterialTheme.colorScheme.background.copy(alpha = 0.5f),
@@ -373,21 +362,6 @@ private fun MediaCard(
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                 )
             }
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.BottomCenter)
-                .background(posterScrim())
-                .padding(8.dp),
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onBackground,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
     }
 }

@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import com.otakustream.core.ui.BackTopBar
 import com.otakustream.core.ui.CoverImage
 import com.otakustream.feature.sources.SourceFailure
 import com.otakustream.feature.sources.StreamOption
