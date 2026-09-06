@@ -138,7 +138,11 @@ class CatalogViewModel @Inject constructor(
             if (entry.media.url in _uiState.value.savedMediaUrls) {
                 libraryRepository.remove(entry.media.url)
             } else {
-                libraryRepository.add(
+                // addIfAbsent for the same reason as MediaDetailsViewModel.toggleWatchlist:
+                // savedMediaUrls is collected asynchronously, so a tap can reach a whole-row
+                // @Upsert that resets an existing entry's status and added-at. Saving from a grid
+                // must never be able to demote a title the user already finished.
+                libraryRepository.addIfAbsent(
                     LibraryEntry(
                         mediaUrl = entry.media.url,
                         sourceId = entry.sourceId,

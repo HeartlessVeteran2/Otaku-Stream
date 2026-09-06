@@ -2,8 +2,8 @@ package com.otakustream.feature.tracking
 
 import android.util.Log
 import com.otakustream.core.database.tracking.toTrackerSeason
+import com.otakustream.core.sources.api.UiMessages
 import com.otakustream.core.database.tracking.TrackingRepository
-import kotlinx.coroutines.CancellationException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -38,7 +38,7 @@ class TrackingManager @Inject constructor(
         val token = trackingRepository.getToken() ?: return
         val link = trackingRepository.getLink(mediaUrl, season.toTrackerSeason()) ?: return
         val episode = episodeNumber.toWholeEpisodeOrNull() ?: return
-        runCatching {
+        sync("AniList progress update") {
             val current = aniListClient.fetchViewerListEntry(token, link.trackerMediaId)
             val update = decideProgressUpdate(current?.status, current?.progress ?: 0, episode)
             if (update != null) {
@@ -49,9 +49,6 @@ class TrackingManager @Inject constructor(
                     progress = update.progress,
                 )
             }
-        }.onFailure {
-            if (it is CancellationException) throw it
-            Log.w(TAG, "AniList progress update failed", it)
         }
     }
 
@@ -60,21 +57,50 @@ class TrackingManager @Inject constructor(
     // new bucket up — Plan↔PLANNING, Watching↔CURRENT, Completed↔COMPLETED. Unlinked titles never
     // force-create an AniList entry, and a finished entry is never silently downgraded (see
     // decideStatusMirror), so this can't erase a completion.
-    suspend fun onLibraryStatusChanged(mediaUrl: String, localStatus: String) {
+    // `season` resolves which AniList entry the new status lands on, exactly as onEpisodeWatched
+    // already did — the season's own link when one exists, the whole-series link otherwise.
+    //
+    // It used to call getLink(mediaUrl) with no season, and the resolution query reads
+    // `season IN (:season, 0)`, so passing the whole-series sentinel matched *only* the
+    // whole-series link. A show linked per-season therefore resolved to null here and returned
+    // early: watching its episodes updated AniList, and marking it Completed did nothing at all.
+    // Two paths, the same title, opposite outcomes, no error either way.
+    //
+    // Callers with no season concept — the Library screen, where status is per-title — pass
+    // nothing and land on the whole-series link, which is what they were getting before.
+    suspend fun onLibraryStatusChanged(mediaUrl: String, localStatus: String, season: Int? = null) {
         val token = trackingRepository.getToken() ?: return
-        val link = trackingRepository.getLink(mediaUrl) ?: return
+        val link = trackingRepository.getLink(mediaUrl, season.toTrackerSeason()) ?: return
         val desired = libraryStatusToAniList(localStatus) ?: return
-        runCatching {
+        sync("AniList status mirror") {
             val current = aniListClient.fetchViewerListEntry(token, link.trackerMediaId)
-            val status = decideStatusMirror(current?.status, desired) ?: return@runCatching
+            val status = decideStatusMirror(current?.status, desired) ?: return@sync
             aniListClient.saveMediaListEntry(
                 token = token,
                 mediaId = link.trackerMediaId,
                 status = status,
             )
-        }.onFailure {
-            if (it is CancellationException) throw it
-            Log.w(TAG, "AniList status mirror failed", it)
+        }
+    }
+
+    // One place where a background sync failure is decided on, because there are two callers and
+    // they were drifting: both logged and dropped everything, including a rejected token.
+    //
+    // A dead credential is not a transient failure and must not be retried forever in silence. The
+    // app clears it, which is the only honest thing it can do — Settings stops claiming to be
+    // signed in and offers to sign in again — and says so, because a sign-out the user did not ask
+    // for is exactly the kind of change that has to be announced rather than discovered.
+    private suspend fun sync(what: String, block: suspend () -> Unit) {
+        runCatching { block() }.onFailure { failure ->
+            when (syncFailureAction(failure)) {
+                SyncFailureAction.Rethrow -> throw failure
+                SyncFailureAction.SignOut -> {
+                    Log.w(TAG, "$what: AniList rejected the token; signing out", failure)
+                    trackingRepository.clearToken()
+                    UiMessages.show("Your AniList sign-in expired. Sign in again in Settings to resume syncing.")
+                }
+                SyncFailureAction.LogAndIgnore -> Log.w(TAG, "$what failed", failure)
+            }
         }
     }
 }

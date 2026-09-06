@@ -60,6 +60,9 @@ android {
 dependencies {
     implementation(project(":core:ui"))
     api(project(":core:database"))
+    // UiMessages — the app-wide snackbar sink. Background sync has no screen of its own to put a
+    // message on, and being signed out of AniList without being told is worse than being told.
+    implementation(project(":core:sources-api"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

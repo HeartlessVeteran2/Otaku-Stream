@@ -73,9 +73,14 @@ class StremioAccountViewModel @Inject constructor(
     }
 
     fun logout() {
-        accountStore.clear()
+        // The screen clears on this frame: accountStore.clear() drops its in-memory state before
+        // suspending, and the durable wipe runs on the store's own scope, so leaving the screen
+        // straight after tapping this can't strand the authKey on disk.
         _uiState.value = _uiState.value.copy(library = emptyList(), message = null, error = null)
-        UiMessages.show("Signed out of Stremio")
+        viewModelScope.launch {
+            accountStore.clear()
+            UiMessages.show("Signed out of Stremio")
+        }
     }
 
     fun refreshLibrary() {

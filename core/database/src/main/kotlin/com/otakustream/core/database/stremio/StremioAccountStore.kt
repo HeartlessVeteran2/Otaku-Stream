@@ -52,10 +52,30 @@ class StremioAccountStore @Inject constructor(
         _authKey.value = authKey
     }
 
-    fun clear() {
-        runCatching { prefs?.edit()?.remove(KEY_AUTH)?.remove(KEY_EMAIL)?.apply() }
+    // suspend, and commit() rather than apply(), because this is a credential revocation.
+    //
+    // apply() returns before the write reaches disk. A process death in that window — and the
+    // window is wide, since nothing forces the flush until the next lifecycle transition — brings
+    // the app back with the credential still on file, and the init block above reads it straight
+    // back in. A sign-out that silently un-signs-out is the one failure mode this store exists to
+    // prevent, and AppearancePrefs already makes exactly this argument for a theme mode; a revoked
+    // bearer token is the stronger case.
+    //
+    // In-memory state is dropped first, so the flow turns over on this frame and nothing can use
+    // the credential while the disk write is in flight. The write runs on this store's own scope
+    // rather than the caller's, so it survives the caller being cancelled — the user navigating
+    // away the instant they tap sign out — and is joined so a caller that wants to know it landed
+    // can wait for it.
+    //
+    // save() deliberately stays on apply(): losing a token that was just written costs a sign-in,
+    // not a leaked credential, and it is on a path that would have to become suspend to gain
+    // nothing.
+    suspend fun clear() {
         email = null
         _authKey.value = null
+        ioScope.launch {
+            runCatching { prefs?.edit()?.remove(KEY_AUTH)?.remove(KEY_EMAIL)?.commit() }
+        }.join()
     }
 
     companion object {

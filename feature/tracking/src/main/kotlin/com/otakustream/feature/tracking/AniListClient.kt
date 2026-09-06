@@ -291,6 +291,7 @@ class AniListClient @Inject constructor(
             if (!response.isSuccessful) {
                 // Body may be non-JSON (proxy/HTML error page) — never let a parse failure mask the HTTP code.
                 val message = runCatching { parseErrorMessage(JSONObject(text)) }.getOrNull()
+                if (isTokenRejection(token, response.code, message)) throw AniListUnauthorizedException()
                 error(message ?: "AniList request failed: HTTP ${response.code}")
             }
             // A 200 can still carry a non-JSON body (captive portal / Cloudflare HTML) — parse
@@ -299,7 +300,9 @@ class AniListClient @Inject constructor(
                 error("AniList returned an unexpected response (HTTP ${response.code}).")
             }
             if (root.has("errors")) {
-                error(parseErrorMessage(root) ?: "AniList request failed")
+                val message = parseErrorMessage(root)
+                if (isTokenRejection(token, response.code, message)) throw AniListUnauthorizedException()
+                error(message ?: "AniList request failed")
             }
             return root.optJSONObject("data")
                 ?: error("AniList returned no data (HTTP ${response.code}).")
