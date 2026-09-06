@@ -150,6 +150,13 @@ class TorrentEngine @Inject constructor(
     val isUsable: Boolean
         get() = isAvailable && settings.enabled && (!settings.unmeteredOnly || isUnmetered())
 
+    // The three inputs to isUsable, exposed separately so a caller that has to refuse a torrent can
+    // say *which* of them refused it. "Torrent playback is turned off" and "this connection is
+    // metered" need different actions from the user, and a single boolean cannot tell them apart.
+    val torrentsEnabled: Boolean get() = settings.enabled
+    val unmeteredOnly: Boolean get() = settings.unmeteredOnly
+    val isOnUnmeteredNetwork: Boolean get() = isUnmetered()
+
     private fun isUnmetered(): Boolean {
         val manager = appContext.getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
             as? android.net.ConnectivityManager ?: return false

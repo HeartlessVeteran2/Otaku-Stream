@@ -279,7 +279,20 @@ fun AppNavHost(
             // consumeWindowInsets: this padding already applies the system-bar insets, so inner
             // Scaffolds/TopAppBars must not re-apply them — without it every screen with its own
             // top bar gets a status-bar-height empty band above the bar.
-            modifier = Modifier.padding(padding).consumeWindowInsets(padding),
+            // The player is exempt from the Scaffold's inset padding; everything else keeps it.
+            //
+            // That padding is the status bar plus the navigation bar, so the video was framed by a
+            // band top and bottom — and because the enclosing Surface paints the *app* theme's
+            // background while the player forces dark inside, a light-theme user got white bars
+            // around a black video. In landscape the gesture-nav inset ate usable width as well.
+            //
+            // consumeWindowInsets stays on the padded branch for the same reason it was added:
+            // screens with their own TopAppBar must not re-apply insets the Scaffold already has.
+            modifier = if (currentRoute == ROUTE_PLAYER) {
+                Modifier
+            } else {
+                Modifier.padding(padding).consumeWindowInsets(padding)
+            },
             // Subtle forward/back motion instead of the default hard cross-fade: pushes slide in
             // from the right, pops slide back out. Tab switches read as pushes too, which is
             // acceptable — a per-destination split isn't worth the ceremony here.

@@ -133,8 +133,10 @@ fun PlayerControlsOverlay(
                 modifier = Modifier.size(56.dp).background(MaterialTheme.colorScheme.primary, CircleShape),
             ) {
                 Icon(
-                    imageVector = if (uiState.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    contentDescription = if (uiState.isPlaying) "Pause" else "Play",
+                    // playWhenReady, not isPlaying — see the comment on the field. The button
+                    // toggles playWhenReady, so it has to show the state of the thing it toggles.
+                    imageVector = if (uiState.playWhenReady) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = if (uiState.playWhenReady) "Pause" else "Play",
                     tint = MaterialTheme.colorScheme.onPrimary,
                 )
             }

@@ -4,7 +4,12 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.view.ContextThemeWrapper
+import android.view.WindowManager
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import android.content.Intent
+import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -38,6 +43,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -67,6 +73,10 @@ import com.otakustream.core.player.PlayerViewModel
 import com.otakustream.core.player.ResizeMode
 import com.otakustream.core.player.SubtitleEdgeStyle
 import com.otakustream.core.player.SubtitleStyle
+
+// Long enough to read the scrubber and reach for a button, short enough that the video is not
+// framed by chrome for the whole episode. Matches the ~3s every other player uses.
+private const val CONTROLS_AUTO_HIDE_MS = 3_000L
 
 private const val PLAYER_SCREEN_TAG = "PlayerScreen"
 
@@ -103,6 +113,9 @@ fun PlayerScreen(
         viewModel.loadSubtitleFile(uri.toString(), displayName)
     }
     var controlsVisible by remember { mutableStateOf(true) }
+    // Bumped whenever the controls should stay up a while longer: showing them, or interacting with
+    // them. The auto-hide effect keys on it, so each bump restarts the countdown.
+    var controlsShownAt by remember { mutableLongStateOf(0L) }
     // Last values pushed into the PlayerView, so AndroidView's update lambda can skip no-op work.
     var lastAppliedResizeMode by remember { mutableStateOf<Int?>(null) }
     var lastAppliedSubtitleStyle by remember { mutableStateOf<SubtitleStyle?>(null) }
@@ -202,13 +215,15 @@ fun PlayerScreen(
         ActivityResultContracts.RequestPermission(),
     ) { /* granted or not, playback proceeds — the notification simply won't show if denied */ }
 
-    // The playback this screen started. Held so its cleanup stops that video and no other — see
-    // PlayerController.stop.
-    var playbackSession by remember { mutableStateOf<Long?>(null) }
+    // The playback *chain* this screen started. Held so its cleanup stops that chain and no other —
+    // see PlayerController.stop. A chain, not a session: auto-play advances the media in place
+    // without changing videoUrl, so the effect below runs exactly once and a per-media token would
+    // be stale from the second episode onward.
+    var playbackChain by remember { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(videoUrl) {
         viewModel.play(videoUrl, fromSource)
-        playbackSession = viewModel.controller.currentPlaybackSession
+        playbackChain = viewModel.controller.currentPlaybackChain
         // Bring the Cast session listener online so the route button reflects device availability.
         viewModel.warmUpCast()
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
@@ -220,6 +235,61 @@ fun PlayerScreen(
                 notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
             }
         }
+    }
+
+    // Immersive while the player is on screen.
+    //
+    // Without this the clock, battery and notification icons sat over the video for the whole
+    // episode and the navigation bar took a strip off the bottom — on a 24-minute episode that is
+    // 24 minutes of somebody else's chrome on top of the thing you came to watch.
+    //
+    // BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE so a swipe from an edge still brings them back briefly
+    // rather than being swallowed; the bars re-hide themselves. Restored on dispose, because these
+    // are window-level flags and leaving them set would hide the status bar on every other screen.
+    DisposableEffect(activity) {
+        val window = activity?.window
+        val controller = window?.let { WindowCompat.getInsetsController(it, it.decorView) }
+        controller?.apply {
+            systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            hide(WindowInsetsCompat.Type.systemBars())
+        }
+        onDispose { controller?.show(WindowInsetsCompat.Type.systemBars()) }
+    }
+
+    // Keep the screen awake while a video is actually playing.
+    //
+    // Media3's PlayerView does not do this — it exposes nothing screen-related, and the app never
+    // set the flag — so watching a 24-minute episode without touching the phone meant the display
+    // dimmed and locked at the system timeout, every time. Held on the window rather than a
+    // wakelock so it needs no permission and cannot outlive the screen, and cleared whenever
+    // playback stops so a paused episode left on screen doesn't keep the display burning.
+    //
+    // Keyed on playWhenReady rather than isPlaying: buffering a torrent for a minute is exactly
+    // when the user is not touching the phone, and letting the screen die there is the worst
+    // moment for it.
+    val keepScreenOn = uiState.playWhenReady
+    DisposableEffect(activity, keepScreenOn) {
+        val window = activity?.window
+        if (keepScreenOn) {
+            window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose { window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+    }
+
+    // Auto-hide the controls, the way every video player does.
+    //
+    // They opened visible and the only thing that ever changed that was a tap, so every episode
+    // started under the scrubber, the play button, the speed picker and a gradient across the
+    // bottom third of the screen — and stayed there until you remembered to dismiss it.
+    //
+    // Held open while paused: controls you cannot see are no use when you have deliberately
+    // stopped, and this is also what keeps them up while a sheet is open over them.
+    LaunchedEffect(controlsVisible, controlsShownAt, uiState.playWhenReady) {
+        if (!controlsVisible || !uiState.playWhenReady) return@LaunchedEffect
+        delay(CONTROLS_AUTO_HIDE_MS)
+        controlsVisible = false
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -256,7 +326,7 @@ fun PlayerScreen(
     // controller refuses a stop for a session it has already moved past, so both orderings end the
     // same way.
     DisposableEffect(Unit) {
-        onDispose { playbackSession?.let { viewModel.controller.stop(it) } }
+        onDispose { playbackChain?.let { viewModel.controller.stop(it) } }
     }
 
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
@@ -318,7 +388,10 @@ fun PlayerScreen(
                         ?: (UNKNOWN_BRIGHTNESS + bankedBrightnessDelta).coerceIn(MIN_BRIGHTNESS, 1f)
                 },
                 doubleTapSeekMs = uiState.seekDurationMs,
-                onTap = { controlsVisible = !controlsVisible },
+                onTap = {
+                    controlsVisible = !controlsVisible
+                    if (controlsVisible) controlsShownAt = SystemClock.elapsedRealtime()
+                },
                 onLongPressSpeedStart = viewModel::beginSpeedBoost,
                 onLongPressSpeedEnd = viewModel::endSpeedBoost,
             )
@@ -369,7 +442,7 @@ fun PlayerScreen(
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
             }
 
-            uiState.error?.let {
+            uiState.error?.let { errorMessage ->
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.align(Alignment.Center).padding(32.dp),
@@ -385,8 +458,16 @@ fun PlayerScreen(
                         color = Color.White,
                         style = MaterialTheme.typography.titleMedium,
                     )
+                    // The message, not a generic sentence about it.
+                    //
+                    // Every one of these was already being computed and thrown away: the torrent
+                    // engine being unavailable on a 32-bit device, a torrent containing no playable
+                    // video, a piece timing out, a blocked file:// url and its reason, and the
+                    // underlying PlaybackException. All five rendered as the same line, so a stalled
+                    // swarm and an unsupported codec were indistinguishable and neither told you
+                    // what to do next.
                     Text(
-                        text = "This video couldn't be played. It may be unavailable or in an unsupported format.",
+                        text = errorMessage,
                         color = Color.White,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(top = 4.dp),
@@ -395,8 +476,9 @@ fun PlayerScreen(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.padding(top = 16.dp),
                     ) {
-                        // play() clears the error and re-prepares the same URL from the last position.
-                        Button(onClick = { viewModel.play(videoUrl) }) { Text("Retry") }
+                        // retryCurrent(), not play(videoUrl): videoUrl is the episode this screen
+                        // was opened on, and auto-play has very likely moved past it.
+                        Button(onClick = { viewModel.retryCurrent() }) { Text("Retry") }
                         OutlinedButton(onClick = onBack) { Text("Go back") }
                     }
                 }
