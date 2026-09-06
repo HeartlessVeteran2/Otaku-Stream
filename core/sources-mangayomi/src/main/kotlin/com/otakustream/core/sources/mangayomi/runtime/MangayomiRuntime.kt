@@ -15,6 +15,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.Closeable
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 // One QuickJS engine per installed extension. QuickJS is strictly single-threaded — the wrapper
 // enforces that every context call happens on the thread that created it (checkSameThread) — so
@@ -25,7 +26,7 @@ import java.util.concurrent.Executors
 // `evaluate` (QuickJS drains the promise job queue before evaluate returns).
 class MangayomiRuntime(
     private val extensionSource: String,
-    private val httpClient: OkHttpClient,
+    httpClient: OkHttpClient,
     // Resolved per-source preference values as a JSON object (getSourcePreferences key -> value),
     // fed back to the extension via getPreference()/__pref_get. Null = no stored preferences.
     prefsJson: String? = null,
@@ -35,11 +36,33 @@ class MangayomiRuntime(
         Thread(runnable, "mangayomi-js").apply { isDaemon = true }
     }
     private val engineDispatcher: ExecutorCoroutineDispatcher = executor.asCoroutineDispatcher()
+    // The shared client with a shorter leash, sharing its connection pool and dispatcher.
+    //
+    // Every extension call runs on this runtime's single executor thread, and this fetch is
+    // blocking, so an unresponsive host occupies that thread for the whole call — and every later
+    // call to the same extension queues behind it. At the app-wide 60-second call timeout, one dead
+    // host made an extension look broken for a minute at a time; there is no interrupt hook in this
+    // QuickJS wrapper, so bounding the call is the only lever there is.
+    private val scriptClient: OkHttpClient = httpClient.newBuilder()
+        .callTimeout(EXTENSION_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .build()
+
     private val dom = JsoupBridge()
     private val prefs: JSONObject? = prefsJson?.let { runCatching { JSONObject(it) }.getOrNull() }
 
     private var context: QuickJSContext? = null
     private var started = false
+
+    // Set before the native context is destroyed, and checked on the way in to every engine call.
+    //
+    // close() only queues context.destroy() onto the executor and shuts it down; calls that had not
+    // been dispatched yet are then rejected, and ExecutorCoroutineDispatcher reroutes a rejected
+    // task to the default executor — where ensureStarted() sees started == true and evaluates
+    // against a destroyed native context, from the wrong thread. Reachable by uninstalling an
+    // extension, or saving its preferences, while a search is in flight; the failure mode is a
+    // native crash rather than an exception.
+    @Volatile
+    private var closed = false
 
     // Filled by the __om_deliver bridge during an invoke; read back right after evaluate returns.
     private var deliverSet = false
@@ -48,11 +71,15 @@ class MangayomiRuntime(
 
     // Forces engine bringup (parse + instantiate the extension) now, so a malformed extension
     // fails at install/bootstrap time rather than on first catalog load. Idempotent.
-    suspend fun ensureLoaded() = withContext(engineDispatcher) { ensureStarted() }
+    suspend fun ensureLoaded() = withContext(engineDispatcher) {
+        checkOpen()
+        ensureStarted()
+    }
 
     // Reads a global set by the extension source, e.g. the `mangayomiSources` metadata array.
     // Returns the JSON string, or null if absent/unset.
     suspend fun readGlobalJson(expression: String): String? = withContext(engineDispatcher) {
+        checkOpen()
         ensureStarted()
         val script = "(function(){try{return JSON.stringify($expression);}catch(e){return null;}})()"
         context!!.evaluate(script) as? String
@@ -62,6 +89,7 @@ class MangayomiRuntime(
     // Returns the JSON string the method resolved to (may be the literal "null"); throws on a
     // thrown/rejected extension error.
     suspend fun invoke(method: String, args: List<Any?>): String? = withContext(engineDispatcher) {
+        checkOpen()
         ensureStarted()
         val ctx = context!!
         val argsJson = JSONArray()
@@ -180,7 +208,7 @@ class MangayomiRuntime(
             "GET" -> builder.get()
             else -> builder.method(method, requestBody)
         }
-        httpClient.newCall(builder.build()).execute().use { response ->
+        scriptClient.newCall(builder.build()).execute().use { response ->
             val out = JSONObject()
             out.put("status", response.code)
             out.put("url", response.request.url.toString())
@@ -194,7 +222,16 @@ class MangayomiRuntime(
         JSONObject().put("error", e.message ?: e.toString()).toString()
     }
 
+    // Refuses an engine call once close() has begun, rather than letting it reach a destroyed
+    // native context on whatever thread the rejected task was rerouted to.
+    private fun checkOpen() {
+        if (closed) error("This extension has been uninstalled or reloaded.")
+    }
+
     override fun close() {
+        // Before anything is torn down, so a call that has not been dispatched yet fails cleanly
+        // instead of racing the destroy.
+        closed = true
         runCatching {
             executor.execute { runCatching { context?.destroy() } }
             executor.shutdown()
@@ -211,3 +248,6 @@ class MangayomiRuntime(
         val BODY_REQUIRED_METHODS = setOf("POST", "PUT", "PATCH")
     }
 }
+
+// Bounds how long a single in-extension fetch can occupy its runtime's one thread.
+private const val EXTENSION_CALL_TIMEOUT_SECONDS = 20L

@@ -16,6 +16,10 @@ interface MangayomiSourceDao {
     @Upsert
     suspend fun upsert(entity: MangayomiSourceEntity)
 
+    // Just the preferences column, for the re-install path that must not clobber it.
+    @Query("SELECT prefsJson FROM mangayomi_sources WHERE id = :id")
+    suspend fun getPrefs(id: Long): String?
+
     @Query("UPDATE mangayomi_sources SET prefsJson = :prefsJson WHERE id = :id")
     suspend fun updatePrefs(id: Long, prefsJson: String?)
 

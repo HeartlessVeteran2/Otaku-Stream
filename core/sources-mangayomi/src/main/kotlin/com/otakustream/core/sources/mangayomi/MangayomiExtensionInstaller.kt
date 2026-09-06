@@ -29,7 +29,8 @@ class MangayomiExtensionInstaller @Inject constructor(
         val content = download(listing.sourceCodeUrl)
         val source = factory.create(content, override = listing.toMetadata())
         try {
-            repository.save(listing.toRecord(content, repoPrefs.repoUrl))
+            // Keeps whatever preferences this extension already had — see saveKeepingPrefs.
+            repository.saveKeepingPrefs(listing.toRecord(content, repoPrefs.repoUrl))
             source
         } catch (t: Throwable) {
             // The source is built (engine thread + native context live) but not yet handed back
