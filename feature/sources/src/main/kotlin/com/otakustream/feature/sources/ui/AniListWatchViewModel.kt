@@ -125,15 +125,23 @@ class AniListWatchViewModel @Inject constructor(
 
     fun pick(sourceId: Long, item: MediaItem) {
         viewModelScope.launch {
+            // The name that gets saved is the name we navigate with, computed once.
+            //
+            // These used to differ: the link stored the AniList title while the navigation carried
+            // the source's, so opening a show for the first time headed the page with one name and
+            // every later visit — which reopens through the saved link at the top of this file —
+            // headed it with the other. Same show, different title depending on whether you had
+            // been there before.
+            val linkedTitle = title.ifBlank { item.title }
             trackingRepository.saveLink(
                 TrackerLink(
                     mediaUrl = item.url,
                     trackerMediaId = mediaId,
-                    trackerTitle = title.ifBlank { item.title },
+                    trackerTitle = linkedTitle,
                     sourceId = sourceId,
                 ),
             )
-            _uiState.value = _uiState.value.copy(navigateTo = WatchTarget(sourceId, item.url, item.title, item.coverUrl))
+            _uiState.value = _uiState.value.copy(navigateTo = WatchTarget(sourceId, item.url, linkedTitle, item.coverUrl))
         }
     }
 

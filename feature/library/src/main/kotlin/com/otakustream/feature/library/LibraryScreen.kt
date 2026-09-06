@@ -557,7 +557,14 @@ private fun DownloadsTab(
                         }
                         // A failed row now has a way forward as well as a way out. It was the
                         // only state in the app whose sole affordance was to throw the thing away.
-                        if (progress?.state == DownloadProgress.State.FAILED) {
+                        //
+                        // A null progress counts as failed here. It means the row is in the
+                        // database but Media3 has no download for it — the enqueue never took, or
+                        // its state was lost — so it will never make progress on its own and Retry
+                        // is exactly what it needs. The tab's badge already counts these rows as
+                        // wanting attention, so hiding Retry left the badge pointing at a row whose
+                        // only button was Delete.
+                        if (progress == null || progress.state == DownloadProgress.State.FAILED) {
                             IconButton(onClick = { viewModel.retryDownload(row) }) {
                                 Icon(Icons.Filled.Refresh, contentDescription = "Retry download")
                             }

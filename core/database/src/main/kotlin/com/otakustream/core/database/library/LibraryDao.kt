@@ -21,6 +21,12 @@ interface LibraryDao {
     @Query("SELECT status FROM library_entries WHERE mediaUrl = :mediaUrl")
     suspend fun getStatus(mediaUrl: String): String?
 
+    // One row, for the caller that needs the entry itself rather than a column of it. Reading the
+    // whole table through observeAll() to find one mediaUrl works and is what removeFromWatchlist
+    // used to do, but it materialises every saved title to keep one of them.
+    @Query("SELECT * FROM library_entries WHERE mediaUrl = :mediaUrl")
+    suspend fun get(mediaUrl: String): LibraryEntry?
+
     @Query("UPDATE library_entries SET status = :status WHERE mediaUrl = :mediaUrl")
     suspend fun setStatus(mediaUrl: String, status: String)
 

@@ -24,7 +24,14 @@ import coil.imageLoader
 import coil.request.CachePolicy
 import coil.request.ImageRequest
 import coil.request.SuccessResult
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 // The colour of the thing you are looking at, applied to the page around it.
@@ -103,6 +110,23 @@ private object AccentCache {
 
     private class Entry(val argb: Int?)
 
+    // One extraction per key at a time, shared by everyone who asks for it while it runs.
+    //
+    // Without this, every caller that missed the cache started its own decode of the same cover.
+    // That happens for real: a details screen and the rail it was opened from ask together, a
+    // rotation asks again before the first answer lands, and the whole point of the cache is that
+    // this work happens once.
+    private val inFlight = mutableMapOf<String, Deferred<Int?>>()
+    private val mutex = Mutex()
+
+    // The shared work runs here rather than on whichever caller happened to arrive first.
+    //
+    // That is the part it would be easy to get wrong: if the extraction ran on the first caller's
+    // scope, a user who opened a page and immediately went back would cancel it — and every other
+    // caller awaiting the same result would be failed by a navigation that had nothing to do with
+    // them. On a scope of its own, cancelling a caller cancels only its own await.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     fun peek(url: String?, against: Int): Color? {
         if (url.isNullOrBlank()) return null
         return entries.get(key(url, against))?.argb?.let(::Color)
@@ -112,30 +136,52 @@ private object AccentCache {
         val cacheKey = key(url, against)
         entries.get(cacheKey)?.let { return it.argb?.let(::Color) }
 
-        // The two ways this comes back empty are not the same and must not be cached the same way.
-        //
-        // A bitmap we could not fetch is a dead host, a flaky connection, a decode that ran out of
-        // memory — all transient, all worth trying again next time the page is opened. Storing that
-        // as "this poster has no accent" would freeze a temporary failure in for the life of the
-        // cache entry, so a missing bitmap returns without recording anything.
-        val bitmap = withContext(Dispatchers.IO) {
-            runCatching { bitmapFor(context, url) }.getOrNull()
-        } ?: return null
-
-        // Same distinction one level down. Quantising can throw — an OOM on a large bitmap, a
-        // recycled one — and that is a failure to look, not a poster with no colour in it, so it
-        // must not be recorded either. Only a run that completed produces a cacheable answer.
-        //
-        // A completed run that found nothing *is* cacheable: a grey poster will be grey every time,
-        // and without recording that, every visit to a monochrome cover would decode it again to
-        // learn the same thing.
-        val extraction = withContext(Dispatchers.Default) {
-            runCatching { pickAccent(bitmap.candidates(), against) }
+        val work = mutex.withLock {
+            // Checked again under the lock: between the fast path above and here, another caller's
+            // extraction may have finished and filled the cache.
+            entries.get(cacheKey)?.let { return it.argb?.let(::Color) }
+            inFlight.getOrPut(cacheKey) { scope.async { extract(context, url, against, cacheKey) } }
         }
-        if (extraction.isFailure) return null
-        val argb = extraction.getOrNull()
-        entries.put(cacheKey, Entry(argb))
-        return argb?.let(::Color)
+        // The shared job is never cancelled by a caller leaving, but it can still fail; a caller
+        // that gets nothing renders on the theme colour, which is the same as a poster with no
+        // usable colour in it.
+        return runCatching { work.await() }.getOrNull()?.let(::Color)
+    }
+
+    private suspend fun extract(context: Context, url: String, against: Int, cacheKey: String): Int? {
+        try {
+            // The two ways this comes back empty are not the same and must not be cached the same
+            // way.
+            //
+            // A bitmap we could not fetch is a dead host, a flaky connection, a decode that ran out
+            // of memory — all transient, all worth trying again next time the page is opened.
+            // Storing that as "this poster has no accent" would freeze a temporary failure in for
+            // the life of the cache entry, so a missing bitmap returns without recording anything.
+            val bitmap = withContext(Dispatchers.IO) {
+                runCatching { bitmapFor(context, url) }.getOrNull()
+            } ?: return null
+
+            // Same distinction one level down. Quantising can throw — an OOM on a large bitmap, a
+            // recycled one — and that is a failure to look, not a poster with no colour in it, so
+            // it must not be recorded either. Only a run that completed produces a cacheable
+            // answer.
+            //
+            // A completed run that found nothing *is* cacheable: a grey poster will be grey every
+            // time, and without recording that, every visit to a monochrome cover would decode it
+            // again to learn the same thing.
+            val extraction = withContext(Dispatchers.Default) {
+                runCatching { pickAccent(bitmap.candidates(), against) }
+            }
+            if (extraction.isFailure) return null
+            val argb = extraction.getOrNull()
+            entries.put(cacheKey, Entry(argb))
+            return argb
+        } finally {
+            // NonCancellable because this suspends: a cancelled job that skipped this would leave a
+            // dead Deferred in the map, and every later request for that cover would await a result
+            // that is never coming.
+            withContext(NonCancellable) { mutex.withLock { inFlight.remove(cacheKey) } }
+        }
     }
 
     private fun key(url: String, against: Int) = "$url|$against"

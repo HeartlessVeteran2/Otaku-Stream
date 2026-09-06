@@ -113,9 +113,14 @@ class AccentMathTest {
         val dim = 0xFF6B4A18.toInt()
         val clamped = nonNull(clampForContrast(dim, DARK_SURFACE, DECORATIVE_CONTRAST))
         // One step back towards the original must fail the ratio, or it moved further than needed.
+        //
+        // One step means LIGHTNESS_STEP, the same 0.01 the search walks in. This used to back off
+        // by 0.02 and still call it one step, which passed for the weaker reason that two steps
+        // back is further from the threshold than one — so the test could not have caught the
+        // algorithm overshooting by a single step, which is the only overshoot it can make.
         val (h, s, l) = clamped.toHsl()
         val originalL = dim.toHsl().third
-        val backwards = hslToArgb(h, s, if (l > originalL) l - 0.02 else l + 0.02)
+        val backwards = hslToArgb(h, s, if (l > originalL) l - LIGHTNESS_STEP else l + LIGHTNESS_STEP)
         assertTrue(contrastRatio(backwards, DARK_SURFACE) < DECORATIVE_CONTRAST)
     }
 

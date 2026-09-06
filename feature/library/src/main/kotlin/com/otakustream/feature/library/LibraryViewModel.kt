@@ -17,7 +17,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -114,12 +113,13 @@ class LibraryViewModel @Inject constructor(
     // row is pure metadata — the exact entry can be restored, so the cheap path is the right one
     // and a dialog would only be in the way of the common case, which is deliberate.
     //
-    // The entry is captured before the delete because after it there is nothing left to read.
+    // The delete hands back what it deleted, so the snackbar is holding the row that actually went
+    // rather than a snapshot read beforehand. Reading and then deleting are two suspending calls,
+    // and a save or a status change landing between them would leave undo restoring the older copy
+    // — quietly reverting whatever happened in the gap.
     fun removeFromWatchlist(mediaUrl: String) {
         viewModelScope.launch {
-            val removed = libraryRepository.observeLibrary().first().find { it.mediaUrl == mediaUrl }
-            libraryRepository.remove(mediaUrl)
-            if (removed == null) return@launch
+            val removed = libraryRepository.removeAndReturn(mediaUrl) ?: return@launch
             UiMessages.showUndoable("Removed ${removed.title}") {
                 // Runs on the snackbar host's scope, not this one — see UiMessages.Message. The
                 // repository is a singleton, so it does not care that this ViewModel may be gone.
@@ -128,7 +128,13 @@ class LibraryViewModel @Inject constructor(
                 // title has been saved again would overwrite the newer entry — and with it whatever
                 // status was just set — with the snapshot taken before the delete. Checking first
                 // and then writing only narrows that window; SQLite closes it.
-                libraryRepository.addIfAbsent(removed)
+                //
+                // And when it does refuse, say so. Dropping the result meant the snackbar closed
+                // exactly as it does on success while nothing had been restored, so the one case
+                // this guard exists to handle was also the one case the user was not told about.
+                if (!libraryRepository.addIfAbsent(removed)) {
+                    UiMessages.show("${removed.title} is already saved")
+                }
             }
         }
     }

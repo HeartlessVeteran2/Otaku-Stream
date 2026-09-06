@@ -141,7 +141,11 @@ internal fun Int.toHsl(): Triple<Double, Double, Double> {
 
 internal fun hslToArgb(h: Double, s: Double, l: Double): Int {
     val c = (1.0 - abs(2.0 * l - 1.0)) * s
-    val x = c * (1.0 - abs((h / 60.0) % 2.0 - 1.0))
+    // Named rather than inlined: `h / 60.0 % 2.0 - 1.0` is correct by precedence but reads as a
+    // pile of operators, and this is the value the formula is actually about — where the hue sits
+    // within its 60-degree sector.
+    val sector = h / 60.0
+    val x = c * (1.0 - abs(sector % 2.0 - 1.0))
     val m = l - c / 2.0
     val (r, g, b) = when {
         h < 60 -> Triple(c, x, 0.0)
@@ -181,7 +185,10 @@ private fun searchLightness(
 
 // 1% steps: fine enough that the result is never visibly further from the poster's colour than it
 // had to be, coarse enough that the worst case is a hundred iterations of cheap arithmetic.
-private const val LIGHTNESS_STEP = 0.01
+//
+// internal rather than private so the test that asserts the clamp moves as little as it has to can
+// step back by exactly this, instead of by a number that happens to match it today.
+internal const val LIGHTNESS_STEP = 0.01
 
 // Below this a colour reads as grey rather than as a hue. Chosen low: the goal is only to reject
 // colours that carry no identity, not to insist a poster be brightly coloured.

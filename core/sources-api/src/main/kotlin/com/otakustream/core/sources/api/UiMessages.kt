@@ -26,7 +26,12 @@ object UiMessages {
             // The two are meaningless apart: an action with no label draws no button, so the
             // lambda can never run, and a label with no action draws a button that does nothing.
             // Both are silent failures at a call site that believes it offered an undo.
-            require((actionLabel.isNullOrBlank()) == (action == null)) {
+            //
+            // Spelled out as two cases rather than as `actionLabel.isNullOrBlank() == (action ==
+            // null)`, which let a blank-but-present label through alongside a null action: both
+            // sides were true, so the check passed, and the host then saw a non-null label and drew
+            // the dead button this is here to prevent.
+            require((action == null && actionLabel == null) || (action != null && !actionLabel.isNullOrBlank())) {
                 "A snackbar action needs a label and a label needs an action"
             }
         }
@@ -49,30 +54,41 @@ object UiMessages {
     fun showUndoable(text: String, actionLabel: String = "Undo", action: suspend () -> Unit) =
         show(Message(text, actionLabel, action))
 
+    // Delivery happens under the lock, deliberately.
+    //
+    // The earlier version read the sink into a local and invoked it outside any lock, which left a
+    // window: the host could unregister between the read and the call, and the message would be
+    // handed to a sink whose scope was already cancelled — the confirmation simply never appeared.
+    // Holding the lock across the call makes delivery and unregistration mutually exclusive, so a
+    // message is either delivered to a live sink or queued for the next one, never lost between the
+    // two.
+    //
+    // Safe to call arbitrary code under this lock because the sink is ours and does one thing:
+    // hands the message to a coroutine scope and returns. It must not block, and it must not call
+    // back into UiMessages from another thread and wait on it.
     fun show(message: Message) {
         if (message.text.isBlank()) return
-        val current = sink
-        if (current != null) {
-            current(message)
-            return
-        }
         synchronized(lock) {
-            if (sink == null) {
+            val current = sink
+            if (current == null) {
                 pending += message
                 return
             }
+            current(message)
         }
-        sink?.invoke(message)
     }
 
     // Registered once by the app's UI host. Replays anything that queued up beforehand.
+    //
+    // The replay is inside the lock for the same reason: outside it, a message shown concurrently
+    // would take the lock, find the new sink, and arrive ahead of confirmations that were waiting
+    // for a host before it did.
     fun setSink(newSink: ((Message) -> Unit)?) {
-        val replay: List<Message>
         synchronized(lock) {
             sink = newSink
-            replay = pending.toList()
+            val replay = pending.toList()
             pending.clear()
+            if (newSink != null) replay.forEach(newSink)
         }
-        if (newSink != null) replay.forEach(newSink)
     }
 }
