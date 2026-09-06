@@ -132,16 +132,16 @@ internal fun Int.toHsl(): Triple<Double, Double, Double> {
     if (delta == 0.0) return Triple(0.0, 0.0, l)
     val s = delta / (1.0 - abs(2.0 * l - 1.0))
     val h = when (maxC) {
-        r -> 60.0 * (((g - b) / delta) % 6.0)
-        g -> 60.0 * (((b - r) / delta) + 2.0)
-        else -> 60.0 * (((r - g) / delta) + 4.0)
+        r -> 60.0 * ((g - b) / delta % 6.0)
+        g -> 60.0 * ((b - r) / delta + 2.0)
+        else -> 60.0 * ((r - g) / delta + 4.0)
     }
     return Triple(if (h < 0) h + 360.0 else h, s, l)
 }
 
 internal fun hslToArgb(h: Double, s: Double, l: Double): Int {
     val c = (1.0 - abs(2.0 * l - 1.0)) * s
-    val x = c * (1.0 - abs(((h / 60.0) % 2.0) - 1.0))
+    val x = c * (1.0 - abs((h / 60.0) % 2.0 - 1.0))
     val m = l - c / 2.0
     val (r, g, b) = when {
         h < 60 -> Triple(c, x, 0.0)

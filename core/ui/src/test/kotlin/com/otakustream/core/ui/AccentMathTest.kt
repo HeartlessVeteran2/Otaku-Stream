@@ -77,7 +77,7 @@ class AccentMathTest {
 
     @Test
     fun `clamping meets the ratio for a wide spread of inputs on both surfaces`() {
-        val hues = (0 until 360 step 15)
+        val hues = 0 until 360 step 15
         val saturations = listOf(0.2, 0.5, 0.8, 1.0)
         val lightnesses = listOf(0.05, 0.2, 0.4, 0.5, 0.6, 0.8, 0.95)
         var checked = 0
