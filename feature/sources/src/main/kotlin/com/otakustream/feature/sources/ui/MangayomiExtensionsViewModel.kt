@@ -6,6 +6,8 @@ import com.otakustream.core.sources.mangayomi.MangayomiExtensionInstaller
 import com.otakustream.core.sources.mangayomi.repo.MangayomiExtensionListing
 import com.otakustream.core.sources.mangayomi.repo.MangayomiRepoClient
 import com.otakustream.core.sources.mangayomi.repo.MangayomiRepoPrefs
+import com.otakustream.core.sources.mangayomi.repo.RecommendedExtensionRepos
+import com.otakustream.core.sources.stremio.AdultContentSettings
 import com.otakustream.feature.sources.SourceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -27,6 +29,16 @@ data class MangayomiExtensionsUiState(
     val installingId: Long? = null,
     val repoUrl: String = "",
     val error: String? = null,
+    // Entries in the loaded repos this app cannot run — Dart extensions, and manga/novel sources.
+    // Shown rather than silently dropped: m2k3a's index is 64 entries of which 40 are Dart, so a
+    // screen that just rendered 24 rows was indistinguishable from a broken repo.
+    val unsupportedCount: Int = 0,
+    // Curated repos that could not be reached, by name. A banner, not a blank screen — the other
+    // repos' extensions are still on it.
+    val unreachableRepos: List<String> = emptyList(),
+    // The repos offered for one-tap browsing, so the screen can say where the listings came from
+    // and what else is available.
+    val suggestedRepos: List<RecommendedExtensionRepos.Repo> = RecommendedExtensionRepos.repos,
 )
 
 // Backs the "AnymeX extensions" screen: browse a Mangayomi anime_index.json repo and install/
@@ -38,6 +50,7 @@ class MangayomiExtensionsViewModel @Inject constructor(
     private val repoPrefs: MangayomiRepoPrefs,
     private val installer: MangayomiExtensionInstaller,
     private val sourceRepository: SourceRepository,
+    private val adultContentSettings: AdultContentSettings,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(MangayomiExtensionsUiState(repoUrl = repoPrefs.repoUrl))
@@ -58,8 +71,22 @@ class MangayomiExtensionsViewModel @Inject constructor(
         loadJob?.cancel()
         _uiState.value = _uiState.value.copy(isLoading = true, error = null)
         loadJob = viewModelScope.launch {
-            runCatching { repoClient.fetch() }
-                .onSuccess { listings -> _uiState.value = _uiState.value.copy(listings = listings) }
+            // Read here and passed down, so an adult listing never reaches this screen's state at
+            // all rather than merely going unrendered by it — the same property the Stremio
+            // directory holds. The setting itself lives in the Stremio module, which the extension
+            // client must not depend on.
+            val showAdult = adultContentSettings.get()
+            runCatching { repoClient.fetch(showAdult) }
+                .onSuccess { directory ->
+                    _uiState.value = _uiState.value.copy(
+                        listings = directory.listings,
+                        unsupportedCount = directory.unsupportedCount,
+                        unreachableRepos = directory.unreachableRepos,
+                        // Only a URL the user typed is reported as an error: a curated repo being
+                        // down is the app's problem to mention quietly, and the others still loaded.
+                        error = directory.customRepoError,
+                    )
+                }
                 .onFailure { failure ->
                     if (failure is CancellationException) throw failure
                     _uiState.value = _uiState.value.copy(error = failure.message ?: "Failed to load extension repo")
@@ -75,6 +102,15 @@ class MangayomiExtensionsViewModel @Inject constructor(
     fun saveRepoUrl() {
         repoPrefs.repoUrl = _uiState.value.repoUrl
         load()
+    }
+
+    // Puts a suggested repo in the URL field and loads it, for someone who wants that one on its
+    // own. The curated repos are already merged into the list without this — it is here for the
+    // case where a repo has an extension the merge deduped away, or the user simply wants to see
+    // one repo's contents.
+    fun useSuggestedRepo(repo: RecommendedExtensionRepos.Repo) {
+        _uiState.value = _uiState.value.copy(repoUrl = repo.indexUrl)
+        saveRepoUrl()
     }
 
     fun install(listing: MangayomiExtensionListing) {

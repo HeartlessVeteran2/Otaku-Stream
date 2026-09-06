@@ -72,12 +72,26 @@ fun MangayomiExtensionsScreen(
             item {
                 Column {
                     Text(
-                        text = "Install AnymeX/Mangayomi anime extensions from a repository. Paste a repo's " +
-                            "anime index URL, or use the built-in example. The app ships no sources itself.",
+                        text = "Mangayomi/AnymeX extensions, written in JavaScript. Aniyomi's own " +
+                            "extensions are Android apps and are a different format this app can't " +
+                            "load, even where they cover the same sites.\n\n" +
+                            "The repositories below are loaded for you. Paste another index URL to " +
+                            "add one of your own. The app ships no sources itself.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 4.dp),
                     )
+
+                    // Named rather than merely merged, so it is clear where the list came from and
+                    // what to type if you want just one of them.
+                    if (uiState.suggestedRepos.isNotEmpty()) {
+                        Text(
+                            text = uiState.suggestedRepos.joinToString(" · ") { it.name },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
 
                     Row(
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
@@ -87,7 +101,7 @@ fun MangayomiExtensionsScreen(
                             value = uiState.repoUrl,
                             onValueChange = viewModel::onRepoUrlChange,
                             label = { Text("Extension repo URL") },
-                            supportingText = { Text("Paste an extension repository link, or leave blank for the built-in sample.") },
+                            supportingText = { Text("Optional — an extra anime_index.json to merge with the ones above.") },
                             modifier = Modifier.weight(1f),
                         )
                         Button(onClick = viewModel::saveRepoUrl, enabled = !uiState.isLoading) { Text("Load") }
@@ -107,6 +121,32 @@ fun MangayomiExtensionsScreen(
                             )
                             TextButton(onClick = viewModel::load) { Text("Retry") }
                         }
+                    }
+
+                    // What the list does not contain, and why.
+                    //
+                    // parseMangayomiIndex keeps only anime extensions written in JavaScript; the
+                    // biggest curated repo is mostly Dart. Rendering 24 rows out of 64 with no
+                    // explanation looks exactly like a repo that is broken or half-loaded.
+                    if (uiState.unsupportedCount > 0) {
+                        Text(
+                            text = "${uiState.listings.size} shown · ${uiState.unsupportedCount} " +
+                                "entries are Dart extensions or manga sources, which this app can't run.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+
+                    // A banner, not a blank screen: the other repos' extensions are still listed.
+                    if (uiState.unreachableRepos.isNotEmpty()) {
+                        Text(
+                            text = "Couldn't reach ${uiState.unreachableRepos.joinToString(", ")}. " +
+                                "Showing what loaded.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
                     }
 
                     if (!uiState.isLoading && uiState.error == null && uiState.listings.isEmpty()) {
@@ -150,8 +190,9 @@ private fun MangayomiExtensionRow(
         headlineContent = { Text(listing.name) },
         supportingContent = {
             val nsfw = if (listing.isNsfw) " · 18+" else ""
+            val repo = listing.repoName?.let { " · $it" }.orEmpty()
             Text(
-                text = "${listing.lang} · v${listing.version}$nsfw",
+                text = "${listing.lang} · v${listing.version}$repo$nsfw",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
