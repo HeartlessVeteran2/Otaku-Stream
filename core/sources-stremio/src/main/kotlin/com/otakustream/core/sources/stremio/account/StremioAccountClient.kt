@@ -1,5 +1,6 @@
 package com.otakustream.core.sources.stremio.account
 
+import com.otakustream.core.network.await
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -25,8 +26,14 @@ data class StremioLibraryItem(
     val name: String,
     val poster: String?,
     val removed: Boolean,
-    // Server-assigned creation time, kept when re-pushing an existing item so we don't rewrite it.
-    val ctime: String? = null,
+    // The server's own document for this item, verbatim, when it came from fetchLibrary — null for
+    // an item built locally that the account has never seen.
+    //
+    // Carried as raw JSON rather than as parsed fields on purpose. A push replaces the whole
+    // document, so anything not round-tripped here is destroyed on the user's account; keeping the
+    // text means fields this app has never heard of survive a push made by a version of the app
+    // written before they existed. See libraryItemDocument.
+    val remoteJson: String? = null,
 ) {
     // The app encodes Stremio catalog items as "type|id", so a pulled item lines up with the same
     // local library key a saved catalog item would use.
@@ -60,63 +67,41 @@ class StremioAccountClient @Inject constructor(
                 name = obj.optString("name").ifEmpty { id },
                 poster = obj.optString("poster").ifEmpty { null },
                 removed = obj.optBoolean("removed", false),
-                ctime = obj.optString("_ctime").ifEmpty { null },
+                remoteJson = obj.toString(),
             )
         }
     }
 
-    // Best-effort push of local saves up to the Stremio account. Builds a minimal-but-valid
-    // libraryItem for each entry (the receiver fills in richer metadata on next sync).
+    // Push local saves up to the Stremio account. An item the account already has is re-sent as the
+    // server's own document with only `removed` touched; a genuinely new one is built from scratch.
+    // libraryItemDocument owns that distinction and explains why it matters.
     suspend fun putLibraryItems(authKey: String, items: List<StremioLibraryItem>) = withContext(Dispatchers.IO) {
         if (items.isEmpty()) return@withContext
         val now = isoNow()
-        val changes = JSONArray().apply { items.forEach { put(libraryItemJson(it, now)) } }
+        // mapNotNull, not map: libraryItemDocument returns null for an existing item whose document
+        // couldn't be parsed, and dropping that item is the whole point — it is better to leave a
+        // row un-pushed than to replace one we couldn't read.
+        val documents = items.mapNotNull { libraryItemDocument(it, now) }
+        if (documents.isEmpty()) return@withContext
+        val changes = JSONArray().apply { documents.forEach { put(it) } }
         val body = JSONObject().put("authKey", authKey).put("collection", "libraryItem").put("changes", changes)
         post("$API_BASE/datastorePut", body)
         Unit
     }
 
-    private fun libraryItemJson(item: StremioLibraryItem, now: String): JSONObject =
-        JSONObject()
-            .put("_id", item.id)
-            .put("name", item.name)
-            .put("type", item.type)
-            .put("poster", item.poster ?: "")
-            .put("posterShape", "poster")
-            .put("background", JSONObject.NULL)
-            .put("logo", JSONObject.NULL)
-            .put("year", "")
-            .put("removed", item.removed)
-            .put("temp", false)
-            // Preserve the server's original creation time for an existing item; only brand-new
-            // pushes stamp "now". _mtime always advances.
-            .put("_ctime", item.ctime ?: now)
-            .put("_mtime", now)
-            .put("state", defaultState())
-
-    private fun defaultState(): JSONObject = JSONObject()
-        .put("lastWatched", "")
-        .put("timeWatched", 0)
-        .put("timeOffset", 0)
-        .put("overallTimeWatched", 0)
-        .put("timesWatched", 0)
-        .put("flaggedWatched", 0)
-        .put("duration", 0)
-        .put("video_id", "")
-        .put("watched", "")
-        .put("noNotif", false)
-        .put("season", 0)
-        .put("episode", 0)
-
     private fun errorMessage(root: JSONObject): String? =
         root.optJSONObject("error")?.let { if (it.isNull("message")) null else it.optString("message").ifEmpty { null } }
 
-    private fun post(url: String, body: JSONObject): JSONObject {
+    // suspend + await(), not a blocking execute(). Cancelling the coroutine — the user leaving the
+    // account screen mid-push, or the ViewModel scope dying — could not interrupt execute(): it
+    // returned immediately while the request carried on underneath holding a thread and a
+    // connection with nobody left to read the result. Same fix AniListClient already carries.
+    private suspend fun post(url: String, body: JSONObject): JSONObject {
         val request = Request.Builder()
             .url(url)
             .post(body.toString().toRequestBody("application/json".toMediaType()))
             .build()
-        httpClient.newCall(request).execute().use { response ->
+        httpClient.newCall(request).await().use { response ->
             val text = response.body?.string().orEmpty()
             val root = runCatching { JSONObject(text) }.getOrElse {
                 error("Stremio returned an unexpected response (HTTP ${response.code}).")
