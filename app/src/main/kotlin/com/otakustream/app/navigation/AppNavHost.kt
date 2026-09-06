@@ -7,6 +7,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
@@ -19,6 +22,7 @@ import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
@@ -32,9 +36,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -47,6 +55,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.otakustream.app.ui.theme.AppearanceViewModel
+import com.otakustream.app.ui.theme.OtakuStreamTheme
+import com.otakustream.app.ui.theme.ThemeMode
 import com.otakustream.core.player.ui.PlayerScreen
 import com.otakustream.core.sources.api.UiMessages
 import com.otakustream.feature.library.LibraryScreen
@@ -116,10 +127,30 @@ fun AppNavHost(
     pendingMagnetName: String? = null,
     onMagnetConfirmed: () -> Unit = {},
     onMagnetDismissed: () -> Unit = {},
+    // Whether the app's own scheme is dark. Combined with the destination below to decide the
+    // system bar icon style, which the activity applies.
+    appThemeIsDark: Boolean = true,
+    onSystemBarsDarkChanged: (Boolean) -> Unit = {},
 ) {
     val navController = rememberNavController()
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
+    // The player renders in the dark scheme whatever the app is set to, so in a light app its
+    // transparent status bar would otherwise draw dark icons over black video.
+    //
+    // SideEffect, not LaunchedEffect: this runs in the apply phase of the same composition that
+    // puts the player on screen, before that frame is drawn. A LaunchedEffect would dispatch a
+    // coroutine after the composition committed, leaving the bars a frame behind the video.
+    // Guarded on the last value applied because SideEffect runs on every recomposition and each
+    // call re-registers a window listener.
+    val barsDark = appThemeIsDark || currentRoute == ROUTE_PLAYER
+    var appliedBarsDark by remember { mutableStateOf<Boolean?>(null) }
+    SideEffect {
+        if (appliedBarsDark != barsDark) {
+            appliedBarsDark = barsDark
+            onSystemBarsDarkChanged(barsDark)
+        }
+    }
     val showBottomBar = currentRoute == ROUTE_PLAY || currentRoute == ROUTE_CATALOG ||
         currentRoute == ROUTE_LIBRARY || currentRoute == ROUTE_SETTINGS
 
@@ -423,11 +454,18 @@ fun AppNavHost(
             ) { entry ->
                 // Navigation Compose already URL-decodes query-string arguments — see the note above.
                 val videoUrl = entry.arguments?.getString("videoUrl").orEmpty()
-                PlayerScreen(
-                    videoUrl = videoUrl,
-                    fromSource = entry.arguments?.getBoolean("fromSource") == true,
-                    onBack = { navController.popBackStack() },
-                )
+                // The player is always dark, whatever the rest of the app is set to. Its controls,
+                // gesture HUDs and stats panel are drawn over video in white-on-black, and its
+                // scrims lean on the theme's surface roles — in a light scheme that is white text
+                // on a white wash. Watching a film with the lights on is also just not a thing
+                // anyone asks for, so this is not a setting.
+                OtakuStreamTheme(themeMode = ThemeMode.DARK) {
+                    PlayerScreen(
+                        videoUrl = videoUrl,
+                        fromSource = entry.arguments?.getBoolean("fromSource") == true,
+                        onBack = { navController.popBackStack() },
+                    )
+                }
             }
         }
     }
@@ -455,6 +493,9 @@ private fun SettingsScreen(
             supportingContent = { Text("Find and manage your sources") },
             modifier = Modifier.clickable(onClick = onSourcesClick),
         )
+
+        SectionHeader("Appearance")
+        ThemeModeRow()
 
         SectionHeader("Accounts & sync")
         ListItem(
@@ -501,6 +542,40 @@ private fun SettingsScreen(
             modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
         )
     }
+}
+
+// Dark, light, or whatever the phone is set to. Three chips rather than a switch because there
+// are genuinely three answers: a switch would have to drop "follow the system", which is the
+// default and the one most people want.
+@Composable
+private fun ThemeModeRow(viewModel: AppearanceViewModel = hiltViewModel()) {
+    val mode by viewModel.themeMode.collectAsState()
+    ListItem(
+        headlineContent = { Text("Theme") },
+        supportingContent = {
+            // Scrollable rather than a fixed Row: at a large font scale three chips do not fit a
+            // narrow window, and a clipped chip is an option the user cannot reach. Same bug, same
+            // fix as the add-on directory's filter row.
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(top = 8.dp).horizontalScroll(rememberScrollState()),
+            ) {
+                ThemeMode.entries.forEach { option ->
+                    FilterChip(
+                        selected = mode == option,
+                        onClick = { viewModel.setThemeMode(option) },
+                        label = { Text(option.label()) },
+                    )
+                }
+            }
+        },
+    )
+}
+
+private fun ThemeMode.label(): String = when (this) {
+    ThemeMode.SYSTEM -> "System"
+    ThemeMode.DARK -> "Dark"
+    ThemeMode.LIGHT -> "Light"
 }
 
 private const val PROJECT_URL = "https://github.com/HeartlessVeteran2/Otaku-Stream"

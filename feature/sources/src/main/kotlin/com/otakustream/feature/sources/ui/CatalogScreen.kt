@@ -2,6 +2,7 @@ package com.otakustream.feature.sources.ui
 
 import com.otakustream.core.ui.CoverImage
 import com.otakustream.core.ui.EmptyState
+import com.otakustream.core.ui.posterScrim
 import com.otakustream.feature.sources.SourceFailure
 import com.otakustream.feature.sources.allOffline
 import com.otakustream.feature.sources.describe
@@ -62,8 +63,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -372,11 +371,7 @@ private fun MediaCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.Transparent, MaterialTheme.colorScheme.background.copy(alpha = 0.85f)),
-                    ),
-                )
+                .background(posterScrim())
                 .padding(8.dp),
         ) {
             Text(

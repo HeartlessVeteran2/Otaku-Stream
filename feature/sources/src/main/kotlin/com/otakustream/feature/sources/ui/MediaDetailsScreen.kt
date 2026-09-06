@@ -60,8 +60,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -69,6 +67,7 @@ import com.otakustream.core.database.library.LIBRARY_STATUS_COMPLETED
 import com.otakustream.core.database.library.LIBRARY_STATUS_PLANNED
 import com.otakustream.core.database.library.LIBRARY_STATUS_WATCHING
 import com.otakustream.core.database.tracking.toTrackerSeason
+import com.otakustream.core.ui.heroScrim
 import com.otakustream.feature.tracking.LinkAniListDialog
 
 // Which link the AniList dialog is being opened to create. A nullable holder rather than a bare
@@ -149,7 +148,7 @@ fun MediaDetailsScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Brush.verticalGradient(listOf(Color.Transparent, MaterialTheme.colorScheme.background))),
+                            .background(heroScrim()),
                     )
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -159,7 +158,15 @@ fun MediaDetailsScreen(
                             text = mediaTitle,
                             style = MaterialTheme.typography.headlineLarge.copy(
                                 color = MaterialTheme.colorScheme.onBackground,
-                                shadow = Shadow(color = Color.Black.copy(alpha = 0.6f), blurRadius = 8f),
+                                // The scheme background, not black: this shadow exists to hold the
+                                // title apart from whatever the artwork is doing behind it, and in
+                                // the light scheme the text is dark — a black halo behind dark text
+                                // muddies it instead of separating it. Following the background
+                                // means the halo is always the opposite of the ink on top of it.
+                                shadow = Shadow(
+                                    color = MaterialTheme.colorScheme.background.copy(alpha = 0.6f),
+                                    blurRadius = 8f,
+                                ),
                             ),
                             modifier = Modifier.weight(1f),
                         )

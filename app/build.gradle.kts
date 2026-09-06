@@ -99,4 +99,8 @@ dependencies {
     implementation(libs.hilt.android)
     implementation(libs.hilt.navigation.compose)
     kapt(libs.hilt.compiler)
+
+    // The theme's colour tables are plain Kotlin values, so ThemeTest asserts role coverage and
+    // contrast on the JVM with no device and no Robolectric.
+    testImplementation(libs.junit)
 }

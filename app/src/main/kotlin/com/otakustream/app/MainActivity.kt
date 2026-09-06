@@ -9,21 +9,52 @@ import android.util.Rational
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.otakustream.app.navigation.AppNavHost
+import com.otakustream.app.R
+import com.otakustream.app.ui.theme.AppearancePrefs
 import com.otakustream.app.ui.theme.OtakuStreamTheme
+import com.otakustream.app.ui.theme.applyAppNightMode
+import com.otakustream.app.ui.theme.isDark
+import com.otakustream.app.ui.theme.storedThemeMode
 import com.otakustream.core.player.PlayerController
 import com.otakustream.core.torrent.MagnetLinks
 import dagger.Lazy
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+
+// Scrims for the navigation bar, matching the values androidx.activity uses for its own
+// enableEdgeToEdge() defaults. Transparent status bar, scrimmed nav bar: the platform composites
+// three-button navigation icons itself below API 29 and needs something behind them.
+private const val TRANSPARENT = android.graphics.Color.TRANSPARENT
+private const val NAV_BAR_LIGHT_SCRIM = 0xE6FFFFFF.toInt()
+private const val NAV_BAR_DARK_SCRIM = 0x801B1B1B.toInt()
+
+// Status and navigation bar icon styling for a resolved scheme. Called once before the first frame
+// and again whenever the answer changes, so the two paths cannot drift apart.
+private fun ComponentActivity.applySystemBarStyle(dark: Boolean) {
+    enableEdgeToEdge(
+        statusBarStyle = if (dark) {
+            SystemBarStyle.dark(TRANSPARENT)
+        } else {
+            SystemBarStyle.light(TRANSPARENT, TRANSPARENT)
+        },
+        navigationBarStyle = if (dark) {
+            SystemBarStyle.dark(NAV_BAR_DARK_SCRIM)
+        } else {
+            SystemBarStyle.light(NAV_BAR_LIGHT_SCRIM, NAV_BAR_DARK_SCRIM)
+        },
+    )
+}
 
 private val MIN_PIP_ASPECT_RATIO = 1 / 2.39
 private val MAX_PIP_ASPECT_RATIO = 2.39
@@ -54,6 +85,12 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var playerControllerLazy: Lazy<PlayerController>
 
+    // Not Lazy, unlike the player above: the theme mode has to be known before the first frame,
+    // so deferring it would only move the same small preferences read to a point where it causes
+    // a visible flash instead of a fast one.
+    @Inject
+    lateinit var appearancePrefs: AppearancePrefs
+
     private var pendingStremioInstallUrl by mutableStateOf<String?>(null)
     private var pendingPlayUrl by mutableStateOf<String?>(null)
     private var pendingAniListRedirect by mutableStateOf<AniListRedirect?>(null)
@@ -69,8 +106,21 @@ class MainActivity : ComponentActivity() {
         // Must run before super.onCreate: swaps the Splash theme for the app theme and keeps the
         // system splash on screen until the first frame instead of flashing a blank window.
         installSplashScreen()
+
+        // Everything in this block has to happen before the window is themed, which is why the mode
+        // is read straight off disk rather than through appearancePrefs — Hilt injects fields
+        // inside super.onCreate(), by which point the first frame's colour is already decided.
+        //
+        // Without it the startup frames follow the *phone's* night setting: forcing Light on a dark
+        // phone painted a dark window and dark-scheme system bar icons for a frame before Compose
+        // drew the light scheme underneath them.
+        val startupMode = storedThemeMode(this)
+        val startupDark = startupMode.isDark(resources.configuration)
+        applyAppNightMode(this, startupMode)
+        setTheme(if (startupDark) R.style.Theme_OtakuStream_Dark else R.style.Theme_OtakuStream_Light)
+
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        applySystemBarStyle(dark = startupDark)
         // Only consume the launch intent on a fresh start — on an activity recreation
         // (e.g. process-death restore) the nav state is already restored, so re-reading it
         // would spuriously re-navigate to the player/install screen.
@@ -81,7 +131,17 @@ class MainActivity : ComponentActivity() {
             pendingMagnet = intent.pendingMagnet()
         }
         setContent {
-            OtakuStreamTheme {
+            val themeMode by appearancePrefs.themeMode.collectAsState()
+            // The player draws its own dark scheme whatever the app is set to, so the bars have to
+            // follow the destination and not just the theme. Light app + player = dark status bar
+            // icons over black video, which is unreadable.
+            //
+            // Decided inside the nav host, where the route is known, and applied from there. Doing
+            // it here — the route reported up into state, a recomposition, then an effect — put
+            // two coroutine hops between the player appearing and the bars matching it, so the
+            // first frame of a video still carried the light-scheme icons. That is the same
+            // one-frame flash this whole change exists to remove, moved rather than fixed.
+            OtakuStreamTheme(themeMode = themeMode) {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     AppNavHost(
                         pendingStremioInstallUrl = pendingStremioInstallUrl,
@@ -99,6 +159,8 @@ class MainActivity : ComponentActivity() {
                             pendingMagnet = null
                         },
                         onMagnetDismissed = { pendingMagnet = null },
+                        appThemeIsDark = themeMode.isDark(),
+                        onSystemBarsDarkChanged = ::applySystemBarStyle,
                     )
                 }
             }

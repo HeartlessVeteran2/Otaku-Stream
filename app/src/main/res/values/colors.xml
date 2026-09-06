@@ -1,5 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- MidnightNavy — matches the Compose theme's background (Color.kt). -->
+    <!-- The launcher icon's own background. Fixed, not theme-dependent: a launcher icon is drawn
+         by the system on someone else's wallpaper, so it keeps the app's navy identity rather
+         than following the in-app scheme. -->
     <color name="ic_launcher_background">#0B1220</color>
+
+    <!-- The two scheme backgrounds (LightBackground and DarkBackground in Color.kt), named so
+         MainActivity can pick one directly by the stored Appearance mode. -->
+    <color name="window_background_light">#FCFAF7</color>
+    <color name="window_background_dark">#0D0F13</color>
+
+    <!-- The qualifier-driven default, for the splash and for the frame before setTheme() runs.
+         values-night carries the dark one. -->
+    <color name="window_background">@color/window_background_light</color>
 </resources>

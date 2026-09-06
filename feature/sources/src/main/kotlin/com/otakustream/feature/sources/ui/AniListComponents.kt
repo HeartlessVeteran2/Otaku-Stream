@@ -18,10 +18,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.otakustream.core.ui.posterScrim
 
 // A poster tile for AniList media rails (Home discovery, detail relations/recs). Same visual
 // treatment as the source-based PosterTile but with an optional subtitle line (e.g. a relation
@@ -53,11 +52,7 @@ fun AniListPosterTile(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(Color.Transparent, MaterialTheme.colorScheme.background.copy(alpha = 0.85f)),
-                    ),
-                )
+                .background(posterScrim())
                 .padding(8.dp),
         ) {
             Text(
