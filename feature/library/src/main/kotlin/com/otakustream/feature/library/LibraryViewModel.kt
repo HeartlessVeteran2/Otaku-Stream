@@ -124,13 +124,11 @@ class LibraryViewModel @Inject constructor(
                 // Runs on the snackbar host's scope, not this one — see UiMessages.Message. The
                 // repository is a singleton, so it does not care that this ViewModel may be gone.
                 //
-                // Only if it is still gone. add() is an upsert, so undoing after the title has been
-                // saved again would overwrite the newer entry — and with it whatever status the
-                // user had just set — with the snapshot taken before the delete. Nothing to undo is
-                // the right outcome there.
-                if (libraryRepository.observeLibrary().first().none { it.mediaUrl == removed.mediaUrl }) {
-                    libraryRepository.add(removed)
-                }
+                // Insert-if-absent, in one statement. add() is an upsert, so undoing after the
+                // title has been saved again would overwrite the newer entry — and with it whatever
+                // status was just set — with the snapshot taken before the delete. Checking first
+                // and then writing only narrows that window; SQLite closes it.
+                libraryRepository.addIfAbsent(removed)
             }
         }
     }

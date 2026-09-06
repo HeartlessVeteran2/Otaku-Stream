@@ -2,6 +2,7 @@ package com.otakustream.app.navigation
 
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -82,6 +83,7 @@ import com.otakustream.feature.sources.ui.MediaDetailsScreen
 import com.otakustream.feature.sources.ui.SourcesScreen
 import com.otakustream.feature.sources.ui.StremioAccountScreen
 import com.otakustream.feature.tracking.TrackingSettingsScreen
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 private const val ROUTE_PLAY = "play"
@@ -233,7 +235,13 @@ fun AppNavHost(
                     // the app down, and the ViewModel that would normally have caught it is
                     // precisely the thing this design assumes is already gone. Failing quietly is
                     // also wrong — the user asked for something back — so say so.
-                    runCatching { message.action?.invoke() }.onFailure {
+                    runCatching { message.action?.invoke() }.onFailure { failure ->
+                        // Cancellation is not a failed undo. runCatching catches Throwable, so a
+                        // nav host going away mid-undo would otherwise be reported to the user as
+                        // an error and then try to draw a snackbar on the scope that just died.
+                        if (failure is CancellationException) throw failure
+                        // The user only gets "couldn't", so the reason has to go somewhere.
+                        Log.w("Undo", "Undo action failed", failure)
                         snackbarHostState.showSnackbar("Couldn't undo that")
                     }
                 }

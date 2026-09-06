@@ -31,6 +31,7 @@ import com.otakustream.core.database.tracking.TrackingRepository
 import com.otakustream.core.ui.BackTopBar
 import com.otakustream.core.ui.ConfirmDialog
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -88,14 +89,20 @@ class TrackingSettingsViewModel @Inject constructor(
             //    belongs to our sign-in; it says nothing about whether the token in it works. Asking
             //    who the token belongs to before storing it turns "signed in" into a statement the
             //    app has checked, rather than one it is repeating back from a URL.
-            val valid = runCatching { aniListClient.fetchViewer(token.trim()) }.isSuccess
+            val valid = runCatching { aniListClient.fetchViewer(token.trim()) }
+                // Cancellation is not a rejected sign-in, and runCatching catches Throwable. Signing
+                // out cancels this job while it is suspended in the fetch, and without this the
+                // cancellation was swallowed into valid = false — so the screen said "That sign-in
+                // couldn't be verified" to someone who had just chosen to sign out. Rethrowing also
+                // means the ensureActive() below is reachable, which in that path it was not.
+                .onFailure { failure -> if (failure is CancellationException) throw failure }
+                .isSuccess
             if (!valid) {
                 _signInRejected.value = true
                 return@launch
             }
-            // Cancellation is cooperative, and fetchViewer above is where this coroutine spends its
-            // time. Checking here means a cancel that arrived during it stops the save rather than
-            // being noticed only at the next suspension point, which is the save.
+            // Belt and braces for the narrow window between the fetch returning and the save
+            // starting. Cancellation is cooperative, and the rethrow above covers the long part.
             ensureActive()
             trackingRepository.saveToken(token.trim())
             _signInRejected.value = false
