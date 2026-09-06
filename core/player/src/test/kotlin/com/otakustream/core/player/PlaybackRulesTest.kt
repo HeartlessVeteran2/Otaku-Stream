@@ -18,11 +18,17 @@ class PlaybackRulesTest {
         assertEquals(10_000L, clampSeekPosition(10_000L, C.TIME_UNSET))
     }
 
-    // The same shape, spelled the way a player that has not resolved a duration can also report it.
+    // Any negative is the same sentinel in practice, so all of them mean "not known yet".
     @Test
-    fun `a zero or negative duration is treated as unknown, not as a bound`() {
-        assertEquals(30_000L, clampSeekPosition(30_000L, 0L))
+    fun `a negative duration is treated as unknown, not as a bound`() {
         assertEquals(30_000L, clampSeekPosition(30_000L, -1L))
+        assertEquals(30_000L, clampSeekPosition(30_000L, Long.MIN_VALUE))
+    }
+
+    // Zero is a real answer, not a sentinel: a zero-length item has exactly one valid position.
+    @Test
+    fun `a zero duration still bounds the target`() {
+        assertEquals(0L, clampSeekPosition(30_000L, 0L))
     }
 
     @Test

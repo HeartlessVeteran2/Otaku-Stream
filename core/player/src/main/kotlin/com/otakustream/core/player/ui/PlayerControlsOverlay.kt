@@ -52,6 +52,11 @@ fun PlayerControlsOverlay(
     progressFlow: StateFlow<PlaybackProgress>,
     onPlayPauseClick: () -> Unit,
     onSeekTo: (Long) -> Unit,
+    // Called whenever the user actually touches these controls, so the screen can restart its
+    // auto-hide countdown. Without it the three seconds run from when the controls appeared, not
+    // from the last thing you did — so a slow drag along the scrubber, or reading the track list
+    // before picking, had the controls vanish out from under the finger mid-gesture.
+    onInteraction: () -> Unit = {},
     onTracksClick: () -> Unit,
     onMarkSegmentStart: () -> Unit,
     onMarkSegmentEnd: (SkipSegmentType) -> Unit,
@@ -79,8 +84,12 @@ fun PlayerControlsOverlay(
                 .coerceIn(0f, durationMs.toFloat().coerceAtLeast(1f))
             Slider(
                 value = shownPositionMs,
-                onValueChange = { draftPositionMs = it },
+                onValueChange = {
+                    onInteraction()
+                    draftPositionMs = it
+                },
                 onValueChangeFinished = {
+                    onInteraction()
                     draftPositionMs?.let { onSeekTo(it.toLong()) }
                     draftPositionMs = null
                 },
@@ -128,15 +137,24 @@ fun PlayerControlsOverlay(
             Text(text = formatDurationMs(durationMs), color = MaterialTheme.colorScheme.onBackground)
         }
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            val showsPause = uiState.playWhenReady && !uiState.hasEnded
             IconButton(
-                onClick = onPlayPauseClick,
+                onClick = {
+                    onInteraction()
+                    onPlayPauseClick()
+                },
                 modifier = Modifier.size(56.dp).background(MaterialTheme.colorScheme.primary, CircleShape),
             ) {
                 Icon(
                     // playWhenReady, not isPlaying — see the comment on the field. The button
-                    // toggles playWhenReady, so it has to show the state of the thing it toggles.
-                    imageVector = if (uiState.playWhenReady) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                    contentDescription = if (uiState.playWhenReady) "Pause" else "Play",
+                    // toggles playWhenReady, so it has to show the state of the thing it toggles;
+                    // rendering from isPlaying showed a play triangle through every buffer and then
+                    // paused when tapped.
+                    //
+                    // Except at the end, where playWhenReady stays true with nothing playing: a
+                    // Pause button over a finished video that does nothing when pressed.
+                    imageVector = if (showsPause) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = if (showsPause) "Pause" else "Play",
                     tint = MaterialTheme.colorScheme.onPrimary,
                 )
             }

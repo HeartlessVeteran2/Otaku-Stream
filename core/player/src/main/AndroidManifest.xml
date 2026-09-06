@@ -2,6 +2,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Required by ExoPlayer.setWakeMode: it acquires a partial WakeLock (and a WifiLock for the
+         NETWORK mode) through PowerManager.newWakeLock, which throws SecurityException without
+         this. The wake mode is what keeps backgrounded or screen-off playback from being starved
+         when the CPU idles. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <!-- Android 13+ gates the media-playback notification behind a runtime grant; requested on
          first playback in PlayerScreen. Playback continues whether or not it's granted. -->

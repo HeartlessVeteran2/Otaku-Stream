@@ -20,7 +20,9 @@ import androidx.media3.common.C
 // With no known duration there is no upper bound to apply, so only the floor is enforced.
 internal fun clampSeekPosition(positionMs: Long, durationMs: Long): Long {
     val atLeastZero = positionMs.coerceAtLeast(0L)
-    return if (durationMs == C.TIME_UNSET || durationMs <= 0L) {
+    // `< 0`, not `<= 0`: C.TIME_UNSET and any other negative mean "not known yet", but a duration
+    // of exactly zero is a real answer for a zero-length item and should still bound the seek to 0.
+    return if (durationMs == C.TIME_UNSET || durationMs < 0L) {
         atLeastZero
     } else {
         atLeastZero.coerceAtMost(durationMs)

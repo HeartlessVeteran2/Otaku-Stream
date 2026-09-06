@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.Cast
@@ -330,6 +331,12 @@ fun PlayerScreen(
     }
 
     Box(modifier = modifier.fillMaxSize().background(Color.Black)) {
+        // The video below fills the window edge to edge, deliberately. Everything drawn *over* it is
+        // inset by safeDrawing instead, because the system bars are hidden but not gone: they are
+        // still there for the first frame before the hide effect runs, and a swipe from an edge
+        // brings them back transiently. Without this the back button and the top OSD sat underneath
+        // the status bar in exactly those moments — and this screen no longer gets the Scaffold's
+        // padding, which is what used to keep them clear.
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
@@ -404,7 +411,7 @@ fun PlayerScreen(
                 Surface(
                     color = Color.Black.copy(alpha = 0.7f),
                     shape = MaterialTheme.shapes.medium,
-                    modifier = Modifier.align(Alignment.TopCenter).padding(24.dp),
+                    modifier = Modifier.align(Alignment.TopCenter).safeDrawingPadding().padding(24.dp),
                 ) {
                     Text(
                         text = label,
@@ -418,7 +425,7 @@ fun PlayerScreen(
             if (uiState.statsOverlayVisible) {
                 Surface(
                     color = Color.Black.copy(alpha = 0.6f),
-                    modifier = Modifier.align(Alignment.TopStart).padding(16.dp),
+                    modifier = Modifier.align(Alignment.TopStart).safeDrawingPadding().padding(16.dp),
                 ) {
                     Column(modifier = Modifier.padding(8.dp)) {
                         Text("Codec: ${uiState.codecName ?: "?"}", color = Color.White, style = MaterialTheme.typography.labelSmall)
@@ -432,7 +439,7 @@ fun PlayerScreen(
             uiState.activeSkipSegment?.let { segment ->
                 Button(
                     onClick = viewModel::skipActiveSegment,
-                    modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                    modifier = Modifier.align(Alignment.BottomEnd).safeDrawingPadding().padding(16.dp),
                 ) {
                     Text(segment.label)
                 }
@@ -503,7 +510,7 @@ fun PlayerScreen(
                             }
                         }
                     },
-                    modifier = Modifier.align(Alignment.TopEnd).padding(16.dp),
+                    modifier = Modifier.align(Alignment.TopEnd).safeDrawingPadding().padding(16.dp),
                 )
             }
 
@@ -544,10 +551,11 @@ fun PlayerScreen(
                     progressFlow = viewModel.progress,
                     onPlayPauseClick = viewModel::togglePlayPause,
                     onSeekTo = viewModel::seekTo,
+                    onInteraction = { controlsShownAt = SystemClock.elapsedRealtime() },
                     onTracksClick = { showTrackSheet = true },
                     onMarkSegmentStart = viewModel::markSegmentStart,
                     onMarkSegmentEnd = viewModel::markSegmentEnd,
-                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().safeDrawingPadding(),
                     trailingControls = {
                         if (uiState.hasNext) {
                             IconButton(onClick = viewModel::skipToNext) {

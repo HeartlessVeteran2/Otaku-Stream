@@ -89,6 +89,9 @@ data class PlayerUiState(
     // button show the opposite of what tapping it would do — a play triangle during buffering that
     // paused when you pressed it, which is most of a torrent's first minute.
     val playWhenReady: Boolean = false,
+    // The media ran to the end. playWhenReady stays true through STATE_ENDED, so without this the
+    // button would show Pause over a finished video and tapping it would do nothing.
+    val hasEnded: Boolean = false,
     val isBuffering: Boolean = false,
     val playbackSpeed: Float = 1f,
     val volume: Float = 1f,
@@ -173,6 +176,10 @@ class PlayerController @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private var currentMediaUrl: String? = null
+
+    // The hand-off consumed by the current playback, retained for retryCurrent(). Not a cache: it
+    // is re-stashed and consumed again on each retry.
+    private var lastStashed: PendingPlayback.Stashed? = null
     // Kept so addExternalSubtitle can rebuild the current item (same headers/factory) with an
     // extra subtitle track mid-playback.
     private var currentMediaItem: MediaItem? = null
@@ -266,7 +273,10 @@ class PlayerController @Inject constructor(
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
-                _uiState.value = _uiState.value.copy(isBuffering = playbackState == Player.STATE_BUFFERING)
+                _uiState.value = _uiState.value.copy(
+                    isBuffering = playbackState == Player.STATE_BUFFERING,
+                    hasEnded = playbackState == Player.STATE_ENDED,
+                )
                 // Duration becomes known during buffering/ready — publish it through the progress
                 // flow so the scrubber's range updates without touching the rest of the UI state.
                 publishProgress(_progress.value.positionMs)
@@ -484,6 +494,25 @@ class PlayerController @Inject constructor(
         } else {
             PendingPlayback.Provenance.USER
         }
+        // Refused before anything is mutated, alongside the PlayableUrl check and for the same
+        // reason: a play that is not going to happen must leave the current one untouched.
+        //
+        // This started out further down, inside the load coroutine, which was wrong in three ways at
+        // once — by then currentMediaUrl had been reassigned, the playback session and chain had
+        // been retired (so a screen holding the new chain would stop the *old*, still-playing
+        // video on disposal), and the foreground-service flag had been reset. The refusal has no
+        // reason to be late: isUsable is a synchronous property read.
+        if (TorrentUri.isTorrentUrl(url) && !torrentEngine.isUsable) {
+            _uiState.value = _uiState.value.copy(
+                error = torrentRefusalMessage(
+                    isAvailable = torrentEngine.isAvailable,
+                    torrentsEnabled = torrentEngine.torrentsEnabled,
+                    unmeteredOnly = torrentEngine.unmeteredOnly,
+                    isOnUnmeteredNetwork = torrentEngine.isOnUnmeteredNetwork,
+                ),
+            )
+            return
+        }
         if (!PlayableUrl.isAllowed(url, provenance)) {
             // Returning before currentMediaUrl is reassigned and before segmentsJob is restarted:
             // a refused URL must not become the key progress and completion are recorded against,
@@ -534,6 +563,12 @@ class PlayerController @Inject constructor(
         }
 
         val stashed = PendingPlayback.consume(url)
+        // Kept so retryCurrent() can put it back. PendingPlayback is a one-shot hand-off, so after
+        // this line the headers, subtitle tracks, HLS flag, trackers and AniSkip lookup that the
+        // source resolved are gone — and a retry without them re-prepares a bare URL: 403 from any
+        // host that needs a Referer, an extension-less HLS stream probed as progressive, no
+        // subtitles and no skip markers.
+        lastStashed = stashed
         val pending = stashed?.video
         currentSkipLookup = stashed?.skipLookup
 
@@ -592,27 +627,6 @@ class PlayerController @Inject constructor(
             // engine instead. The trackers come from the stashed Video rather than the url: the url is
             // deliberately just the torrent's identity, so that everything keyed on it above — resume
             // position, skip segments, history — stays stable across sessions.
-            if (TorrentUri.isTorrentUrl(url) && !torrentEngine.isUsable) {
-                // The two settings the user controls, enforced where it matters.
-                //
-                // TorrentEngine.isUsable folds "torrents enabled" and "unmetered networks only" into
-                // one check, and its own comment says it is meant to be applied at play time because
-                // connectivity changes between choosing a stream and playing it. Its only caller was
-                // the code deciding whether to *offer* torrent streams — so opening a torrent from
-                // Continue Watching, or tapping a magnet link, joined the swarm on mobile data with
-                // the setting switched off, uploading and exposing the user's IP. Given the care
-                // taken over the magnet-consent dialog, silently ignoring the switch underneath it
-                // was the wrong way round.
-                _uiState.value = _uiState.value.copy(
-                    error = torrentRefusalMessage(
-                        isAvailable = torrentEngine.isAvailable,
-                        torrentsEnabled = torrentEngine.torrentsEnabled,
-                        unmeteredOnly = torrentEngine.unmeteredOnly,
-                        isOnUnmeteredNetwork = torrentEngine.isOnUnmeteredNetwork,
-                    ),
-                )
-                return@launch
-            }
             val dataSourceFactory = if (TorrentUri.isTorrentUrl(url)) {
                 // Torrents keep their own storage and are never in the download store, so they skip
                 // the cache layer rather than paying a lookup that can only miss.
@@ -793,9 +807,11 @@ class PlayerController @Inject constructor(
     // process, so releasing it here would leave the next one with a dead player. What is torn down
     // is the *playback*: position saved, media dropped, jobs cancelled, service stopped.
     //
-    // Takes the session the caller believes it is stopping (see currentPlaybackSession). A screen
-    // that has already been superseded by a newer play() holds an old token and is refused, which
-    // is what stops a departing player screen from killing the video that replaced it.
+    // Takes the playback *chain* the caller believes it is stopping (see currentPlaybackChain). A
+    // screen that has already been superseded by a newer play() holds an old chain and is refused,
+    // which is what stops a departing player screen from killing the video that replaced it.
+    // Auto-play continuations deliberately do not advance the chain, so a screen still owns the
+    // episodes its queue moved on to.
     fun stop(chain: Long) {
         if (chain != playbackChain.get()) return
         // Retire both here, so a second stop for the same chain — a disposal racing an explicit
@@ -958,6 +974,21 @@ class PlayerController @Inject constructor(
     // the chain where the user actually is.
     fun retryCurrent() {
         val url = currentMediaUrl ?: return
+        // Put the hand-off back before replaying.
+        //
+        // Two things go wrong without this. The metadata is lost, as described where lastStashed is
+        // written. And play() treats a missing stash as a direct play, so it calls
+        // PlaybackQueue.clear() — meaning a failed episode that the user retried would also switch
+        // auto-play off for the rest of the session.
+        lastStashed?.let { stashed ->
+            PendingPlayback.stash(
+                video = stashed.video,
+                historyHandled = stashed.historyHandled,
+                skipLookup = stashed.skipLookup,
+                provenance = stashed.provenance,
+                directPlayTitle = stashed.directPlayTitle,
+            )
+        }
         play(url, continuesChain = true)
     }
 
