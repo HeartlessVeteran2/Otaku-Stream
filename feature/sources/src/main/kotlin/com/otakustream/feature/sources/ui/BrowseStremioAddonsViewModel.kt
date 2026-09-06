@@ -5,8 +5,12 @@ import androidx.lifecycle.viewModelScope
 import com.otakustream.core.database.stremio.StremioRepository
 import com.otakustream.core.sources.stremio.StremioAddonDirectoryClient
 import com.otakustream.core.sources.stremio.StremioAddonInstaller
+import com.otakustream.core.sources.stremio.AdultContentSettings
 import com.otakustream.core.sources.stremio.StremioDirectorySettings
+import com.otakustream.core.sources.stremio.normalizeStremioManifestUrl
+import com.otakustream.core.sources.stremio.model.AddonKind
 import com.otakustream.core.sources.stremio.model.OfficialAddonListing
+import com.otakustream.core.sources.stremio.model.kind
 import com.otakustream.feature.sources.SourceRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -15,14 +19,29 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import com.otakustream.core.sources.api.UiMessages
+
+// Which slice of the directory is on screen. ALL is a hundred rows of which about half are subtitle
+// add-ons, so it is browsable rather than useful; STREAMS is what someone opening this screen almost
+// always came for.
+enum class AddonFilter(val label: String) {
+    ALL("All"),
+    STREAMS("Streams"),
+    CATALOGS("Catalogs"),
+    SUBTITLES("Subtitles"),
+}
 
 data class BrowseStremioUiState(
     val isLoading: Boolean = false,
     val listings: List<OfficialAddonListing> = emptyList(),
+    val filter: AddonFilter = AddonFilter.ALL,
     val installedUrls: Set<String> = emptySet(),
     val installingUrl: String? = null,
     val error: String? = null,
@@ -30,6 +49,7 @@ data class BrowseStremioUiState(
     // Reported separately from `error`: a broken custom list must not read as the whole directory
     // being down, since the official and community add-ons are still listed below it.
     val customListError: String? = null,
+    val showAdult: Boolean = false,
 )
 
 @HiltViewModel
@@ -39,31 +59,65 @@ class BrowseStremioAddonsViewModel @Inject constructor(
     private val stremioRepository: StremioRepository,
     private val sourceRepository: SourceRepository,
     private val directorySettings: StremioDirectorySettings,
+    private val adultContentSettings: AdultContentSettings,
 ) : ViewModel() {
 
     private val listings = MutableStateFlow<List<OfficialAddonListing>>(emptyList())
-    private val isLoading = MutableStateFlow(false)
+    private val filter = MutableStateFlow(AddonFilter.ALL)
+
+    // Driven by what the directory actually filtered on, not by a second read of the preference.
+    // Two independent reads settle at different moments, and the pairing that produces is the one
+    // that must never happen: adult rows on screen under a switch that reads off.
+    private val showAdult = MutableStateFlow(false)
+    // A count of loads in flight, not a boolean.
+    //
+    // This replaces a flag that three different places wrote and that had to be guarded on job
+    // identity to be correct. The guard was the problem: cancellation completes on whatever thread
+    // the coroutine happened to be suspended on, so an old load's callback could read `loadJob`
+    // while `load()` on the main thread was still between cancelling the old job and assigning the
+    // new one — see it as still current, and clear the spinner for a fetch that had just started.
+    //
+    // A counter has no such reading to get wrong. Each load raises it once and lowers it once, in a
+    // finally so cancellation counts too, and the spinner is simply "is anything in flight". Two
+    // loads overlapping during a handover is a count of two rather than a question about which of
+    // them owns a flag.
+    private val activeLoads = MutableStateFlow(0)
+    private val isLoading = activeLoads.map { it > 0 }
     private val installingUrl = MutableStateFlow<String?>(null)
     private val error = MutableStateFlow<String?>(null)
     private val customListError = MutableStateFlow<String?>(null)
 
     val uiState: StateFlow<BrowseStremioUiState> = combine(
-        listings,
+        combine(listings, filter) { all, selected -> all.filteredBy(selected) to selected },
         stremioRepository.observeAddons(),
         isLoading,
         installingUrl,
-        combine(error, directorySettings.customListUrl, customListError) { err, customUrl, customErr ->
-            Triple(err, customUrl, customErr)
+        combine(
+            error,
+            directorySettings.customListUrl,
+            customListError,
+            showAdult,
+        ) { err, customUrl, customErr, adult ->
+            DirectoryPrefsState(err, customUrl, customErr, adult)
         },
-    ) { listings, installed, loading, installing, (err, customUrl, customErr) ->
+    ) { (visible, selected), installed, loading, installing, prefs ->
         BrowseStremioUiState(
             isLoading = loading,
-            listings = listings,
-            installedUrls = installed.map { it.manifestUrl }.toSet(),
+            listings = visible,
+            filter = selected,
+            // Normalized on both sides, because installation normalizes before saving.
+            //
+            // A listing whose transportUrl is `stremio://…`, or which omits the trailing
+            // /manifest.json, is stored under a different string than the one the row holds — so
+            // comparing raw strings left it reading "Install" after it had just been installed,
+            // and tapping again reinstalled it. Not introduced here, but this is the screen it
+            // shows on, and the curated list makes hand-written URLs more common rather than less.
+            installedUrls = installed.mapTo(mutableSetOf()) { normalizeStremioManifestUrl(it.manifestUrl) },
             installingUrl = installing,
-            error = err,
-            customListUrl = customUrl.orEmpty(),
-            customListError = customErr,
+            error = prefs.error,
+            customListUrl = prefs.customListUrl.orEmpty(),
+            customListError = prefs.customListError,
+            showAdult = prefs.showAdult,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), BrowseStremioUiState())
 
@@ -71,27 +125,101 @@ class BrowseStremioAddonsViewModel @Inject constructor(
         load()
     }
 
+    fun setFilter(selected: AddonFilter) {
+        filter.value = selected
+    }
+
+    // Turning it off hides what is already on screen *before* anything is saved or refetched.
+    //
+    // The reload is what rebuilds the list properly, but it is a network round trip that can be
+    // slow and can fail — and until it returns, the adult rows fetched under the old setting are
+    // still being rendered. Leaving them there for the duration is precisely the thing this switch
+    // exists to prevent, so the off case does not wait for anything it does not have to.
+    //
+    // Turning it *on* has no such urgency and stays purely reload-driven: nothing can be shown
+    // early that was not already fetched.
+    fun setShowAdult(enabled: Boolean) {
+        if (!enabled) {
+            // The in-flight load goes first. It was started under the old setting, and if it lands
+            // after the hide below it publishes its own list straight over the top — putting the
+            // adult rows back on a screen whose switch now reads off.
+            loadJob?.cancel()
+            showAdult.value = false
+            listings.value = listings.value.filterNot { it.isAdult }
+        }
+        // Recorded before the coroutine starts, so the value that gets written is the last one
+        // tapped rather than the first one dispatched.
+        requestedShowAdult = enabled
+        viewModelScope.launch {
+            toggleLock.withLock {
+                // Whoever holds the lock writes whatever was most recently asked for and clears the
+                // request; anyone queued behind finds nothing left to do. Without this, two taps in
+                // quick succession launch two coroutines whose completion order is not the order
+                // they were tapped in, and the setting can come to rest on the earlier one — a
+                // switch reading on with adult content off, or the reverse.
+                val target = requestedShowAdult ?: return@withLock
+                requestedShowAdult = null
+                // The switch follows the store, not the tap. A preferences write can fail, and a
+                // switch that moved while the setting did not would disagree with the directory on
+                // the next load — in the direction of showing more than the user asked for.
+                if (!adultContentSettings.set(target)) {
+                    error.value = "Couldn't save that setting."
+                    // Deliberately no reload. The write failed, so the store still holds the old
+                    // value — and reloading reads the store, which for a failed switch-off would
+                    // fetch with adult content still enabled and put back the rows just hidden.
+                    // The screen keeps the safe state and says the setting did not save; a
+                    // deliberate Retry is what re-reads the store.
+                    //
+                    // The spinner is deliberately not touched here. It belongs to load(), and
+                    // clearing it from this path would hide progress for a fetch still running —
+                    // which is exactly what happens when the switch is turned *on* during a load,
+                    // since that path does not cancel anything. Where a load was cancelled (the
+                    // off path above), its own completion callback has already cleared it.
+                    return@withLock
+                }
+                load()
+            }
+        }
+    }
+
+    private val toggleLock = Mutex()
+
+    @Volatile
+    private var requestedShowAdult: Boolean? = null
+
     // A newer load supersedes an older one rather than racing it: Retry and Save both call this, and
     // two in-flight fetches could otherwise finish out of order and leave the screen showing the
     // earlier result. Same job-cancelling shape the other loading ViewModels here use.
     private var loadJob: Job? = null
 
     fun load() {
+        // Raised before the cancel, so the count cannot dip to zero between the outgoing load
+        // ending and this one beginning — which would blink the spinner off mid-handover.
+        activeLoads.update { it + 1 }
         loadJob?.cancel()
-        isLoading.value = true
         error.value = null
         customListError.value = null
         loadJob = viewModelScope.launch {
-            runCatching { directoryClient.fetchAddonCatalog() }
-                .onSuccess { directory ->
-                    listings.value = directory.listings
-                    customListError.value = directory.customListError
-                }
-                .onFailure { failure ->
-                    if (failure is CancellationException) throw failure
-                    error.value = failure.message ?: "Failed to load addon catalog"
-                }
-            isLoading.value = false
+            try {
+                runCatching { directoryClient.fetchAddonCatalog() }
+                    .onSuccess { directory ->
+                        listings.value = directory.listings
+                        showAdult.value = directory.showAdult
+                        customListError.value = directory.customListError
+                        // A banner beside the recommended list rather than instead of it: the
+                        // fetched lists being unreachable no longer empties the screen.
+                        error.value = directory.builtInListError
+                    }
+                    .onFailure { failure ->
+                        if (failure is CancellationException) throw failure
+                        error.value = failure.message ?: "Failed to load addon catalog"
+                    }
+            } finally {
+                // In a finally so a cancelled load lowers the count it raised. setShowAdult cancels
+                // an in-flight load, and without this the screen would sit showing progress for a
+                // fetch that is never coming back.
+                activeLoads.update { (it - 1).coerceAtLeast(0) }
+            }
         }
     }
 
@@ -125,3 +253,29 @@ class BrowseStremioAddonsViewModel @Inject constructor(
         }
     }
 }
+
+// Filtering by what the add-on does, not by what it calls itself.
+//
+// ALL is returned untouched rather than mapped through the same predicate, so a listing whose
+// manifest declares no resources at all — every configuration-required add-on, until it is
+// configured — is reachable from somewhere. Under a specific filter it would fall into no bucket
+// and vanish, which for AIOStreams would mean the add-on cannot be found on the screen that exists
+// to find add-ons.
+private fun List<OfficialAddonListing>.filteredBy(filter: AddonFilter): List<OfficialAddonListing> =
+    when (filter) {
+        AddonFilter.ALL -> this
+        AddonFilter.STREAMS -> filter { it.kind() == AddonKind.STREAMS }
+        AddonFilter.CATALOGS -> filter { it.kind() == AddonKind.CATALOGS }
+        AddonFilter.SUBTITLES -> filter { it.kind() == AddonKind.SUBTITLES }
+    }
+
+// The four values that ride together through the combine, which is capped at five flows. A named
+// holder rather than another nested Triple: the previous destructuring was already at the edge of
+// readable, and adding a fourth positional field to it would make a mis-ordered argument a silent
+// bug rather than a compile error.
+private data class DirectoryPrefsState(
+    val error: String?,
+    val customListUrl: String?,
+    val customListError: String?,
+    val showAdult: Boolean,
+)

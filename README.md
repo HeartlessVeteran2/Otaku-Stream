@@ -76,12 +76,34 @@ Everything installable lives under one roof: **Settings → Sources**.
 
 - **Stremio add-ons** — install any add-on by URL, or browse a built-in directory. Catalogs,
   metadata, streams, and add-on subtitles all flow through. Enable, disable, and reorder them.
+- **An add-on directory with the stream add-ons in it.** The directory shows Stremio's own official
+  and community lists — the same ~100 add-ons Stremio's app shows, from the same endpoints. Worth
+  knowing what that list is: it is subtitles, catalogs, ratings and watch calendars, and **not one
+  entry in it resolves a video.** Stremio's collection carries no torrent or stream add-ons, which
+  is why browsing it end to end never turns up anything that plays. So a short curated list of the
+  ones that do — Torrentio, Comet, MediaFusion, Anime Kitsu and a few more — ships with the app and
+  leads the directory. Filter by Streams / Catalogs / Subtitles, and add-ons that do nothing until
+  configured say so and link to their configure page rather than installing dead.
+- **The community index too.** Below the curated picks sits the catalogue from
+  [stremio-addons.net](https://stremio-addons.net/), the community-maintained list where the stream
+  add-ons actually get published — around 40 entries, more than half of which resolve video. It is
+  bundled with the app rather than fetched: that site has no JSON API, its index page carries no
+  manifest URLs, and each add-on's URL lives on its own page, so reading it live would mean scraping
+  fifty pages of markup on a screen you are waiting on. Harvested once, checked in, and visible in
+  the diff — so it goes stale slowly and openly instead of breaking silently.
+- **Adult add-ons are off until you turn them on.** A switch on the directory screen, off on a fresh
+  install, governing every list — curated, community, Stremio's own, and your custom one. Detection
+  reads the protocol's `behaviorHints.adult` flag *and* the declared content types, because two of
+  the adult add-ons in the community index set no hints at all and call themselves "movie"; the
+  bundled data marks those explicitly. It errs toward hiding: a wrongly hidden add-on costs one flip
+  of a switch, a wrongly shown one costs the thing the switch is for.
 - **Anime extensions** — install extensions from AnymeX/Mangayomi repositories, which run in an
   embedded QuickJS engine against a host API covering HTTP, the crypto and deobfuscation helpers,
   a `p.a.c.k.e.r` unpacker with a stream extractor built on it, and per-extension preferences.
   That's a useful subset rather than the full Mangayomi host surface, so an extension reaching for
   a helper that isn't implemented yet will fail — if one doesn't work, that's why.
-- **A curated source directory** for one-tap installs.
+- **A curated directory of scripted sources** for one-tap installs — separate from the Stremio
+  add-on directory above, and pointable at your own repo URL.
 - **Custom sources** — paste a `.js` URL and it becomes a full source at runtime, sandboxed in an
   embedded Rhino interpreter. See [docs/scripted-sources.md](docs/scripted-sources.md).
 - **Cloudflare challenges** are solved in a hidden WebView when a host demands it, so a source

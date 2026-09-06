@@ -12,6 +12,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import javax.inject.Inject
@@ -21,6 +22,15 @@ import javax.inject.Inject
 data class AddonDirectory(
     val listings: List<OfficialAddonListing>,
     val customListError: String? = null,
+    // Stremio's own endpoints failed. Reported rather than thrown, because the recommended list is
+    // local and still worth showing — see fetchAddonCatalog.
+    val builtInListError: String? = null,
+    // The setting these listings were actually filtered on.
+    //
+    // Reported so the switch on screen can be driven by it rather than by a second, independent
+    // read. Two reads of the same preference settle at different times, and the pairing that
+    // produces is the bad one: adult rows listed under a switch that says they are off.
+    val showAdult: Boolean = false,
 )
 
 // Lets users browse add-ons and one-tap install them, like the real Stremio app. Fetches Stremio's
@@ -31,9 +41,16 @@ data class AddonDirectory(
 class StremioAddonDirectoryClient @Inject constructor(
     private val httpClient: OkHttpClient,
     private val directorySettings: StremioDirectorySettings,
+    private val adultContentSettings: AdultContentSettings,
+    private val bundledCommunityAddons: BundledCommunityAddons,
 ) {
     suspend fun fetchAddonCatalog(): AddonDirectory = coroutineScope {
         val customUrl = directorySettings.get()
+        // Read here rather than in the UI, so an adult listing never reaches the screen's state at
+        // all while the setting is off — not merely goes unrendered by it. The value is handed back
+        // in the result so the switch renders from the same read that did the filtering.
+        val showAdult = adultContentSettings.get()
+        val thirdParty = bundledCommunityAddons.listings()
         val official = async { fetchListing(OFFICIAL_ADDON_COLLECTION_URL, AddonListOrigin.OFFICIAL) }
         val community = async { fetchListing(COMMUNITY_ADDON_COLLECTION_URL, AddonListOrigin.COMMUNITY) }
         // Fetched as a Result rather than null-on-failure: unlike the two built-in collections, a
@@ -53,15 +70,43 @@ class StremioAddonDirectoryClient @Inject constructor(
 
         val builtIn = awaitAll(official, community)
         val customResult = custom?.await()
-        // Both built-in endpoints down → surface the failure; otherwise show whatever loaded.
-        if (builtIn.all { it == null } && customResult?.getOrNull() == null) {
-            error("Failed to load the add-on catalog")
-        }
+        // Both built-in endpoints down is reported, not thrown.
+        //
+        // Throwing blanked the whole screen — which was right when everything on it came off the
+        // network, and is wrong now that the recommended add-ons are local and need no network at
+        // all. Being offline is exactly when someone is most likely to be here fixing their
+        // sources, and hiding the one list that still works behind a full-screen error would be a
+        // strange way to help.
+        val builtInListError = "Couldn't reach Stremio's add-on lists. Showing the ones bundled with the app."
+            .takeIf { builtIn.all { listing -> listing == null } }
 
-        // Official first (curated base add-ons like Cinemeta lead the list), then community, then the
-        // user's own — deduped by normalized manifest URL, so an add-on appearing in more than one
-        // list shows once, keeping the most-vetted origin it was found under.
-        val merged = (builtIn.filterNotNull().flatten() + customResult?.getOrNull().orEmpty())
+        // Recommended first, then official (Cinemeta and friends), then community, then the user's
+        // own — deduped by normalized manifest URL, so an add-on appearing in more than one list
+        // shows once, keeping the most-vetted origin it was found under.
+        //
+        // Recommended leads because it is the only part of this screen that answers "what do I
+        // install to watch something". Everything below it is worth having and none of it resolves
+        // a stream.
+        val merged = (
+            RecommendedAddons.listings +
+                // After the curated picks and before Stremio's own lists: these are the add-ons
+                // that resolve video, which is what the screen is for, but they are a whole
+                // community index rather than a chosen few.
+                thirdParty +
+                builtIn.filterNotNull().flatten() +
+                customResult?.getOrNull().orEmpty()
+            )
+            // Applies to every origin. Stremio's own two lists happen to carry no adult entries
+            // today — checked, both are zero — but the bundled community index carries five, and a
+            // custom list the user pointed at is arbitrary. The setting has to mean the same thing
+            // wherever a listing came from.
+            //
+            // This is also the only gate on adult content now. There was briefly a second, curated
+            // adult tier added ahead of the index — which duplicated four entries the index already
+            // had, and, because deduplication keeps the first occurrence, would have shown
+            // pornography under a "For anime" badge.
+            .filterNot { it.origin in FETCHED_ORIGINS && isUnreachableOnDevice(it.transportUrl) }
+            .hideAdultUnless(showAdult)
             .distinctBy { normalizeStremioManifestUrl(it.transportUrl) }
 
         AddonDirectory(
@@ -69,6 +114,8 @@ class StremioAddonDirectoryClient @Inject constructor(
             customListError = customResult?.exceptionOrNull()?.let { failure ->
                 "Couldn't load your custom list: ${failure.message ?: "unknown error"}"
             },
+            builtInListError = builtInListError,
+            showAdult = showAdult,
         )
     }
 
@@ -110,7 +157,44 @@ class StremioAddonDirectoryClient @Inject constructor(
         parsed
     }
 
+    // Hides adult listings by url, not by entry.
+    //
+    // Filtering entry-by-entry and then deduplicating gets this wrong when two lists carry the same
+    // add-on and disagree about it — the bundled index marks something adult, a custom list does
+    // not. Removing only the flagged copy leaves the unflagged duplicate for distinctBy to keep,
+    // and the add-on appears with the switch off. Whether a url is adult is therefore decided once,
+    // across every listing that claims it, before anything is dropped.
+    private fun List<OfficialAddonListing>.hideAdultUnless(showAdult: Boolean): List<OfficialAddonListing> {
+        if (showAdult) return this
+        val adultUrls = filter { it.isAdult }
+            .mapTo(mutableSetOf()) { normalizeStremioManifestUrl(it.transportUrl) }
+        if (adultUrls.isEmpty()) return this
+        return filterNot { normalizeStremioManifestUrl(it.transportUrl) in adultUrls }
+    }
+
+    // Drops listings that point at the machine the app is running on.
+    //
+    // Stremio's official list includes "Local Files", served by the Stremio *desktop* streaming
+    // server at 127.0.0.1:11470. On a phone there is nothing at that address and there never will
+    // be, so installing it produces a source that fails every request — and a directory whose very
+    // first screen contains something guaranteed to break teaches the user not to trust the rest.
+    //
+    // Applied only to the two lists the app fetches on the user's behalf. A recommended entry is
+    // exempt so this can never quietly delete a curated one — nothing in that list is a loopback
+    // URL, and if one ever is, that is a bug to see rather than to hide. A *custom* entry is exempt
+    // because the user typed the URL of that list themselves: someone pointing the app at their own
+    // collection, which may well serve an add-on running on this very device, has said what they
+    // want more clearly than this heuristic can second-guess.
+    private fun isUnreachableOnDevice(transportUrl: String): Boolean {
+        val host = transportUrl.toHttpUrlOrNull()?.host ?: return false
+        return host == "127.0.0.1" || host == "localhost" || host == "::1" || host == "0.0.0.0"
+    }
+
     private companion object {
+        // The origins whose entries the app chose to fetch, as opposed to the ones it ships or the
+        // user supplied.
+        val FETCHED_ORIGINS = setOf(AddonListOrigin.OFFICIAL, AddonListOrigin.COMMUNITY)
+
         const val OFFICIAL_ADDON_COLLECTION_URL = "https://raw.githubusercontent.com/Stremio/stremio-official-addons/master/index.json"
         // Stremio's server-maintained community collection — the source its own app's
         // "Community Add-ons" list is populated from.

@@ -1,0 +1,894 @@
+[
+ {
+  "transportUrl": "https://aiolists.elfhosted.com/manifest.json",
+  "manifest": {
+   "name": "AIOLists",
+   "types": [
+    "movie",
+    "series",
+    "all",
+    "search",
+    "anime"
+   ],
+   "resources": [
+    {
+     "name": "catalog"
+    },
+    {
+     "name": "meta"
+    }
+   ],
+   "description": "Manage all your lists in one place.",
+   "behaviorHints": {
+    "configurable": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://aiostreams.elfhosted.com/stremio/manifest.json",
+  "manifest": {
+   "name": "AIOStreams | ElfHosted",
+   "types": [],
+   "resources": [],
+   "description": "AIOStreams consolidates multiple Stremio addons and debrid services into a single, easily configurable addon.",
+   "behaviorHints": {
+    "configurable": true,
+    "configurationRequired": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://fun.kort.workers.dev/manifest.json",
+  "manifest": {
+   "name": "All IPTV",
+   "types": [
+    "tv"
+   ],
+   "resources": [
+    {
+     "name": "catalog"
+    },
+    {
+     "name": "meta"
+    },
+    {
+     "name": "stream"
+    }
+   ],
+   "description": "Watch 12,000+ daily updated premium IPTV channels in English, Spanish, Russian, French, German, Hindi, Chinese and other languages.",
+   "behaviorHints": {
+    "configurable": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://nuviotr.vercel.app/manifest.json",
+  "manifest": {
+   "name": "Anthology",
+   "types": [
+    "movie",
+    "series",
+    "tv",
+    "live",
+    "channel",
+    "anime"
+   ],
+   "resources": [
+    {
+     "name": "catalog"
+    },
+    {
+     "name": "stream"
+    },
+    {
+     "name": "meta"
+    }
+   ],
+   "description": "Golang tabanlı 40+ sağlayıcılı yüksek performanslı Türkçe dizi, film, anime ve Canlı IPTV & Maç yayın motoru."
+  }
+ },
+ {
+  "transportUrl": "https://streamio.auto-subs.com/1d33f2ea06c94470074ceb8b/manifest.json",
+  "manifest": {
+   "name": "Auto-Subs",
+   "types": [
+    "movie",
+    "series"
+   ],
+   "resources": [
+    {
+     "name": "subtitles"
+    }
+   ],
+   "description": "Tip: press Configure and pick your language before installing. Finds the English subtitle for what you are watching and translates it into your language with tested AI models.",
+   "behaviorHints": {
+    "configurable": true,
+    "configurationRequired": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://94c8cb9f702d-brazuca-torrents.baby-beamup.club/manifest.json",
+  "manifest": {
+   "name": "Brazuca Torrents",
+   "types": [
+    "movie",
+    "series",
+    "anime",
+    "other"
+   ],
+   "resources": [
+    {
+     "name": "stream"
+    }
+   ],
+   "description": "Fornece streams de filmes e series dublados de provedores de torrent.",
+   "behaviorHints": {
+    "configurable": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://comet.elfhosted.com/manifest.json",
+  "manifest": {
+   "name": "Comet | ElfHosted",
+   "types": [
+    "movie",
+    "series",
+    "anime",
+    "other"
+   ],
+   "resources": [
+    {
+     "name": "stream"
+    }
+   ],
+   "description": "Stremio's fastest torrent/debrid search add-on.",
+   "behaviorHints": {
+    "configurable": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://fenixflix.fenixhub.online/manifest.json",
+  "manifest": {
+   "name": "FenixFlix",
+   "types": [
+    "movie",
+    "series"
+   ],
+   "resources": [
+    {
+     "name": "stream"
+    },
+    {
+     "name": "catalog"
+    }
+   ],
+   "description": "Addon de filmes, séries e Animes dublados e legendados em Português (PT‑BR)",
+   "behaviorHints": {
+    "configurable": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://flixnest.app/flix-streams/manifest.json",
+  "manifest": {
+   "name": "Flix-Streams",
+   "types": [
+    "movie",
+    "series",
+    "anime",
+    "tv"
+   ],
+   "resources": [
+    {
+     "name": "stream"
+    },
+    {
+     "name": "catalog"
+    },
+    {
+     "name": "meta"
+    }
+   ],
+   "description": "Movies, series, anime, live TV, sports, 4K/REMUX sources, media libraries, and built-in subtitles in one Stremio addon.",
+   "behaviorHints": {
+    "configurable": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://froststream.cloutteam.com/manifest.json",
+  "manifest": {
+   "name": "FrostStream",
+   "types": [
+    "movie",
+    "series"
+   ],
+   "resources": [
+    {
+     "name": "meta"
+    },
+    {
+     "name": "stream"
+    }
+   ],
+   "description": "Filmes e séries com reprodução rapida, multiplas fontes para assistir, e sobretudo sem travamentos e com ótima qualidade. Aproveite sem interrupções.",
+   "behaviorHints": {
+    "configurable": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://hdhub.thevolecitor.qzz.io/eyJ0b3Jib3giOiJ1bnNldCIsInF1YWxpdGllcyI6IjIxNjBwLDEwODBwLDcyMHAiLCJzb3J0IjoiZGVzYyJ9/manifest.json",
+  "manifest": {
+   "name": "HdHub",
+   "types": [
+    "movie",
+    "series",
+    "HdHub"
+   ],
+   "resources": [
+    {
+     "name": "stream"
+    },
+    {
+     "name": "catalog"
+    }
+   ],
+   "description": "Watch movies and series from HdHub.",
+   "behaviorHints": {
+    "configurable": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://streamio-hianime.onrender.com/manifest.json",
+  "manifest": {
+   "name": "HiAnime Streams",
+   "types": [
+    "movie",
+    "series"
+   ],
+   "resources": [
+    {
+     "name": "stream"
+    },
+    {
+     "name": "meta"
+    },
+    {
+     "name": "catalog"
+    }
+   ],
+   "description": "Stream your anime from the AniWatch API",
+   "behaviorHints": {
+    "adult": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://icv.stremio-italia.eu/manifest.json",
+  "manifest": {
+   "name": "IlCorsaroViola",
+   "types": [
+    "movie",
+    "series",
+    "anime"
+   ],
+   "resources": [
+    {
+     "name": "stream"
+    }
+   ],
+   "description": "Streaming da UIndex, CorsaroNero DB local, Knaben e Jackettio con o senza Real-Debrid, Torbox e Alldebrid.",
+   "behaviorHints": {
+    "configurable": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://loostream.nipva.com/manifest.json",
+  "manifest": {
+   "name": "LooStream",
+   "types": [
+    "movie",
+    "series"
+   ],
+   "resources": [
+    {
+     "name": "stream"
+    },
+    {
+     "name": "subtitles"
+    }
+   ],
+   "description": "Netflix, Prime, Disney+ mirrors + StreamFlix + Movix VF/VOSTFR",
+   "behaviorHints": {
+    "configurable": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://addon-marvel.gonp.deno.net/manifest.json",
+  "manifest": {
+   "name": "Marvel",
+   "types": [
+    "movie",
+    "series"
+   ],
+   "resources": [
+    {
+     "name": "catalog"
+    }
+   ],
+   "description": "Watch the entire Marvel catalog! MCU and X-Men (chronologically organized), Movies, Series, and Animations!",
+   "behaviorHints": {
+    "configurable": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://mediafusion.elfhosted.com/manifest.json",
+  "manifest": {
+   "name": "MediaFusion | ElfHosted",
+   "types": [
+    "movie",
+    "series",
+    "tv",
+    "events"
+   ],
+   "resources": [
+    {
+     "name": "catalog"
+    },
+    {
+     "name": "stream"
+    },
+    {
+     "name": "meta"
+    }
+   ],
+   "description": "MediaFusion — universal torrent & debrid streaming addon for Stremio",
+   "behaviorHints": {
+    "configurable": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://meteorfortheweebs.midnightignite.me/stremio/manifest.json",
+  "manifest": {
+   "name": "Meteor",
+   "types": [
+    "movie",
+    "series",
+    "anime"
+   ],
+   "resources": [
+    {
+     "name": "stream"
+    }
+   ],
+   "description": "Conservative, franchise-aware torrent matching.",
+   "behaviorHints": {
+    "configurable": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://da5f663b4690-minhatv.baby-beamup.club/manifest.json",
+  "manifest": {
+   "name": "Minha TV",
+   "types": [
+    "tv"
+   ],
+   "resources": [
+    {
+     "name": "catalog"
+    },
+    {
+     "name": "stream"
+    },
+    {
+     "name": "meta"
+    }
+   ],
+   "description": "O Melhor do IPTV na sua TV"
+  }
+ },
+ {
+  "transportUrl": "https://7a82163c306e-stremio-concerts.baby-beamup.club/manifest.json",
+  "manifest": {
+   "name": "Music Concerts",
+   "types": [
+    "music"
+   ],
+   "resources": [
+    {
+     "name": "catalog"
+    }
+   ],
+   "description": "Live Music Concerts on IMDB"
+  }
+ },
+ {
+  "transportUrl": "https://mytrakt.elfhosted.com/manifest.json",
+  "manifest": {
+   "name": "MyTrakt Sync | ElfHosted",
+   "types": [
+    "movie",
+    "series"
+   ],
+   "resources": [
+    {
+     "name": "catalog"
+    },
+    {
+     "name": "meta"
+    },
+    {
+     "name": "stream"
+    }
+   ],
+   "description": "Access your Trakt.tv watchlists, collections, custom lists, trending content and calendars directly in Stremio.",
+   "behaviorHints": {
+    "configurable": true,
+    "configurationRequired": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://07b88951aaab-jaxxx-v2.baby-beamup.club/manifest.json",
+  "manifest": {
+   "name": "OnlyPorn",
+   "types": [
+    "movie"
+   ],
+   "resources": [
+    {
+     "name": "catalog"
+    },
+    {
+     "name": "stream"
+    },
+    {
+     "name": "meta"
+    }
+   ],
+   "description": "Use your TV remote to its full potential!",
+   "behaviorHints": {
+    "adult": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://opensubtitlesv3-pro.dexter21767.com/manifest.json",
+  "manifest": {
+   "name": "opensubtitles PRO",
+   "types": [
+    "movie",
+    "series"
+   ],
+   "resources": [
+    {
+     "name": "subtitles"
+    }
+   ],
+   "description": "ad-free and spam-free subtitles addon",
+   "behaviorHints": {
+    "configurable": true,
+    "configurationRequired": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://pengu.uk/manifest.json",
+  "manifest": {
+   "name": "PenguPlay",
+   "types": [
+    "movie",
+    "series"
+   ],
+   "resources": [
+    {
+     "name": "stream"
+    },
+    {
+     "name": "subtitles"
+    }
+   ],
+   "description": "Stream movies and series in Stremio with configurable provider and quality filters.",
+   "behaviorHints": {
+    "configurable": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://stremio.alirostami.com/subtitles/manifest.json",
+  "manifest": {
+   "name": "Persian Subtitles",
+   "types": [
+    "movie",
+    "series"
+   ],
+   "resources": [
+    {
+     "name": "subtitles"
+    }
+   ],
+   "description": "Provides Persian subtitles from the SubSource API. Author: Ali Rostami Website: alirostami.com/support GitHub: https://github.com/alirostami01/Persian-Subtitles/"
+  }
+ },
+ {
+  "transportUrl": "https://dirty-pink.ers.pw/manifest.json",
+  "manifest": {
+   "name": "Porn Tube",
+   "types": [
+    "movie"
+   ],
+   "resources": [
+    {
+     "name": "catalog"
+    },
+    {
+     "name": "meta"
+    },
+    {
+     "name": "stream"
+    }
+   ],
+   "description": "Premium Porn Torrents, 4K & VR. Supports Real-Debrid, TorBox & Easynews.",
+   "behaviorHints": {
+    "configurable": true,
+    "configurationRequired": true,
+    "adult": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://1fe84bc728af-stremio-radios.baby-beamup.club/manifest.json",
+  "manifest": {
+   "name": "Radios",
+   "types": [
+    "music",
+    "movie"
+   ],
+   "resources": [
+    {
+     "name": "catalog"
+    },
+    {
+     "name": "meta"
+    },
+    {
+     "name": "stream"
+    }
+   ],
+   "description": "Over 93.000 radio stations from SHOUTcast."
+  }
+ },
+ {
+  "transportUrl": "https://stremiptv.com/addon/manifest.json",
+  "manifest": {
+   "name": "Romania IPTV",
+   "types": [
+    "movie",
+    "series",
+    "tv"
+   ],
+   "resources": [
+    {
+     "name": "catalog"
+    },
+    {
+     "name": "meta"
+    },
+    {
+     "name": "stream"
+    },
+    {
+     "name": "subtitles"
+    }
+   ],
+   "description": "Filme, seriale și TV live în română. Configure obligatoriu pe site: https://stremiptv.com/addon",
+   "behaviorHints": {
+    "configurable": true,
+    "configurationRequired": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://stravo.site/local/manifest.json",
+  "manifest": {
+   "name": "Stravo",
+   "types": [
+    "movie",
+    "series"
+   ],
+   "resources": [
+    {
+     "name": "meta"
+    },
+    {
+     "name": "subtitles"
+    },
+    {
+     "name": "stream"
+    },
+    {
+     "name": "catalog"
+    }
+   ],
+   "description": "For movies and your favorite TV shows - with subtitles",
+   "behaviorHints": {
+    "configurable": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://streailer.elfhosted.com/manifest.json",
+  "manifest": {
+   "name": "Streailer | ElfHosted",
+   "types": [
+    "movie",
+    "series"
+   ],
+   "resources": [
+    {
+     "name": "stream"
+    }
+   ],
+   "description": "Trailer provider with multi-language support. TMDB → YouTube fallback → TMDB en-US. Season recaps for TV series.",
+   "behaviorHints": {
+    "configurable": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://7a82163c306e-stremio-netflix-catalog-addon.baby-beamup.club/manifest.json",
+  "manifest": {
+   "name": "Streaming Catalogs",
+   "types": [
+    "movie",
+    "series"
+   ],
+   "resources": [
+    {
+     "name": "catalog"
+    }
+   ],
+   "description": "Trending movies and series on Netflix, HBO Max, Disney+, Apple TV+ and more. Configure to choose your favourite services.",
+   "behaviorHints": {
+    "configurable": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://apps.soluserv.es/stremio_catalog_plus/manifest.json",
+  "manifest": {
+   "name": "Streaming Catalogs Plus",
+   "types": [
+    "movie",
+    "series"
+   ],
+   "resources": [
+    {
+     "name": "catalog"
+    },
+    {
+     "name": "meta"
+    }
+   ],
+   "description": "Streaming Catalog Plus organizes general movies and series by platform (Netflix, Disney+, Prime Video, HBO Max, SkyShowtime and Crunchyroll), excluding kids content and adding…",
+   "behaviorHints": {
+    "configurable": true,
+    "configurationRequired": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://subdl.strem.top/manifest.json",
+  "manifest": {
+   "name": "SubDL Subtitles",
+   "types": [
+    "movie",
+    "series",
+    "anime",
+    "subtitles"
+   ],
+   "resources": [
+    {
+     "name": "subtitles"
+    }
+   ],
+   "description": "Unofficial addon for getting subtitles from SubDL.com",
+   "behaviorHints": {
+    "configurable": true,
+    "configurationRequired": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://subsense.nepiraw.com/manifest.json",
+  "manifest": {
+   "name": "SubSense",
+   "types": [
+    "movie",
+    "series",
+    "subtitles"
+   ],
+   "resources": [
+    {
+     "name": "subtitles"
+    }
+   ],
+   "description": "Subtitle aggregator that fetches subtitles in your selected languages from multiple sources including OpenSubtitles, SubDL, SubSource, AnimeTosho and more.",
+   "behaviorHints": {
+    "configurable": true,
+    "configurationRequired": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://subsource.strem.top/manifest.json",
+  "manifest": {
+   "name": "SubSource Subtitles",
+   "types": [
+    "movie",
+    "series",
+    "anime",
+    "subtitles"
+   ],
+   "resources": [
+    {
+     "name": "subtitles"
+    }
+   ],
+   "description": "Unofficial addon for getting subtitles from SubSource.net",
+   "behaviorHints": {
+    "configurable": true,
+    "configurationRequired": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://94c8cb9f702d-tmdb-addon.baby-beamup.club/manifest.json",
+  "manifest": {
+   "name": "The Movie Database Addon",
+   "types": [
+    "movie",
+    "series"
+   ],
+   "resources": [
+    {
+     "name": "catalog"
+    },
+    {
+     "name": "meta"
+    }
+   ],
+   "description": "Stremio addon that provides rich metadata for movies and TV shows from TMDB, featuring customizable catalogs, multi-language support, favorites lists, watchlist, ratings, and IMDb…",
+   "behaviorHints": {
+    "configurable": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://torrentclaw.com/api/stremio/manifest.json",
+  "manifest": {
+   "name": "TorrentClaw",
+   "types": [
+    "movie",
+    "series"
+   ],
+   "resources": [
+    {
+     "name": "stream"
+    },
+    {
+     "name": "meta"
+    }
+   ],
+   "description": "One addon instead of eight: streams, TMDB metadata, subtitles, anime IDs and debrid — all in one. Replaces Torrentio + Cinemeta + OpenSubtitles + Anime Kitsu.",
+   "behaviorHints": {
+    "configurable": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://torrentsdb.com/manifest.json",
+  "manifest": {
+   "name": "TorrentsDB",
+   "types": [
+    "movie",
+    "series",
+    "anime",
+    "other"
+   ],
+   "resources": [
+    {
+     "name": "stream"
+    }
+   ],
+   "description": "Provides torrent streams from scraped torrent providers. Currently supports YTS(+), EZTV(+), 1337x(+), TorrentCSV(+), 1lou(+), Nyaa(+), Sk-CzTorrent(+), 1TamilBlasters(+)…",
+   "behaviorHints": {
+    "configurable": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://tpb-adult-addon.click/manifest.json",
+  "manifest": {
+   "name": "TPB 4K Porn",
+   "types": [
+    "Porn",
+    "hentai",
+    "series",
+    "MegaPacks"
+   ],
+   "resources": [
+    {
+     "name": "catalog"
+    },
+    {
+     "name": "meta"
+    },
+    {
+     "name": "stream"
+    }
+   ],
+   "description": "Stremio and Nuvio addon with 4K, HD & VR, MegaPack adult streams from 12+ P2P indexers (ThePirateBay, PornRips, Sukebei and more via Knaben) and 35+ tube sites, plus Stripchat and…",
+   "behaviorHints": {
+    "configurable": true,
+    "configureUrl": "https://tpb-adult-addon.click/configure",
+    "adult": true
+   }
+  }
+ },
+ {
+  "transportUrl": "https://bcf125302240-tvvio.baby-beamup.club/manifest.json",
+  "manifest": {
+   "name": "Tvvio",
+   "types": [
+    "channel"
+   ],
+   "resources": [
+    {
+     "name": "catalog"
+    },
+    {
+     "name": "meta"
+    },
+    {
+     "name": "stream"
+    }
+   ],
+   "description": "📺 Canais ao vivo com busca e filtro por gênero"
+  }
+ },
+ {
+  "transportUrl": "https://xclub-stremio.vercel.app/manifest.json",
+  "manifest": {
+   "name": "xxxClub",
+   "types": [
+    "movie"
+   ],
+   "resources": [
+    {
+     "name": "catalog"
+    },
+    {
+     "name": "stream"
+    },
+    {
+     "name": "meta"
+    }
+   ],
+   "description": "High Quality Adult Content Scraper by github.com/vauth.",
+   "behaviorHints": {
+    "adult": true
+   }
+  }
+ }
+]
