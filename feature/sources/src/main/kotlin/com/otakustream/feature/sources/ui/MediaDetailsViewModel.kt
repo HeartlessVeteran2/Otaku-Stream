@@ -241,7 +241,14 @@ class MediaDetailsViewModel @Inject constructor(
         _autoPlayEnabled.value = enabled
     }
 
-    fun load(sourceId: Long, mediaUrl: String, mediaTitle: String) {
+    // Held like currentTitle and currentSourceId, because retryLoad() replays this call. Without
+    // it a retry after a failed load rebuilt the MediaItem with no cover, and for a scripted source
+    // — which hands the item straight back — that null then propagated into the library entry, the
+    // download row, watch history and the next-episode resolver. The first attempt would have got
+    // it right and the retry would silently lose it.
+    private var currentSeedCoverUrl: String? = null
+
+    fun load(sourceId: Long, mediaUrl: String, mediaTitle: String, seedCoverUrl: String? = null) {
         // Navigating to a different title must drop the previous title's season selection, or the
         // link row and the progress push target a season the new title may not even have. The
         // screen's own effect can't catch this — it keys on the derived season list, and two titles
@@ -250,6 +257,7 @@ class MediaDetailsViewModel @Inject constructor(
         if (currentMediaUrl.value != mediaUrl) _selectedSeason.value = null
         currentMediaUrl.value = mediaUrl
         currentTitle = mediaTitle
+        currentSeedCoverUrl = seedCoverUrl
         currentSourceId = sourceId
         if (loadedFor == sourceId to mediaUrl) return
         loadedFor = sourceId to mediaUrl
@@ -264,7 +272,10 @@ class MediaDetailsViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(isLoading = true, error = null)
         loadJob = viewModelScope.launch {
             runCatching {
-                val media = MediaItem(url = mediaUrl, title = mediaTitle)
+                // Seeded with the cover the caller already had. Sources that return their own
+                // cover (Mangayomi) or a background (Stremio) overwrite it; a scripted source
+                // hands this MediaItem straight back, so for those it is the only artwork there is.
+                val media = MediaItem(url = mediaUrl, title = mediaTitle, coverUrl = seedCoverUrl)
                 val details = source.getMediaDetails(media)
                 // Dedupe by url: the episode list keys on url, and some sources list the same
                 // episode url more than once (multi-server) — a duplicate key would crash the list.
@@ -288,7 +299,7 @@ class MediaDetailsViewModel @Inject constructor(
     fun retryLoad() {
         val url = currentMediaUrl.value ?: return
         loadedFor = null
-        load(currentSourceId, url, currentTitle)
+        load(currentSourceId, url, currentTitle, currentSeedCoverUrl)
     }
 
     fun setLibraryStatus(status: String) {

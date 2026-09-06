@@ -54,7 +54,7 @@ import com.otakustream.feature.sources.ui.HomeContent
 fun PlayScreen(
     onPlayVideo: (String) -> Unit,
     onBrowseAddons: () -> Unit,
-    onMediaClick: (sourceId: Long, mediaUrl: String, title: String) -> Unit,
+    onMediaClick: (sourceId: Long, mediaUrl: String, title: String, coverUrl: String?) -> Unit,
     onAniListClick: (mediaId: Long, title: String) -> Unit,
     onAniListSearch: () -> Unit,
     onSeeSchedule: () -> Unit,

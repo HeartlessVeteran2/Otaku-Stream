@@ -81,7 +81,7 @@ import kotlinx.coroutines.withContext
 
 @Composable
 fun LibraryScreen(
-    onMediaClick: (sourceId: Long, mediaUrl: String, title: String) -> Unit,
+    onMediaClick: (sourceId: Long, mediaUrl: String, title: String, coverUrl: String?) -> Unit,
     onPlayDirect: (url: String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: LibraryViewModel = hiltViewModel(),
@@ -94,8 +94,12 @@ fun LibraryScreen(
 
     // Direct plays (local files, pasted links) have no details page — route them straight back
     // into the player; catalog entries open their details as before.
-    val onEntryClick: (Long, String, String) -> Unit = { sourceId, mediaUrl, title ->
-        if (sourceId == DIRECT_PLAY_SOURCE_ID) onPlayDirect(mediaUrl) else onMediaClick(sourceId, mediaUrl, title)
+    val onEntryClick: (Long, String, String, String?) -> Unit = { sourceId, mediaUrl, title, coverUrl ->
+        if (sourceId == DIRECT_PLAY_SOURCE_ID) {
+            onPlayDirect(mediaUrl)
+        } else {
+            onMediaClick(sourceId, mediaUrl, title, coverUrl)
+        }
     }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -131,7 +135,7 @@ private val LIBRARY_STATUS_SECTIONS = listOf(
 private fun WatchlistTab(
     uiState: LibraryUiState,
     viewModel: LibraryViewModel,
-    onMediaClick: (Long, String, String) -> Unit,
+    onMediaClick: (Long, String, String, String?) -> Unit,
 ) {
     // One section per non-empty status bucket. Unmigrated rows (status not one of the known values)
     // fall back into "Plan to watch" so nothing is ever hidden. Remembered and hoisted above the
@@ -152,7 +156,7 @@ private fun WatchlistTab(
                 )
             }
             items(uiState.continueWatching, key = { "cw-${it.id}" }) { entry ->
-                HistoryRow(entry) { onMediaClick(entry.sourceId, entry.mediaUrl, entry.mediaTitle) }
+                HistoryRow(entry) { onMediaClick(entry.sourceId, entry.mediaUrl, entry.mediaTitle, entry.coverUrl) }
             }
         }
 
@@ -183,7 +187,7 @@ private fun WatchlistTab(
                         currentStatus = entry.status,
                         onSetStatus = { viewModel.setStatus(entry.mediaUrl, it) },
                         onRemove = { viewModel.removeFromWatchlist(entry.mediaUrl) },
-                        onClick = { onMediaClick(entry.sourceId, entry.mediaUrl, entry.title) },
+                        onClick = { onMediaClick(entry.sourceId, entry.mediaUrl, entry.title, entry.coverUrl) },
                     )
                 }
             }
@@ -237,7 +241,7 @@ private fun WatchlistRow(
 private fun HistoryTab(
     uiState: LibraryUiState,
     viewModel: LibraryViewModel,
-    onMediaClick: (Long, String, String) -> Unit,
+    onMediaClick: (Long, String, String, String?) -> Unit,
 ) {
     // Clearing history is not undoable and the button sits directly above the list it destroys, so
     // it asks first. It is also the only destructive action on this screen with no other route back
@@ -279,7 +283,7 @@ private fun HistoryTab(
             }
         }
         items(uiState.history, key = { it.id }) { entry ->
-            HistoryRow(entry) { onMediaClick(entry.sourceId, entry.mediaUrl, entry.mediaTitle) }
+            HistoryRow(entry) { onMediaClick(entry.sourceId, entry.mediaUrl, entry.mediaTitle, entry.coverUrl) }
         }
     }
 }

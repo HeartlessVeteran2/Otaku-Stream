@@ -73,7 +73,7 @@ private const val LOAD_MORE_THRESHOLD_ITEMS = 6
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CatalogScreen(
-    onMediaClick: (sourceId: Long, mediaUrl: String, title: String) -> Unit,
+    onMediaClick: (sourceId: Long, mediaUrl: String, title: String, coverUrl: String?) -> Unit,
     onManageSourcesClick: () -> Unit,
     onBrowseAddons: () -> Unit,
     modifier: Modifier = Modifier,
@@ -207,7 +207,14 @@ fun CatalogScreen(
                                 sourceName = if (uiState.selectedSourceId == null) uiState.sourceNames[entry.sourceId] else null,
                                 saved = entry.media.url in uiState.savedMediaUrls,
                                 onToggleSave = { viewModel.toggleSave(entry) },
-                                onClick = { onMediaClick(entry.sourceId, entry.media.url, entry.media.title) },
+                                onClick = {
+                                    onMediaClick(
+                                        entry.sourceId,
+                                        entry.media.url,
+                                        entry.media.title,
+                                        entry.media.coverUrl,
+                                    )
+                                },
                             )
                         }
                         if (uiState.isLoadingMore) {
