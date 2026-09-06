@@ -1,5 +1,9 @@
 package com.otakustream.feature.sources.ui
 
+import androidx.compose.material3.AssistChip
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -82,15 +86,26 @@ fun MangayomiExtensionsScreen(
                         modifier = Modifier.padding(top = 4.dp),
                     )
 
-                    // Named rather than merely merged, so it is clear where the list came from and
-                    // what to type if you want just one of them.
+                    // Tappable, not just named. All three are merged into the list below already,
+                    // so this is for the case where you want to see one repo on its own — and it is
+                    // also what makes their URLs discoverable at all, since the alternative was
+                    // knowing one to type.
                     if (uiState.suggestedRepos.isNotEmpty()) {
-                        Text(
-                            text = uiState.suggestedRepos.joinToString(" · ") { it.name },
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 8.dp),
-                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(top = 8.dp),
+                        ) {
+                            uiState.suggestedRepos.forEach { repo ->
+                                AssistChip(
+                                    onClick = { viewModel.useSuggestedRepo(repo) },
+                                    label = { Text(repo.name) },
+                                    enabled = !uiState.isLoading,
+                                )
+                            }
+                        }
                     }
 
                     Row(

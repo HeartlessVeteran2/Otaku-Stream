@@ -55,6 +55,10 @@ class MangayomiIndexTest {
         val listings = parseMangayomiIndex(json).listings
         assertEquals(2, listings.size)
         assertEquals(setOf("en", "ja"), listings.map { it.lang }.toSet())
+        // And with ids of their own: the browse list, the installed set, the registry and the
+        // database primary key are all keyed on the id alone, so two rows sharing one would crash
+        // Compose and make installing either variant overwrite the other.
+        assertEquals(2, listings.map { it.id }.toSet().size)
     }
 
     @Test

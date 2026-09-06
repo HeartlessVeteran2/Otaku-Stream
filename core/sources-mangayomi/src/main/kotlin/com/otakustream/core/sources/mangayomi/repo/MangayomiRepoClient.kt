@@ -11,6 +11,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import javax.inject.Inject
@@ -28,8 +29,6 @@ class MangayomiRepoPrefs @Inject constructor(@ApplicationContext context: Contex
     var repoUrl: String
         get() = prefs.getString(KEY_REPO_URL, "").orEmpty()
         set(value) { prefs.edit().putString(KEY_REPO_URL, value.trim()).apply() }
-
-    private class CuratedResult(val repoName: String, val parsed: ParsedIndex?)
 
     private companion object {
         const val KEY_REPO_URL = "repo_url"
@@ -80,7 +79,14 @@ class MangayomiRepoClient @Inject constructor(
         val custom = customUrl?.let { url ->
             async {
                 try {
-                    Result.success(fetchIndex(url, CUSTOM_REPO_NAME))
+                    // Bounded separately from the curated repos. They are known URLs; this one is
+                    // whatever somebody typed, and it must not be able to hold the whole directory
+                    // behind a loading spinner — the curated extensions have already arrived by
+                    // then and are what the screen is for.
+                    val parsed = withTimeoutOrNull(CUSTOM_REPO_TIMEOUT_MS) {
+                        fetchIndex(url, CUSTOM_REPO_NAME)
+                    } ?: error("That repository took too long to respond.")
+                    Result.success(parsed)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -148,5 +154,8 @@ class MangayomiRepoClient @Inject constructor(
     private companion object {
         const val HTTP_NOT_FOUND = 404
         const val CUSTOM_REPO_NAME = "Your repository"
+
+        // Long enough for a slow host, short enough that a dead one is not an outage.
+        const val CUSTOM_REPO_TIMEOUT_MS = 15_000L
     }
 }

@@ -45,15 +45,33 @@ fun parseMangayomiIndex(json: String, repoName: String? = null): ParsedIndex {
     val array = JSONArray(json)
     val entries = (0 until array.length()).map { index -> array.optJSONObject(index) }
     val parsed = entries.mapNotNull { obj -> parseEntry(obj, repoName) }
-    // A malformed third-party repo could list the same extension twice; the browse list keys on id,
-    // so a duplicate would crash it.
+    // Ids must come out unique, because every consumer downstream is keyed on the id alone: the
+    // browse list's Compose key, the installed-id set, the source registry, and the database's
+    // primary key.
     //
-    // Keyed on id *and* lang, not id alone. Swakshan's index gives Animeonsen `en` and Animeonsen
-    // `ja` the same declared id, and deduping on id threw one of them away — a real extension in a
-    // real repo, silently missing, which is precisely the failure this whole change is about. The
-    // two are distinct sources to every other part of the app, since stableSourceId is derived from
-    // name and lang together.
-    val deduped = parsed.distinctBy { it.id to it.lang }
+    // Two things have to be true at once. Swakshan's index gives Animeonsen `en` and Animeonsen
+    // `ja` the *same* declared id, and they are genuinely two sources — deduping on the id alone
+    // threw one away, which is the bug this change is about. But keeping both under one id is
+    // worse than losing one: Compose throws on a duplicate list key, and installing either variant
+    // would mark and overwrite the other.
+    //
+    // So a declared id is honoured once. A second entry claiming an id already taken by a
+    // different language gets a derived one instead — the same stableSourceId(name, lang) already
+    // used for entries that declare no id at all, so nothing new is invented here. A repeat of the
+    // same id *and* language is a genuine duplicate and is dropped.
+    val seenIds = mutableSetOf<Long>()
+    val seenKeys = mutableSetOf<Pair<Long, String>>()
+    val deduped = parsed.mapNotNull { listing ->
+        if (!seenKeys.add(listing.id to listing.lang)) return@mapNotNull null
+        if (seenIds.add(listing.id)) {
+            listing
+        } else {
+            val derived = stableSourceId(listing.name, listing.lang)
+            // Only if the derived id is itself free; otherwise this entry cannot be told apart from
+            // one already listed and is dropped rather than colliding.
+            if (seenIds.add(derived)) listing.copy(id = derived) else null
+        }
+    }
     return ParsedIndex(
         listings = deduped,
         // Counted against what was actually in the file, so the number means "entries this app

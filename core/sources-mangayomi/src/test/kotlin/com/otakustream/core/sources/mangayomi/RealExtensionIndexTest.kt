@@ -49,19 +49,35 @@ class RealExtensionIndexTest {
         assertEquals(0, parseMangayomiIndex(fixture("anime_index_swakshan.json")).unsupportedCount)
     }
 
-    // The regression that motivated keying the dedupe on (id, lang).
+    // The regression that motivated this, and the constraint that makes fixing it non-trivial.
     //
     // Swakshan's index gives Animeonsen `en` and Animeonsen `ja` the same declared id. Deduping on
     // id alone kept one and threw the other away — a real extension, in a real repo, silently
-    // missing from the list.
+    // missing. But simply keeping both under one id is worse: every consumer is keyed on the id
+    // alone, so Compose throws on the duplicate list key and installing either variant marks the
+    // other. Both survive *and* get distinct ids.
     @Test
-    fun `two language variants sharing an id both survive`() {
+    fun `two language variants sharing an id both survive with distinct ids`() {
         val swak = parseMangayomiIndex(fixture("anime_index_swakshan.json"), "Swakshan")
         val animeonsen = swak.listings.filter { it.name == "Animeonsen" }
         assertEquals(2, animeonsen.size)
         assertEquals(setOf("en", "ja"), animeonsen.map { it.lang }.toSet())
-        // Same declared id — which is exactly why deduping on it alone lost one.
-        assertEquals(1, animeonsen.map { it.id }.toSet().size)
+        assertEquals("both variants need their own id", 2, animeonsen.map { it.id }.toSet().size)
+    }
+
+    // The invariant the rest of the app depends on, asserted over every curated repo at once:
+    // nothing downstream can tell two listings apart by anything but the id.
+    @Test
+    fun `every id in a parsed index is unique`() {
+        listOf("anime_index_m2k3a.json", "anime_index_mallyd11.json", "anime_index_swakshan.json")
+            .forEach { name ->
+                val listings = parseMangayomiIndex(fixture(name)).listings
+                assertEquals(
+                    "duplicate ids in $name would crash the list and collide on install",
+                    listings.size,
+                    listings.map { it.id }.toSet().size,
+                )
+            }
     }
 
     @Test
