@@ -105,25 +105,24 @@ class StremioAccountViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(isBusy = true, error = null, message = null)
         viewModelScope.launch {
             runCatching {
-                // Preserve the server's _ctime for items already in the account, and only push
-                // genuine Stremio catalog saves (stremioLibraryItemFor filters non-Stremio keys).
+                // The remote library is fetched first so every item the account already has can be
+                // re-sent as the server's own document rather than as a locally-invented one. That
+                // is what keeps a push from resetting watch progress; libraryItemDocument explains
+                // the mechanics. stremioLibraryItemFor filters out non-Stremio keys, so only genuine
+                // catalog saves are pushed at all.
                 val existingById = accountClient.fetchLibrary(authKey).associateBy { it.id }
                 val local = libraryRepository.observeLibrary().first()
                 val items = local.mapNotNull { entry ->
-                    stremioLibraryItemFor(entry.mediaUrl, entry.title, entry.coverUrl)
-                        ?.copy(ctime = existingById[entry.mediaUrl.substringAfter("|").trim()]?.ctime)
+                    val item = stremioLibraryItemFor(entry.mediaUrl, entry.title, entry.coverUrl)
+                        ?: return@mapNotNull null
+                    // Keyed off the parsed id rather than re-deriving it from mediaUrl: the same
+                    // parse, done once, in the function that owns the format.
+                    item.copy(remoteJson = existingById[item.id]?.remoteJson)
                 }
                 accountClient.putLibraryItems(authKey, items)
-                items.size
-            }.onSuccess { count ->
-                _uiState.value = _uiState.value.copy(
-                    isBusy = false,
-                    message = if (count == 0) {
-                        "No Stremio titles to push — saved catalog items sync; local files don't."
-                    } else {
-                        "Pushed $count title${if (count == 1) "" else "s"} to your Stremio library."
-                    },
-                )
+                PushOutcome(total = items.size, added = items.count { it.remoteJson == null })
+            }.onSuccess { outcome ->
+                _uiState.value = _uiState.value.copy(isBusy = false, message = outcome.message())
                 refreshLibrary()
             }.onFailure { failure ->
                 if (failure is CancellationException) throw failure
@@ -138,4 +137,21 @@ class StremioAccountViewModel @Inject constructor(
     fun consumeMessage() {
         _uiState.value = _uiState.value.copy(message = null, error = null)
     }
+}
+
+// What a push actually did, split into the two cases the user cares about. The old message said
+// "Pushed N titles" for a run that mostly re-sent rows that were already there — true, but it read
+// as though N titles had been changed, which is the impression that made silently resetting their
+// watch state so hard to notice.
+private data class PushOutcome(val total: Int, val added: Int) {
+    private val alreadyThere: Int get() = total - added
+
+    fun message(): String = when {
+        total == 0 -> "No Stremio titles to push — saved catalog items sync; local files don't."
+        added == 0 -> "Your Stremio library already had all ${titles(total)}; watch progress left as it was."
+        alreadyThere == 0 -> "Added ${titles(added)} to your Stremio library."
+        else -> "Added ${titles(added)}; the other $alreadyThere kept their watch progress."
+    }
+
+    private fun titles(count: Int) = "$count title${if (count == 1) "" else "s"}"
 }
