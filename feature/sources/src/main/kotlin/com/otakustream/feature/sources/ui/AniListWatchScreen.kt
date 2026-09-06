@@ -72,53 +72,60 @@ fun AniListWatchScreen(
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
             )
 
-            when {
-                uiState.hasNoSources -> EmptyState(
-                    icon = Icons.Filled.Extension,
-                    title = "No sources installed",
-                    message = "Install an add-on or extension, then come back to watch this from AniList.",
-                    actionLabel = "Browse add-ons",
-                    onAction = onBrowseAddons,
-                )
-                uiState.isSearching -> LoadingState()
-                uiState.query.isBlank() -> CenterText(
-                    "Type a title above to find it in your installed sources.",
-                )
-                uiState.groups.isEmpty() -> CenterText(
-                    "No matches. Try a different spelling or the romaji title.",
-                )
-                else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    uiState.groups.forEach { group ->
-                        item(key = "hdr-${group.sourceId}") {
-                            Text(
-                                text = group.sourceName,
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
-                            )
-                        }
-                        items(group.items, key = { "${group.sourceId}:${it.url}" }) { item ->
-                            ListItem(
-                                headlineContent = { Text(item.title) },
-                                leadingContent = {
-                                    // Explicit poster bounds: CoverImage lays its image out with
-                                    // matchParentSize, which contributes nothing to measurement —
-                                    // without a size here the row's thumbnail collapses to 0x0 as
-                                    // soon as the image loads and replaces the placeholder icon.
-                                    CoverImage(
-                                        url = item.coverUrl,
-                                        contentDescription = item.title,
-                                        modifier = Modifier
-                                            .padding(4.dp)
-                                            .width(40.dp)
-                                            .aspectRatio(2f / 3f)
-                                            .clip(RoundedCornerShape(4.dp)),
-                                    )
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { viewModel.pick(group.sourceId, item) },
-                            )
+            // Weighted, and wrapping the whole `when` rather than one branch of it. Every branch
+            // below fills its parent, and as a plain second child of this Column each was measured
+            // against the *full* screen height starting under the text field — so the spinner
+            // centred itself below the fold and the results grid ran off the bottom. weight(1f)
+            // hands them the height that is actually left.
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                when {
+                    uiState.hasNoSources -> EmptyState(
+                        icon = Icons.Filled.Extension,
+                        title = "No sources installed",
+                        message = "Install an add-on or extension, then come back to watch this from AniList.",
+                        actionLabel = "Browse add-ons",
+                        onAction = onBrowseAddons,
+                    )
+                    uiState.isSearching -> LoadingState()
+                    uiState.query.isBlank() -> CenterText(
+                        "Type a title above to find it in your installed sources.",
+                    )
+                    uiState.groups.isEmpty() -> CenterText(
+                        "No matches. Try a different spelling or the romaji title.",
+                    )
+                    else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
+                        uiState.groups.forEach { group ->
+                            item(key = "hdr-${group.sourceId}") {
+                                Text(
+                                    text = group.sourceName,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
+                                )
+                            }
+                            items(group.items, key = { "${group.sourceId}:${it.url}" }) { item ->
+                                ListItem(
+                                    headlineContent = { Text(item.title) },
+                                    leadingContent = {
+                                        // Explicit poster bounds: CoverImage lays its image out with
+                                        // matchParentSize, which contributes nothing to measurement —
+                                        // without a size here the row's thumbnail collapses to 0x0 as
+                                        // soon as the image loads and replaces the placeholder icon.
+                                        CoverImage(
+                                            url = item.coverUrl,
+                                            contentDescription = item.title,
+                                            modifier = Modifier
+                                                .padding(4.dp)
+                                                .width(40.dp)
+                                                .aspectRatio(2f / 3f)
+                                                .clip(RoundedCornerShape(4.dp)),
+                                        )
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { viewModel.pick(group.sourceId, item) },
+                                )
+                            }
                         }
                     }
                 }
