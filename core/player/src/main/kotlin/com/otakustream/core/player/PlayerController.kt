@@ -9,6 +9,7 @@ import android.os.SystemClock
 import android.provider.OpenableColumns
 import androidx.annotation.OptIn
 import androidx.core.content.ContextCompat
+import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -81,6 +82,16 @@ data class PlaybackProgress(
 
 data class PlayerUiState(
     val isPlaying: Boolean = false,
+    // Whether the user has asked for playback, as opposed to whether frames are moving.
+    //
+    // These differ for the whole of every buffer and every seek, and the play/pause button has to
+    // render from this one: it acts by toggling playWhenReady, so rendering from isPlaying made the
+    // button show the opposite of what tapping it would do — a play triangle during buffering that
+    // paused when you pressed it, which is most of a torrent's first minute.
+    val playWhenReady: Boolean = false,
+    // The media ran to the end. playWhenReady stays true through STATE_ENDED, so without this the
+    // button would show Pause over a finished video and tapping it would do nothing.
+    val hasEnded: Boolean = false,
     val isBuffering: Boolean = false,
     val playbackSpeed: Float = 1f,
     val volume: Float = 1f,
@@ -126,7 +137,33 @@ class PlayerController @Inject constructor(
     // same folder.
     private val downloadStore: com.otakustream.core.download.DownloadStore,
 ) {
-    val player: ExoPlayer = ExoPlayer.Builder(appContext, PlayerRenderersFactory(appContext)).build()
+    val player: ExoPlayer = ExoPlayer.Builder(appContext, PlayerRenderersFactory(appContext))
+        // Media3 defaults both of these off, so a player built without them is antisocial in two
+        // very noticeable ways.
+        //
+        // setAudioAttributes(handleAudioFocus = true): without it an episode keeps playing at full
+        // volume over a phone call, a voice note, a navigation prompt or another app's audio, and
+        // never ducks or pauses. MOVIE usage with MEDIA content type is what a video player should
+        // be requesting.
+        //
+        // setHandleAudioBecomingNoisy: without it, unplugging headphones or losing a Bluetooth
+        // connection routes the audio to the phone speaker and keeps playing — the classic way to
+        // broadcast your anime to a train carriage.
+        .setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                .build(),
+            /* handleAudioFocus = */ true,
+        )
+        .setHandleAudioBecomingNoisy(true)
+        .build()
+        .apply {
+            // A partial wakelock for the audio path, so backgrounded or screen-off playback isn't
+            // starved when the CPU idles. The screen itself is kept on by the player screen while
+            // it is visible; this covers the case where it deliberately is not.
+            setWakeMode(C.WAKE_MODE_NETWORK)
+        }
 
     private val _uiState = MutableStateFlow(PlayerUiState())
     val uiState: StateFlow<PlayerUiState> = _uiState.asStateFlow()
@@ -139,6 +176,10 @@ class PlayerController @Inject constructor(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private var currentMediaUrl: String? = null
+
+    // The hand-off consumed by the current playback, retained for retryCurrent(). Not a cache: it
+    // is re-stashed and consumed again on each retry.
+    private var lastStashed: PendingPlayback.Stashed? = null
     // Kept so addExternalSubtitle can rebuild the current item (same headers/factory) with an
     // extra subtitle track mid-playback.
     private var currentMediaItem: MediaItem? = null
@@ -177,6 +218,23 @@ class PlayerController @Inject constructor(
     // outcome the same whichever way the race falls.
     private val playbackSession = java.util.concurrent.atomic.AtomicLong(0)
     val currentPlaybackSession: Long get() = playbackSession.get()
+
+    // What a player screen actually owns: the *chain* of playbacks it started, not one video.
+    //
+    // playbackSession above is per-media and is bumped by every play(), auto-play included. The
+    // screen captured it once, in LaunchedEffect(videoUrl) — and auto-play changes the media in
+    // place without renavigating, so videoUrl never changes and that effect never re-runs. One
+    // episode in, the screen was holding a retired token, stop() refused it, and backing out left
+    // the episode playing underneath the details screen with the queue still chaining episode after
+    // episode and no controls anywhere to stop it. That is the exact failure the session token was
+    // introduced to fix, working only for the first episode.
+    //
+    // The chain is bumped only by a playback nobody is already holding — a screen opening a video —
+    // and deliberately not by playNext()/skipToNext(), which continue the chain the screen already
+    // owns. A newly opened player still retires the previous screen's claim, so the guard that stops
+    // a departing screen killing the video that replaced it is unchanged.
+    private val playbackChain = java.util.concurrent.atomic.AtomicLong(0)
+    val currentPlaybackChain: Long get() = playbackChain.get()
     // Manual (database) and AniSkip-fetched segments are tracked separately, then merged into
     // currentSegments with AniSkip winning on overlap.
     private var manualSegments: List<PlayerSkipSegment> = emptyList()
@@ -199,6 +257,10 @@ class PlayerController @Inject constructor(
             _uiState.value = _uiState.value.copy(autoSkipEnabled = autoSkip, seekDurationMs = seek)
         }
         player.addListener(object : Player.Listener {
+            override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+                _uiState.value = _uiState.value.copy(playWhenReady = playWhenReady)
+            }
+
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 _uiState.value = _uiState.value.copy(isPlaying = isPlaying)
                 // Only start the service once per playback session: onIsPlayingChanged(true) fires
@@ -211,7 +273,10 @@ class PlayerController @Inject constructor(
             }
 
             override fun onPlaybackStateChanged(playbackState: Int) {
-                _uiState.value = _uiState.value.copy(isBuffering = playbackState == Player.STATE_BUFFERING)
+                _uiState.value = _uiState.value.copy(
+                    isBuffering = playbackState == Player.STATE_BUFFERING,
+                    hasEnded = playbackState == Player.STATE_ENDED,
+                )
                 // Duration becomes known during buffering/ready — publish it through the progress
                 // flow so the scrubber's range updates without touching the rest of the UI state.
                 publishProgress(_progress.value.positionMs)
@@ -401,7 +466,14 @@ class PlayerController @Inject constructor(
         }
     }
 
-    fun play(url: String, startPositionMs: Long? = null, fromSource: Boolean = false) {
+    fun play(
+        url: String,
+        startPositionMs: Long? = null,
+        fromSource: Boolean = false,
+        // True only for playNext()/skipToNext(): the same screen moving through its queue, which
+        // must not retire that screen's claim on the playback. See playbackChain.
+        continuesChain: Boolean = false,
+    ) {
         // Before anything is mutated. What the player will open depends on who chose the URL: a
         // source may only point at http, https or the app's own torrent:// identity, while file://
         // and content:// belong to URLs the user picked, and refusing those would break on-device
@@ -422,6 +494,35 @@ class PlayerController @Inject constructor(
         } else {
             PendingPlayback.Provenance.USER
         }
+        // Refused before anything is mutated, alongside the PlayableUrl check and for the same
+        // reason: a play that is not going to happen must leave the current one untouched.
+        //
+        // This started out further down, inside the load coroutine, which was wrong in three ways at
+        // once — by then currentMediaUrl had been reassigned, the playback session and chain had
+        // been retired (so a screen holding the new chain would stop the *old*, still-playing
+        // video on disposal), and the foreground-service flag had been reset. The refusal has no
+        // reason to be late: isUsable is a synchronous property read.
+        if (TorrentUri.isTorrentUrl(url) && !torrentEngine.isUsable) {
+            // Recorded even though nothing will play, so Retry has something to retry.
+            //
+            // Refusing before any state is mutated is right, but it left currentMediaUrl unset on
+            // the very first play of a session — and retryCurrent() reads exactly that, so the
+            // Retry button under "Torrent playback is turned off" did nothing at all. Turning the
+            // setting on and pressing Retry is the obvious next move, and it has to work.
+            //
+            // Only this field: the session and chain stay where they are, so a screen holding the
+            // previous chain still owns whatever is genuinely playing.
+            currentMediaUrl = url
+            _uiState.value = _uiState.value.copy(
+                error = torrentRefusalMessage(
+                    isAvailable = torrentEngine.isAvailable,
+                    torrentsEnabled = torrentEngine.torrentsEnabled,
+                    unmeteredOnly = torrentEngine.unmeteredOnly,
+                    isOnUnmeteredNetwork = torrentEngine.isOnUnmeteredNetwork,
+                ),
+            )
+            return
+        }
         if (!PlayableUrl.isAllowed(url, provenance)) {
             // Returning before currentMediaUrl is reassigned and before segmentsJob is restarted:
             // a refused URL must not become the key progress and completion are recorded against,
@@ -436,6 +537,7 @@ class PlayerController @Inject constructor(
         // Retires whatever the player screen that started the previous video is holding, so its
         // eventual disposal cannot stop this one.
         playbackSession.incrementAndGet()
+        if (!continuesChain) playbackChain.incrementAndGet()
         // New media, new playback session: the foreground service must be (re)started when this
         // one begins playing, and the scrubber must not briefly show the previous video's position.
         foregroundServiceStarted = false
@@ -471,6 +573,12 @@ class PlayerController @Inject constructor(
         }
 
         val stashed = PendingPlayback.consume(url)
+        // Kept so retryCurrent() can put it back. PendingPlayback is a one-shot hand-off, so after
+        // this line the headers, subtitle tracks, HLS flag, trackers and AniSkip lookup that the
+        // source resolved are gone — and a retry without them re-prepares a bare URL: 403 from any
+        // host that needs a Referer, an extension-less HLS stream probed as progressive, no
+        // subtitles and no skip markers.
+        lastStashed = stashed
         val pending = stashed?.video
         currentSkipLookup = stashed?.skipLookup
 
@@ -636,7 +744,7 @@ class PlayerController @Inject constructor(
     private suspend fun playNext() {
         val next = PlaybackQueue.resolveNext() ?: return
         PendingPlayback.stash(next)
-        play(next.url)
+        play(next.url, continuesChain = true)
     }
 
     // A play that arrived outside the catalog flow (local file, pasted URL, "Open with") still
@@ -709,14 +817,17 @@ class PlayerController @Inject constructor(
     // process, so releasing it here would leave the next one with a dead player. What is torn down
     // is the *playback*: position saved, media dropped, jobs cancelled, service stopped.
     //
-    // Takes the session the caller believes it is stopping (see currentPlaybackSession). A screen
-    // that has already been superseded by a newer play() holds an old token and is refused, which
-    // is what stops a departing player screen from killing the video that replaced it.
-    fun stop(session: Long) {
-        if (session != playbackSession.get()) return
-        // Retire the session here too, so a second stop for the same one — a disposal racing an
-        // explicit stop — cannot run this twice.
+    // Takes the playback *chain* the caller believes it is stopping (see currentPlaybackChain). A
+    // screen that has already been superseded by a newer play() holds an old chain and is refused,
+    // which is what stops a departing player screen from killing the video that replaced it.
+    // Auto-play continuations deliberately do not advance the chain, so a screen still owns the
+    // episodes its queue moved on to.
+    fun stop(chain: Long) {
+        if (chain != playbackChain.get()) return
+        // Retire both here, so a second stop for the same chain — a disposal racing an explicit
+        // stop — cannot run this twice.
         playbackSession.incrementAndGet()
+        playbackChain.incrementAndGet()
 
         // Before player.stop(), which resets the position to zero — reading it afterwards would
         // write "the very beginning" over the user's real place in the episode.
@@ -779,13 +890,13 @@ class PlayerController @Inject constructor(
         if (player.playWhenReady) pause() else resume()
     }
 
+    // Bounds handled by clampSeekPosition, which tolerates an unknown duration — see PlaybackRules.
     fun seekBy(deltaMs: Long) {
-        val target = (player.currentPosition + deltaMs).coerceIn(0L, player.duration.coerceAtLeast(0L))
-        player.seekTo(target)
+        player.seekTo(clampSeekPosition(player.currentPosition + deltaMs, player.duration))
     }
 
     fun seekTo(positionMs: Long) {
-        player.seekTo(positionMs.coerceIn(0L, player.duration.coerceAtLeast(0L)))
+        player.seekTo(clampSeekPosition(positionMs, player.duration))
     }
 
     fun setVolume(volume: Float) {
@@ -863,6 +974,32 @@ class PlayerController @Inject constructor(
 
     fun skipToNext() {
         scope.launch { playNext() }
+    }
+
+    // Re-prepares whatever is playing now, from the last known position.
+    //
+    // The error overlay used to retry the player screen's route argument, which is the episode the
+    // screen was *opened* on. Auto-play moves through episodes without renavigating, so if episode
+    // three failed, Retry restarted episode one. Retrying the controller's own current url keeps
+    // the chain where the user actually is.
+    fun retryCurrent() {
+        val url = currentMediaUrl ?: return
+        // Put the hand-off back before replaying.
+        //
+        // Two things go wrong without this. The metadata is lost, as described where lastStashed is
+        // written. And play() treats a missing stash as a direct play, so it calls
+        // PlaybackQueue.clear() — meaning a failed episode that the user retried would also switch
+        // auto-play off for the rest of the session.
+        lastStashed?.let { stashed ->
+            PendingPlayback.stash(
+                video = stashed.video,
+                historyHandled = stashed.historyHandled,
+                skipLookup = stashed.skipLookup,
+                provenance = stashed.provenance,
+                directPlayTitle = stashed.directPlayTitle,
+            )
+        }
+        play(url, continuesChain = true)
     }
 
     // AniSkip is fetched once per playback, after the real duration is known (STATE_READY).

@@ -62,4 +62,9 @@ dependencies {
     implementation(libs.hilt.android)
     implementation(libs.hilt.navigation.compose)
     kapt(libs.hilt.compiler)
+
+    // This module had no tests at all, which is how a seek clamp that sent every seek to 0:00
+    // while the duration was unknown survived. The parts of playback that are pure arithmetic now
+    // live in PlaybackRules.kt so they can be exercised on the JVM runners CI already has.
+    testImplementation(libs.junit)
 }

@@ -91,6 +91,8 @@ class PlayerViewModel @Inject constructor(
 
     fun play(url: String, fromSource: Boolean = false) = controller.play(url, fromSource = fromSource)
 
+    fun retryCurrent() = controller.retryCurrent()
+
     fun warmUpCast() = controller.warmUpCast()
 
     fun clearNotice() = controller.clearNotice()
