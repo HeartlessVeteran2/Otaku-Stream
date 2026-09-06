@@ -2,6 +2,7 @@ package com.otakustream.app.navigation
 
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -30,8 +31,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -80,6 +83,7 @@ import com.otakustream.feature.sources.ui.MediaDetailsScreen
 import com.otakustream.feature.sources.ui.SourcesScreen
 import com.otakustream.feature.sources.ui.StremioAccountScreen
 import com.otakustream.feature.tracking.TrackingSettingsScreen
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 private const val ROUTE_PLAY = "play"
@@ -209,9 +213,38 @@ fun AppNavHost(
     val scope = rememberCoroutineScope()
     DisposableEffect(Unit) {
         UiMessages.setSink { message ->
+            // The undo runs on this scope, not the caller's. A ViewModel that removed something is
+            // routinely cleared the moment the user leaves the screen, while the snackbar offering
+            // to put it back is still on screen — undoing on a cancelled viewModelScope would do
+            // nothing while telling the user it had worked. This scope lives as long as the nav
+            // host, which is as long as there is a snackbar to tap.
             scope.launch {
-                snackbarHostState.currentSnackbarData?.dismiss()
-                snackbarHostState.showSnackbar(message)
+                // No dismiss of whatever is showing. SnackbarHostState already queues, and
+                // dismissing first completed a pending Undo *as dismissed* — so any second
+                // confirmation arriving in the four seconds after a removal ("Installed X") took
+                // the chance to undo it away without the user doing anything.
+                val result = snackbarHostState.showSnackbar(
+                    message = message.text,
+                    actionLabel = message.actionLabel,
+                    // Long, so there is time to notice a mis-tap and take it back. A plain
+                    // confirmation stays Short — it is telling you something, not asking.
+                    duration = if (message.action != null) SnackbarDuration.Long else SnackbarDuration.Short,
+                )
+                if (result == SnackbarResult.ActionPerformed) {
+                    // Guarded, because this scope belongs to the nav host: an exception here takes
+                    // the app down, and the ViewModel that would normally have caught it is
+                    // precisely the thing this design assumes is already gone. Failing quietly is
+                    // also wrong — the user asked for something back — so say so.
+                    runCatching { message.action?.invoke() }.onFailure { failure ->
+                        // Cancellation is not a failed undo. runCatching catches Throwable, so a
+                        // nav host going away mid-undo would otherwise be reported to the user as
+                        // an error and then try to draw a snackbar on the scope that just died.
+                        if (failure is CancellationException) throw failure
+                        // The user only gets "couldn't", so the reason has to go somewhere.
+                        Log.w("Undo", "Undo action failed", failure)
+                        snackbarHostState.showSnackbar("Couldn't undo that")
+                    }
+                }
             }
         }
         onDispose { UiMessages.setSink(null) }

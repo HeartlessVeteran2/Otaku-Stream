@@ -10,6 +10,10 @@ interface LibraryRepository {
     fun observeInLibrary(mediaUrl: String): Flow<Boolean>
     fun observeStatus(mediaUrl: String): Flow<String?>
     suspend fun add(entry: LibraryEntry)
+
+    // Restores an entry only if its mediaUrl is free. Returns whether it was actually inserted, so
+    // a caller undoing a removal can tell "put back" from "someone saved it again first".
+    suspend fun addIfAbsent(entry: LibraryEntry): Boolean
     suspend fun remove(mediaUrl: String)
     suspend fun setStatus(mediaUrl: String, status: String)
 
@@ -29,6 +33,8 @@ class LibraryRepositoryImpl @Inject constructor(
     override fun observeInLibrary(mediaUrl: String): Flow<Boolean> = libraryDao.observeInLibrary(mediaUrl)
     override fun observeStatus(mediaUrl: String): Flow<String?> = libraryDao.observeStatus(mediaUrl)
     override suspend fun add(entry: LibraryEntry) = libraryDao.upsert(entry)
+    override suspend fun addIfAbsent(entry: LibraryEntry): Boolean =
+        libraryDao.insertIfAbsent(entry) != -1L
     override suspend fun remove(mediaUrl: String) = libraryDao.delete(mediaUrl)
     override suspend fun setStatus(mediaUrl: String, status: String) = libraryDao.setStatus(mediaUrl, status)
 

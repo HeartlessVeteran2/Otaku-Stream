@@ -11,17 +11,46 @@ package com.otakustream.core.sources.api
 // with a Retry affordance. This is for confirmations, which have nowhere else to live.
 object UiMessages {
 
+    // A confirmation, optionally with something to undo it.
+    //
+    // The action is a suspend lambda and is invoked by whoever hosts the snackbar, on that host's
+    // scope — deliberately not the caller's. A ViewModel that removes something can be cleared the
+    // moment the user leaves the screen, and an undo running on its cancelled scope would do
+    // nothing at all while the snackbar said it had worked.
+    class Message(
+        val text: String,
+        val actionLabel: String? = null,
+        val action: (suspend () -> Unit)? = null,
+    ) {
+        init {
+            // The two are meaningless apart: an action with no label draws no button, so the
+            // lambda can never run, and a label with no action draws a button that does nothing.
+            // Both are silent failures at a call site that believes it offered an undo.
+            require((actionLabel.isNullOrBlank()) == (action == null)) {
+                "A snackbar action needs a label and a label needs an action"
+            }
+        }
+    }
+
     private val lock = Any()
 
     @Volatile
-    private var sink: ((String) -> Unit)? = null
+    private var sink: ((Message) -> Unit)? = null
 
     // Messages emitted before a sink exists (e.g. a bootstrapper finishing during startup) are
     // held so the confirmation isn't silently dropped.
-    private val pending = mutableListOf<String>()
+    private val pending = mutableListOf<Message>()
 
-    fun show(message: String) {
-        if (message.isBlank()) return
+    fun show(message: String) = show(Message(message))
+
+    // A confirmation the user can take back. Only for changes that can be restored exactly —
+    // removing a row, say. Deleting a file's bytes cannot be undone, and offering "Undo" for it
+    // would be a lie; those ask first instead.
+    fun showUndoable(text: String, actionLabel: String = "Undo", action: suspend () -> Unit) =
+        show(Message(text, actionLabel, action))
+
+    fun show(message: Message) {
+        if (message.text.isBlank()) return
         val current = sink
         if (current != null) {
             current(message)
@@ -37,8 +66,8 @@ object UiMessages {
     }
 
     // Registered once by the app's UI host. Replays anything that queued up beforehand.
-    fun setSink(newSink: ((String) -> Unit)?) {
-        val replay: List<String>
+    fun setSink(newSink: ((Message) -> Unit)?) {
+        val replay: List<Message>
         synchronized(lock) {
             sink = newSink
             replay = pending.toList()

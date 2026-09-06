@@ -4,17 +4,20 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.otakustream.core.database.download.DownloadEntry
 import com.otakustream.core.database.download.DownloadRepository
+import com.otakustream.core.download.DownloadHeaders
 import com.otakustream.core.download.DownloadProgress
 import com.otakustream.core.download.EpisodeDownloads
 import com.otakustream.core.database.library.LibraryEntry
 import com.otakustream.core.database.library.LibraryRepository
 import com.otakustream.core.database.library.WatchHistoryEntry
+import com.otakustream.core.sources.api.UiMessages
 import com.otakustream.feature.tracking.TrackingManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -77,6 +80,9 @@ class LibraryViewModel @Inject constructor(
         .flowOn(Dispatchers.IO)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState())
 
+    // No undo here, and that is the point: this deletes the file's bytes. Offering "Undo" for
+    // something that would have to be re-downloaded over the network — possibly on a metered
+    // connection, possibly not available any more — would be a lie, so the screen asks first.
     fun removeDownload(row: DownloadRow) {
         viewModelScope.launch {
             episodeDownloads.remove(row.entry.videoUrl)
@@ -84,12 +90,47 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
+    // A failed download was a dead end: the row said "Failed" in red and the only button beside it
+    // deleted it, so recovering meant finding the show again and re-tapping the episode. Everything
+    // needed to re-enqueue is already on the row — the stream url, whether it is HLS, and the
+    // per-video headers the host requires — so this is the same call the first attempt made.
+    fun retryDownload(row: DownloadRow) {
+        val entry = row.entry
+        episodeDownloads.start(
+            url = entry.videoUrl,
+            isM3U8 = entry.isM3U8,
+            // The same decoder the download's own data source uses, not a second copy of it: a
+            // retry that parsed headers differently from the request it is re-issuing would fail
+            // in ways the first attempt did not.
+            headers = DownloadHeaders.decode(entry.headersJson),
+        )
+    }
+
     fun pauseDownload(row: DownloadRow) = episodeDownloads.pause(row.entry.videoUrl)
 
     fun resumeDownload(row: DownloadRow) = episodeDownloads.resume(row.entry.videoUrl)
 
+    // Removal happens immediately and offers to put it back, rather than asking first. A watchlist
+    // row is pure metadata — the exact entry can be restored, so the cheap path is the right one
+    // and a dialog would only be in the way of the common case, which is deliberate.
+    //
+    // The entry is captured before the delete because after it there is nothing left to read.
     fun removeFromWatchlist(mediaUrl: String) {
-        viewModelScope.launch { libraryRepository.remove(mediaUrl) }
+        viewModelScope.launch {
+            val removed = libraryRepository.observeLibrary().first().find { it.mediaUrl == mediaUrl }
+            libraryRepository.remove(mediaUrl)
+            if (removed == null) return@launch
+            UiMessages.showUndoable("Removed ${removed.title}") {
+                // Runs on the snackbar host's scope, not this one — see UiMessages.Message. The
+                // repository is a singleton, so it does not care that this ViewModel may be gone.
+                //
+                // Insert-if-absent, in one statement. add() is an upsert, so undoing after the
+                // title has been saved again would overwrite the newer entry — and with it whatever
+                // status was just set — with the snapshot taken before the delete. Checking first
+                // and then writing only narrows that window; SQLite closes it.
+                libraryRepository.addIfAbsent(removed)
+            }
+        }
     }
 
     fun setStatus(mediaUrl: String, status: String) {

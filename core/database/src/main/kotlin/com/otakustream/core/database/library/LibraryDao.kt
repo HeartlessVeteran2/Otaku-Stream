@@ -2,6 +2,7 @@ package com.otakustream.core.database.library
 
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
@@ -25,6 +26,14 @@ interface LibraryDao {
 
     @Upsert
     suspend fun upsert(entry: LibraryEntry)
+
+    // Insert only if nothing holds this mediaUrl, reported by the rowid (-1 when the conflict
+    // clause dropped it). For undoing a removal: a read-then-upsert leaves a window in which the
+    // title is saved again between the check and the write, and the restore then overwrites the
+    // newer entry — and whatever status was just set — with a snapshot from before the delete.
+    // SQLite does the check and the insert in one statement; nothing can interleave.
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(entry: LibraryEntry): Long
 
     @Query("DELETE FROM library_entries WHERE mediaUrl = :mediaUrl")
     suspend fun delete(mediaUrl: String)

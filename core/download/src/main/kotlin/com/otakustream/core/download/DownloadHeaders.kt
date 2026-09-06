@@ -32,20 +32,28 @@ class DownloadHeaders @Inject constructor(
 
     // Called on Media3's download executor, never the main thread — see the DAO query's comment.
     fun headersFor(url: String): Map<String, String> =
-        cache.getOrPut(url) { parse(runCatching { dao.headersJsonForBlocking(url) }.getOrNull()) }
-
-    private fun parse(json: String?): Map<String, String> {
-        if (json.isNullOrBlank()) return emptyMap()
-        return runCatching {
-            val obj = JSONObject(json)
-            obj.keys().asSequence().associateWith { obj.optString(it) }
-        }.getOrDefault(emptyMap())
-    }
+        cache.getOrPut(url) { decode(runCatching { dao.headersJsonForBlocking(url) }.getOrNull()) }
 
     companion object {
         // Stored as JSON rather than a Room type converter: this is the only place that reads it,
         // and a converter would put a map serialisation format in the schema for one column.
         fun encode(headers: Map<String, String>): String? =
             if (headers.isEmpty()) null else JSONObject(headers as Map<*, *>).toString()
+
+        // The counterpart, shared with anything that re-issues a stored request — a retried
+        // download reads the same column this does. It lived here as a private function until a
+        // second caller wrote its own copy and used getString instead of optString, which throws on
+        // a non-string value and, inside a runCatching, discarded every header rather than that one.
+        //
+        // optString coerces instead, so a malformed value costs its own header and no more.
+        // Unreadable JSON altogether means no headers, which is what the download did before they
+        // were recorded at all.
+        fun decode(json: String?): Map<String, String> {
+            if (json.isNullOrBlank()) return emptyMap()
+            return runCatching {
+                val obj = JSONObject(json)
+                obj.keys().asSequence().associateWith { obj.optString(it) }
+            }.getOrDefault(emptyMap())
+        }
     }
 }

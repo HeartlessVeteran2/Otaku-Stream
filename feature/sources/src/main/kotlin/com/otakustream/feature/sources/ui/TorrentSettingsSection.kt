@@ -14,11 +14,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.compose.runtime.collectAsState
+import com.otakustream.core.ui.ConfirmDialog
 
 // Torrent settings, shown next to the streaming-server field because both answer the same question —
 // "how should a torrent-backed stream be played?" — and keeping them apart would make them look like
@@ -117,8 +121,19 @@ fun TorrentSettingsSection(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
             )
+            var confirmClear by remember { mutableStateOf(false) }
+            if (confirmClear) {
+                ConfirmDialog(
+                    title = "Clear torrent cache?",
+                    body = "This deletes ${state.usageLabel} of downloaded torrent data. Anything you " +
+                        "were part-way through has to be fetched again.",
+                    confirmLabel = "Clear",
+                    onConfirm = viewModel::clearCache,
+                    onDismiss = { confirmClear = false },
+                )
+            }
             TextButton(
-                onClick = viewModel::clearCache,
+                onClick = { confirmClear = true },
                 enabled = state.usageBytes > 0 && !state.isClearing,
             ) { Text(if (state.isClearing) "Clearing…" else "Clear now") }
         }
