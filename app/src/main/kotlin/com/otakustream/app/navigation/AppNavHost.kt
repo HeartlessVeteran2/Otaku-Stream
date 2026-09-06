@@ -424,15 +424,17 @@ fun AppNavHost(
                 AniListWatchScreen(
                     onBack = { navController.popBackStack() },
                     onBrowseAddons = { navController.navigate(ROUTE_BROWSE_STREMIO) },
-                    onOpenSource = { sourceId, mediaUrl, title ->
+                    onOpenSource = { sourceId, mediaUrl, title, coverUrl ->
                         // Replace the bridge in the back stack so returning from the source detail
                         // lands back on the AniList detail (and the bridge doesn't re-resolve the
                         // now-saved link into an immediate re-navigation loop).
-                        // No cover to seed: the bridge matched an AniList title to a source
-                        // result and carries only what it needed to identify it. Stremio and
-                        // Mangayomi fill this in from their own detail responses.
+                        // The picked search result's own poster travels with it. Only a target
+                        // restored from an existing tracker link has none, because the link record
+                        // stores no artwork — there it stays null and the source's own details fill
+                        // the hero in, as they do everywhere else.
                         navController.navigate(
-                            "details/$sourceId?mediaUrl=${Uri.encode(mediaUrl)}&title=${Uri.encode(title)}",
+                            "details/$sourceId?mediaUrl=${Uri.encode(mediaUrl)}&title=${Uri.encode(title)}" +
+                                "&coverUrl=${Uri.encode(coverUrl.orEmpty())}",
                         ) {
                             popUpTo(ROUTE_ANILIST_WATCH) { inclusive = true }
                         }

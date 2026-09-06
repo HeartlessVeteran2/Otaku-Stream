@@ -205,6 +205,13 @@ class MediaDetailsViewModel @Inject constructor(
         _autoPlayEnabled.value = enabled
     }
 
+    // Held like currentTitle and currentSourceId, because retryLoad() replays this call. Without
+    // it a retry after a failed load rebuilt the MediaItem with no cover, and for a scripted source
+    // — which hands the item straight back — that null then propagated into the library entry, the
+    // download row, watch history and the next-episode resolver. The first attempt would have got
+    // it right and the retry would silently lose it.
+    private var currentSeedCoverUrl: String? = null
+
     fun load(sourceId: Long, mediaUrl: String, mediaTitle: String, seedCoverUrl: String? = null) {
         // Navigating to a different title must drop the previous title's season selection, or the
         // link row and the progress push target a season the new title may not even have. The
@@ -214,6 +221,7 @@ class MediaDetailsViewModel @Inject constructor(
         if (currentMediaUrl.value != mediaUrl) _selectedSeason.value = null
         currentMediaUrl.value = mediaUrl
         currentTitle = mediaTitle
+        currentSeedCoverUrl = seedCoverUrl
         currentSourceId = sourceId
         if (loadedFor == sourceId to mediaUrl) return
         loadedFor = sourceId to mediaUrl
@@ -255,7 +263,7 @@ class MediaDetailsViewModel @Inject constructor(
     fun retryLoad() {
         val url = currentMediaUrl.value ?: return
         loadedFor = null
-        load(currentSourceId, url, currentTitle)
+        load(currentSourceId, url, currentTitle, currentSeedCoverUrl)
     }
 
     fun setLibraryStatus(status: String) {
