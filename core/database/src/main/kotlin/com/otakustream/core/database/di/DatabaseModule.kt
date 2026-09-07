@@ -118,7 +118,11 @@ abstract class DatabaseBindsModule {
         impl: ScriptedSourceRepositoryImpl,
     ): ScriptedSourceRepository
 
+    // Scoped, unlike the rest here. LibraryRepositoryImpl holds the history-generation counter that
+    // invalidates a pending undo after a Clear history, and a counter handed out per injection point
+    // is no counter at all — see the class for the full argument.
     @Binds
+    @Singleton
     abstract fun bindLibraryRepository(
         impl: LibraryRepositoryImpl,
     ): LibraryRepository

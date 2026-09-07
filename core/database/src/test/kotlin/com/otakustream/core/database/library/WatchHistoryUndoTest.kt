@@ -7,7 +7,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -61,7 +63,7 @@ class WatchHistoryUndoTest {
         val target = repository.observeHistory().first().first { it.episodeNumber == 2f }
         val removed = repository.removeHistoryEntryAndReturn(target.id)
 
-        assertEquals("the deleted row is handed back", target.id, removed?.id)
+        assertEquals("the deleted row is handed back", target.id, removed?.entry?.id)
         val remaining = repository.observeHistory().first()
         assertEquals(2, remaining.size)
         assertEquals(setOf(1f, 1f), remaining.map { it.episodeNumber }.toSet())
@@ -75,7 +77,7 @@ class WatchHistoryUndoTest {
         val removed = repository.removeHistoryEntryAndReturn(original.id)!!
         assertEquals(0, repository.observeHistory().first().size)
 
-        repository.restoreHistoryEntry(removed)
+        assertTrue("a restore into an unchanged history must succeed", repository.restoreHistoryEntry(removed))
 
         val restored = repository.observeHistory().first().single()
         // The id is deliberately not compared: autoGenerate issues a new one, which is why undo
@@ -93,9 +95,59 @@ class WatchHistoryUndoTest {
         repository.recordWatch(entry("Frieren", 1f, 1_000))
         val id = repository.observeHistory().first().single().id
 
-        assertEquals(id, repository.removeHistoryEntryAndReturn(id)?.id)
+        assertEquals(id, repository.removeHistoryEntryAndReturn(id)?.entry?.id)
         // Undo can be tapped after the row has gone another way — clearing history, say. It has to
         // find nothing rather than fail.
         assertNull(repository.removeHistoryEntryAndReturn(id))
+    }
+
+    // Clear history asks first and tells the user it cannot be undone. A snackbar from a single-row
+    // delete can still be on screen when they say yes — the undo runs on the snackbar host's scope
+    // precisely so it outlives the screen that offered it — and tapping it then would put one row
+    // back into a history that had just been wiped on that promise.
+    @Test
+    fun `undo refuses to restore into a history that has since been cleared`() = runTest {
+        repository.recordWatch(entry("Frieren", 12f, 5_000))
+        repository.recordWatch(entry("Dandadan", 1f, 6_000))
+        val target = repository.observeHistory().first().first { it.mediaTitle == "Frieren" }
+
+        val removed = repository.removeHistoryEntryAndReturn(target.id)!!
+        repository.clearHistory()
+
+        assertFalse("the restore must be refused, not silently performed", repository.restoreHistoryEntry(removed))
+        assertEquals("and nothing may come back", 0, repository.observeHistory().first().size)
+    }
+
+    // The other half of the same rule: a clear the user has *since undone the effects of* by
+    // watching something new does not make the history a different history. Only a clear does — so
+    // a delete made after the clear is still restorable.
+    @Test
+    fun `a row deleted after a clear is still restorable`() = runTest {
+        repository.recordWatch(entry("Frieren", 1f, 1_000))
+        repository.clearHistory()
+        repository.recordWatch(entry("Dandadan", 1f, 2_000))
+        val target = repository.observeHistory().first().single()
+
+        val removed = repository.removeHistoryEntryAndReturn(target.id)!!
+
+        assertTrue(repository.restoreHistoryEntry(removed))
+        assertEquals("Dandadan", repository.observeHistory().first().single().mediaTitle)
+    }
+
+    // Two deletions, one clear: neither undo may fire. The token is per-history, not per-row, so a
+    // second pending undo must not be judged against the first one's fate either way.
+    @Test
+    fun `a clear invalidates every undo outstanding at the time`() = runTest {
+        repository.recordWatch(entry("Frieren", 1f, 1_000))
+        repository.recordWatch(entry("Dandadan", 1f, 2_000))
+        val rows = repository.observeHistory().first()
+
+        val first = repository.removeHistoryEntryAndReturn(rows[0].id)!!
+        val second = repository.removeHistoryEntryAndReturn(rows[1].id)!!
+        repository.clearHistory()
+
+        assertFalse(repository.restoreHistoryEntry(first))
+        assertFalse(repository.restoreHistoryEntry(second))
+        assertEquals(0, repository.observeHistory().first().size)
     }
 }

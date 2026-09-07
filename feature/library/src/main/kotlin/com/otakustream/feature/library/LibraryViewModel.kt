@@ -21,7 +21,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 
 data class LibraryUiState(
@@ -177,11 +176,6 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
-    // Bumped every time the history is wiped. A pending Undo captures the value it was created
-    // under and refuses if it no longer matches, so "this can't be undone" stays true. Atomic
-    // because the undo runs on the snackbar host's scope, not this ViewModel's.
-    private val historyGeneration = AtomicInteger(0)
-
     // One row, with an undo — matching what Watchlist and Downloads already offer. History was
     // the only list where the sole way to remove anything was to clear all of it, so a single
     // mistyped search or a video opened by accident could only be tidied away by destroying the
@@ -189,36 +183,33 @@ class LibraryViewModel @Inject constructor(
     fun removeHistoryEntry(id: Long) {
         viewModelScope.launch {
             val removed = libraryRepository.removeHistoryEntryAndReturn(id) ?: return@launch
-            // Read before the snackbar is shown, so the action below is scoped to the history this
-            // row was deleted from rather than to whatever is there when it is tapped.
-            val generation = historyGeneration.get()
-            UiMessages.showUndoable("Removed ${removed.mediaTitle} from history") {
+            UiMessages.showUndoable("Removed ${removed.entry.mediaTitle} from history") {
                 // Runs on the snackbar host's scope, not this one — see UiMessages.Message. A
                 // straight restore rather than insert-if-absent: history rows are append-only and
                 // carry no user-editable state, so there is nothing here for a concurrent write to
                 // overwrite, unlike the watchlist entry this pattern came from.
                 //
                 // But the undo has to expire. The snackbar outlives the row it is about: delete one
-                // entry, then Clear history — which asks first and says it cannot be undone — and
-                // the still-visible Undo would put that one row back into a history the user had
-                // just been told was gone for good. And say so when it refuses, for the same reason
-                // the watchlist undo above does: a snackbar that closes exactly as it does on
-                // success, having done nothing, is the one case worth telling the user about.
-                if (historyGeneration.get() != generation) {
-                    UiMessages.show("History was cleared — ${removed.mediaTitle} wasn't restored")
-                    return@showUndoable
+                // entry, then Clear history — which asks first and says it cannot be undone — and a
+                // still-visible Undo would put that one row back into a history the user had just
+                // been told was gone for good. `removed` carries which history it came from, and
+                // the repository refuses the restore if that history has since been wiped.
+                //
+                // The check lives there rather than here for two reasons this ViewModel cannot fix:
+                // it has to be atomic with the insert, and it has to survive this ViewModel, which
+                // a rotation replaces while the snackbar it created is still on screen.
+                //
+                // And say so when it refuses, for the same reason the watchlist undo above does: a
+                // snackbar that closes exactly as it does on success, having done nothing, is the
+                // one case worth telling the user about.
+                if (!libraryRepository.restoreHistoryEntry(removed)) {
+                    UiMessages.show("History was cleared — ${removed.entry.mediaTitle} wasn't restored")
                 }
-                libraryRepository.restoreHistoryEntry(removed)
             }
         }
     }
 
     fun clearHistory() {
-        viewModelScope.launch {
-            libraryRepository.clearHistory()
-            // After the delete, not before: a pending undo racing the clear should lose only if the
-            // clear actually happened.
-            historyGeneration.incrementAndGet()
-        }
+        viewModelScope.launch { libraryRepository.clearHistory() }
     }
 }
