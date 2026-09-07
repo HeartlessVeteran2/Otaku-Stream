@@ -141,12 +141,15 @@ class RealExtensionIndexTest {
     // reproduction. MangayomiIndexTest holds the case that does reproduce it.
     @Test
     fun `every id in the merged directory is unique`() {
+        // Repo names, not filenames — the other tests in this file pass these and the merged rows
+        // carry repoName through to the UI, so labelling them after the fixture file would be a
+        // small lie sitting in the one test that reads most like production.
         val fixtures = listOf(
-            "anime_index_m2k3a.json",
-            "anime_index_mallyd11.json",
-            "anime_index_swakshan.json",
+            "anime_index_m2k3a.json" to "m2k3a",
+            "anime_index_mallyd11.json" to "Mallyd11",
+            "anime_index_swakshan.json" to "Swakshan",
         )
-        val parsed = fixtures.flatMap { parseMangayomiIndex(fixture(it), it).listings }
+        val parsed = fixtures.flatMap { (file, repo) -> parseMangayomiIndex(fixture(file), repo).listings }
         val merged = withUniqueIds(parsed)
 
         val duplicates = merged.groupBy { it.id }.filterValues { it.size > 1 }
