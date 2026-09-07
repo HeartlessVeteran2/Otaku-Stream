@@ -56,10 +56,35 @@ private object SandboxedContextFactory : ContextFactory() {
     override fun observeInstructionCount(context: Context, instructionCount: Int) {
         val deadline = context.getThreadLocal(DEADLINE_KEY) as? Long ?: return
         if (System.nanoTime() > deadline) {
-            throw ScriptTimeoutException()
+            throw ScriptDeadlineError()
         }
     }
 }
+
+// Two types for one event, and the split is load-bearing.
+//
+// ScriptDeadlineError is what the instruction observer throws, and it extends Error because Rhino
+// will not deliver an Error to a script's own `catch`. A RuntimeException is delivered, and that
+// defeats the entire mechanism: a source written as
+//
+//     try { while (true) {} } catch (e) {}
+//
+// catches the timeout, resumes the loop, gets interrupted again at the next 10,000-instruction
+// checkpoint, catches again, and never stops — with the mutex still held, which is the exact
+// permanent wedge the deadline exists to prevent. Rhino's own ContextFactory documentation
+// specifies an Error subclass here so the script "never gets control back through catch or
+// finally". This was shipped as a RuntimeException and had to be corrected.
+//
+// ScriptTimeoutException is what callers see, and it stays a RuntimeException because the app's
+// error handling is built on Exception: ScriptedSourceBootstrapper deliberately catches Exception
+// rather than Throwable so a genuine VM error propagates instead of being filed as "this script was
+// malformed". Letting an Error out of ScriptEngine would crash the app on a slow script during
+// bootstrap — trading a wedged source for a crash.
+//
+// So the Error is confined to the span Rhino controls, and ScriptEngine converts at the boundary.
+internal class ScriptDeadlineError : Error(
+    "The source script took too long and was stopped.",
+)
 
 // A script that ran past its deadline. Distinct from a script that threw, because the two mean
 // different things to the user: one source is broken, the other is stuck.
@@ -108,6 +133,9 @@ class ScriptEngine @Inject constructor(
             ScriptableObject.putProperty(scope, "httpGet", httpGetFunctionFor(httpBridge))
             context.evaluateString(scope, source, scriptName, 1, null)
             return ScriptScope(scope)
+        } catch (deadline: ScriptDeadlineError) {
+            // Converted here, at the edge of the span Rhino controls — see ScriptDeadlineError.
+            throw ScriptTimeoutException()
         } finally {
             Context.exit()
         }
@@ -123,6 +151,8 @@ class ScriptEngine @Inject constructor(
                 ?: error("Script does not define function '$functionName'")
             val result = function.call(context, scope.scriptable, scope.scriptable, args)
             return Context.toString(result)
+        } catch (deadline: ScriptDeadlineError) {
+            throw ScriptTimeoutException()
         } finally {
             Context.exit()
         }

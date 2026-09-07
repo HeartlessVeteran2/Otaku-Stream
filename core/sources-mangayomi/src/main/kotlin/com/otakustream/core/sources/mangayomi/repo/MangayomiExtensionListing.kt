@@ -59,19 +59,7 @@ fun parseMangayomiIndex(json: String, repoName: String? = null): ParsedIndex {
     // different language gets a derived one instead — the same stableSourceId(name, lang) already
     // used for entries that declare no id at all, so nothing new is invented here. A repeat of the
     // same id *and* language is a genuine duplicate and is dropped.
-    val seenIds = mutableSetOf<Long>()
-    val seenKeys = mutableSetOf<Pair<Long, String>>()
-    val deduped = parsed.mapNotNull { listing ->
-        if (!seenKeys.add(listing.id to listing.lang)) return@mapNotNull null
-        if (seenIds.add(listing.id)) {
-            listing
-        } else {
-            val derived = stableSourceId(listing.name, listing.lang)
-            // Only if the derived id is itself free; otherwise this entry cannot be told apart from
-            // one already listed and is dropped rather than colliding.
-            if (seenIds.add(derived)) listing.copy(id = derived) else null
-        }
-    }
+    val deduped = withUniqueIds(parsed)
     return ParsedIndex(
         listings = deduped,
         // Counted against what was actually in the file, so the number means "entries this app
@@ -106,4 +94,38 @@ private fun parseEntry(obj: JSONObject?, repoName: String?): MangayomiExtensionL
         sourceCodeLanguage = obj.optInt("sourceCodeLanguage", SOURCE_LANGUAGE_JS),
         repoName = repoName,
     )
+}
+
+// The unique-id rule, as a function, because it has to hold in two places and only held in one.
+//
+// It was applied inside parseMangayomiIndex — per repository — while the screen renders the *merged*
+// directory from three curated repos plus the user's own. Two repos carrying the same declared id
+// under different languages therefore reached the list with a duplicate id, and Compose throws on a
+// duplicate list key: a crash on opening the extensions screen, from data neither repo did anything
+// wrong to produce. Fixing the per-index case and leaving the merge is the same mistake one layer
+// up, which is why the rule now lives somewhere both callers use.
+//
+// Two things have to be true at once. Swakshan's index gives Animeonsen `en` and Animeonsen `ja` the
+// same declared id, and they are genuinely two sources — deduping on the id alone throws one away.
+// But keeping both under one id is worse: besides the Compose key, `installedIds` and the database
+// primary key are id-only, so installing either variant would mark and overwrite the other.
+//
+// So a declared id is honoured once. A second entry claiming an id already taken by a different
+// language gets a derived one — the same stableSourceId(name, lang) already used for entries that
+// declare no id at all, so nothing new is invented here. A repeat of the same id *and* language is a
+// genuine duplicate and is dropped.
+internal fun withUniqueIds(listings: List<MangayomiExtensionListing>): List<MangayomiExtensionListing> {
+    val seenIds = mutableSetOf<Long>()
+    val seenKeys = mutableSetOf<Pair<Long, String>>()
+    return listings.mapNotNull { listing ->
+        if (!seenKeys.add(listing.id to listing.lang)) return@mapNotNull null
+        if (seenIds.add(listing.id)) {
+            listing
+        } else {
+            val derived = stableSourceId(listing.name, listing.lang)
+            // Only if the derived id is itself free; otherwise this entry cannot be told apart from
+            // one already listed and is dropped rather than colliding.
+            if (seenIds.add(derived)) listing.copy(id = derived) else null
+        }
+    }
 }

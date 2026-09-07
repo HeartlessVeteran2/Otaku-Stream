@@ -100,6 +100,63 @@ class ScriptTimeoutTest {
         assertEquals("19999900000", realDeadline.call(scope, "work"))
     }
 
+    // The test the first version of this deadline would have failed.
+    //
+    // A source that wraps its own loop in try/catch — which plenty of real extensions do defensively
+    // around a whole scrape — used to catch the timeout, resume, get interrupted at the next
+    // checkpoint, catch again, and never stop. The mutex stayed held and the source was wedged for
+    // the life of the process, which is precisely the failure the deadline exists to prevent. It
+    // only works because the observer throws an Error, which Rhino will not hand to a script's
+    // catch block.
+    @Test
+    fun `a script cannot swallow its own timeout`() {
+        val scope = shortDeadline.load(
+            """
+            function stubborn() {
+              var caught = 0;
+              while (true) {
+                try {
+                  while (true) {}
+                } catch (e) {
+                  caught++;
+                }
+              }
+            }
+            """.trimIndent(),
+            "stubborn.js",
+        )
+
+        val startedAtMs = System.currentTimeMillis()
+        try {
+            shortDeadline.call(scope, "stubborn")
+            fail("expected the script to be stopped despite catching")
+        } catch (expected: ScriptTimeoutException) {
+            // Control came back, and as the caller-facing type rather than an Error — the app's
+            // error handling catches Exception, not Throwable.
+        }
+        assertTrue(
+            "took ${System.currentTimeMillis() - startedAtMs}ms; a swallowed deadline never returns",
+            System.currentTimeMillis() - startedAtMs < 30_000,
+        )
+    }
+
+    // Nothing above may leak an Error to callers: ScriptedSourceBootstrapper deliberately catches
+    // Exception rather than Throwable, so an Error escaping the engine would crash the app on a
+    // slow script during startup instead of skipping that one source.
+    @Test
+    fun `the deadline surfaces as an Exception, never an Error`() {
+        val scope = shortDeadline.load("function spin() { while (true) {} }", "spin.js")
+
+        val thrown = try {
+            shortDeadline.call(scope, "spin")
+            null
+        } catch (t: Throwable) {
+            t
+        }
+        assertTrue("expected an Exception, got ${thrown?.javaClass?.name}", thrown is Exception)
+        assertTrue(thrown is ScriptTimeoutException)
+    }
+
     // A timeout is not the same thing as a broken script, and the two need different words: one
     // source is stuck, the other is wrong. Reported as its own type so a caller can tell them apart.
     @Test

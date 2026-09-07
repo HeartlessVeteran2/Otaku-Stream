@@ -27,7 +27,13 @@ class MangayomiExtensionInstaller @Inject constructor(
 ) {
     suspend fun install(listing: MangayomiExtensionListing): MangayomiVideoSource = withContext(Dispatchers.IO) {
         val content = download(listing.sourceCodeUrl)
-        val source = factory.create(content, override = listing.toMetadata())
+        // Read first, then build. saveKeepingPrefs restores the row's preferences in the database,
+        // but the source handed back here was already constructed — so a re-install returned a live
+        // runtime with default settings while the database held the user's, and the two only agreed
+        // again at the next cold start. Reachable whenever a re-install happens with the extension
+        // already registered, which is exactly what the directory's Install button does.
+        val existingPrefs = repository.getPrefs(listing.id)
+        val source = factory.create(content, override = listing.toMetadata(), prefsJson = existingPrefs)
         try {
             // Keeps whatever preferences this extension already had — see saveKeepingPrefs.
             repository.saveKeepingPrefs(listing.toRecord(content, repoPrefs.repoUrl))
