@@ -301,7 +301,14 @@ class AniListClient @Inject constructor(
             }
             if (root.has("errors")) {
                 val message = parseErrorMessage(root)
-                if (isTokenRejection(token, response.code, message)) throw AniListUnauthorizedException()
+                // Every error, not just the first, for the rejection check. GraphQL returns an
+                // array, and an auth failure is routinely not the entry at index 0 — a query that
+                // asks for both public and viewer-scoped fields reports the public failure first.
+                // Testing only parseErrorMessage's single message meant the expired token stayed
+                // stored and sync went on failing silently, which is the case this is here to end.
+                if (isTokenRejection(token, response.code, allErrorMessages(root))) {
+                    throw AniListUnauthorizedException()
+                }
                 error(message ?: "AniList request failed")
             }
             return root.optJSONObject("data")
@@ -314,6 +321,17 @@ class AniListClient @Inject constructor(
     // opaque JSONException that getJSONObject throws.
     private fun JSONObject.requireField(name: String): JSONObject =
         optJSONObject(name) ?: error("AniList response was missing \"$name\".")
+
+    // Every GraphQL error message joined together, for predicates that need to see all of them.
+    // Deliberately separate from parseErrorMessage, which picks the one message a human is shown.
+    private fun allErrorMessages(root: JSONObject): String? {
+        val errors = root.optJSONArray("errors") ?: return null
+        val messages = (0 until errors.length()).mapNotNull { index ->
+            errors.optJSONObject(index)?.let { if (it.isNull("message")) null else it.optString("message") }
+                ?.ifEmpty { null }
+        }
+        return messages.joinToString(" ").ifEmpty { null }
+    }
 
     private fun parseErrorMessage(root: JSONObject): String? =
         root.optJSONArray("errors")?.optJSONObject(0)?.let { if (it.isNull("message")) null else it.optString("message") }

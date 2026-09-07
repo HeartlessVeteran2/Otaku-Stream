@@ -47,6 +47,20 @@ class SyncFailurePolicyTest {
     }
 
     @Test
+    fun `a message-based rejection only counts on the status AniList uses for it`() {
+        // The first version matched the message on any status, which is far too wide: a 200 GraphQL
+        // response carrying an "unauthorized" error for one field of a query, or a 5xx whose HTML
+        // body happens to contain the word, would have signed the user out of an account nothing
+        // had rejected.
+        assertFalse(isTokenRejection(token = "abc", code = 200, message = "Unauthorized"))
+        assertFalse(isTokenRejection(token = "abc", code = 500, message = "Invalid token"))
+        assertFalse(isTokenRejection(token = "abc", code = 403, message = "unauthenticated"))
+        // 400 is what AniList actually answers a dead token with, and 401 stands on its own.
+        assertTrue(isTokenRejection(token = "abc", code = 400, message = "Invalid token"))
+        assertTrue(isTokenRejection(token = "abc", code = 401, message = null))
+    }
+
+    @Test
     fun `an outage is not a token rejection`() {
         assertFalse(isTokenRejection(token = "abc", code = 500, message = "Internal Server Error"))
         assertFalse(isTokenRejection(token = "abc", code = 503, message = null))

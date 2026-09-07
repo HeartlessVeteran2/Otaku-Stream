@@ -38,7 +38,7 @@ class TrackingManager @Inject constructor(
         val token = trackingRepository.getToken() ?: return
         val link = trackingRepository.getLink(mediaUrl, season.toTrackerSeason()) ?: return
         val episode = episodeNumber.toWholeEpisodeOrNull() ?: return
-        sync("AniList progress update") {
+        sync("AniList progress update", token) {
             val current = aniListClient.fetchViewerListEntry(token, link.trackerMediaId)
             val update = decideProgressUpdate(current?.status, current?.progress ?: 0, episode)
             if (update != null) {
@@ -72,7 +72,7 @@ class TrackingManager @Inject constructor(
         val token = trackingRepository.getToken() ?: return
         val link = trackingRepository.getLink(mediaUrl, season.toTrackerSeason()) ?: return
         val desired = libraryStatusToAniList(localStatus) ?: return
-        sync("AniList status mirror") {
+        sync("AniList status mirror", token) {
             val current = aniListClient.fetchViewerListEntry(token, link.trackerMediaId)
             val status = decideStatusMirror(current?.status, desired) ?: return@sync
             aniListClient.saveMediaListEntry(
@@ -90,14 +90,25 @@ class TrackingManager @Inject constructor(
     // app clears it, which is the only honest thing it can do — Settings stops claiming to be
     // signed in and offers to sign in again — and says so, because a sign-out the user did not ask
     // for is exactly the kind of change that has to be announced rather than discovered.
-    private suspend fun sync(what: String, block: suspend () -> Unit) {
+    // Takes the token the work was done with, so a rejection can be checked against the token
+    // still in use. Requests outlive the credential they were sent with: sign in again while an
+    // older sync is in flight and its 401 lands after the new token is stored, and an
+    // unconditional clear would revoke a credential nothing had rejected — signing the user out
+    // moments after they signed in, with no explanation.
+    private suspend fun sync(what: String, token: String, block: suspend () -> Unit) {
         runCatching { block() }.onFailure { failure ->
             when (syncFailureAction(failure)) {
                 SyncFailureAction.Rethrow -> throw failure
                 SyncFailureAction.SignOut -> {
-                    Log.w(TAG, "$what: AniList rejected the token; signing out", failure)
-                    trackingRepository.clearToken()
-                    UiMessages.show("Your AniList sign-in expired. Sign in again in Settings to resume syncing.")
+                    Log.w(TAG, "$what: AniList rejected the token", failure)
+                    if (trackingRepository.clearTokenIfCurrent(token)) {
+                        UiMessages.show(
+                            "Your AniList sign-in expired. Sign in again in Settings to resume syncing.",
+                        )
+                    } else {
+                        // A newer token is already in use; this rejection was about the old one.
+                        Log.i(TAG, "$what: the rejected token is no longer current, leaving sign-in alone")
+                    }
                 }
                 SyncFailureAction.LogAndIgnore -> Log.w(TAG, "$what failed", failure)
             }

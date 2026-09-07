@@ -5,6 +5,8 @@ import com.otakustream.core.database.security.openEncryptedPrefs
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -33,7 +35,18 @@ class EncryptedTokenStore @Inject constructor(
     private val _token = MutableStateFlow<String?>(null)
     val token: StateFlow<String?> = _token.asStateFlow()
 
-    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // Every touch of this store's disk state runs here, one at a time, in the order it was asked
+    // for. Same shape AppearancePrefs uses, and it is what makes the initial load, a save and a
+    // clear mutually exclusive instead of three coroutines racing over one file.
+    //
+    // Three concrete races it closes, all of which end with a revoked credential still usable:
+    //  - the initial load finishing after clear() nulled the flow, putting the token straight back
+    //    in memory via compareAndSet;
+    //  - a save landing between clear() dropping memory and clear()'s commit, leaving memory
+    //    signed in and disk signed out;
+    //  - a clear queued behind a save whose write had not happened yet.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
 
     init {
         ioScope.launch {
@@ -47,8 +60,11 @@ class EncryptedTokenStore @Inject constructor(
     fun current(): String? = _token.value
 
     fun save(token: String) {
-        runCatching { prefs?.edit()?.putString(KEY_TOKEN, token)?.apply() }
         _token.value = token
+        // Queued on the same single-threaded scope as clear(), so the two can never invert. apply()
+        // rather than commit(): losing a token that was just written costs a sign-in, not a leaked
+        // credential.
+        ioScope.launch { runCatching { prefs?.edit()?.putString(KEY_TOKEN, token)?.apply() } }
     }
 
     // suspend, and commit() rather than apply(), because this is a credential revocation.
@@ -60,19 +76,39 @@ class EncryptedTokenStore @Inject constructor(
     // prevent, and AppearancePrefs already makes exactly this argument for a theme mode; a revoked
     // bearer token is the stronger case.
     //
-    // In-memory state is dropped first, so the flow turns over on this frame and nothing can use
-    // the credential while the disk write is in flight. The write runs on this store's own scope
-    // rather than the caller's, so it survives the caller being cancelled — the user navigating
-    // away the instant they tap sign out — and is joined so a caller that wants to know it landed
-    // can wait for it.
+    // In-memory state is dropped twice on purpose: once here, so the flow turns over on this frame
+    // and nothing can use the credential while the write is in flight, and once inside the scope,
+    // where it is ordered against the initial load and any queued save. Only the second is enough
+    // for correctness; only the first is fast enough for the UI.
     //
-    // save() deliberately stays on apply(): losing a token that was just written costs a sign-in,
-    // not a leaked credential, and it is on a path that would have to become suspend to gain
-    // nothing.
-    suspend fun clear() {
+    // Returns whether the credential is actually gone from disk. commit() reports failure by
+    // returning false and the earlier version discarded it, so a clear that did not happen was
+    // indistinguishable from one that did — for the one operation where that distinction is the
+    // whole point.
+    suspend fun clear(): Boolean {
         _token.value = null
-        ioScope.launch { runCatching { prefs?.edit()?.remove(KEY_TOKEN)?.commit() } }.join()
+        return ioScope.async {
+            _token.value = null
+            runCatching { prefs?.edit()?.remove(KEY_TOKEN)?.commit() }.getOrNull() ?: false
+        }.await()
     }
+
+    // Clears only if the token being revoked is still the one in use.
+    //
+    // The AniList sync path signs the user out when a request comes back rejected, and requests
+    // outlive the token they were sent with: sign in again while an older request is in flight, and
+    // that request's 401 arrives after the new credential is stored. An unconditional clear then
+    // revokes a token that was never rejected, and the user is signed out moments after signing in
+    // with no explanation at all.
+    //
+    // Compared inside the write scope so the comparison and the removal cannot be separated by a
+    // save landing between them.
+    suspend fun clearIfCurrent(expected: String): Boolean = ioScope.async {
+        if (_token.value != expected) return@async false
+        _token.value = null
+        runCatching { prefs?.edit()?.remove(KEY_TOKEN)?.commit() }
+        true
+    }.await()
 
     companion object {
         // Referenced by the backup-rules XML so this file is excluded from backup.

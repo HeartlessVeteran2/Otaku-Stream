@@ -23,6 +23,10 @@ interface TrackingRepository {
     fun observeToken(): Flow<String?>
     suspend fun saveToken(accessToken: String)
     suspend fun clearToken()
+
+    // Clears only if [token] is still the one in use, and reports whether it did. For the sync
+    // path, where a rejected request can outlive the credential it was sent with.
+    suspend fun clearTokenIfCurrent(token: String): Boolean
 }
 
 class TrackingRepositoryImpl @Inject constructor(
@@ -32,6 +36,14 @@ class TrackingRepositoryImpl @Inject constructor(
     // itself so this repository does not force the database open earlier than it otherwise would.
     private val database: javax.inject.Provider<com.otakustream.core.database.AppDatabase>,
 ) : TrackingRepository {
+
+    // Declared before the token operations that take it: sign-in, sign-out and the one-time legacy
+    // migration all serialise on this, so none of them can observe a half-finished other.
+    private val migrationMutex = Mutex()
+
+    @Volatile
+    private var migrated = false
+
     override suspend fun getLink(mediaUrl: String, season: Int): TrackerLink? = dao.getLink(mediaUrl, season)
     override fun observeLink(mediaUrl: String, season: Int): Flow<TrackerLink?> = dao.observeLink(mediaUrl, season)
     override suspend fun getLinkByTrackerId(trackerMediaId: Long): TrackerLink? =
@@ -53,22 +65,36 @@ class TrackingRepositoryImpl @Inject constructor(
         emitAll(tokenStore.token)
     }
 
-    override suspend fun saveToken(accessToken: String) {
+    override suspend fun saveToken(accessToken: String) = migrationMutex.withLock {
         tokenStore.save(accessToken)
         // Never leave a plaintext copy behind in Room.
         ignoringFailure { dao.clearToken() }
         migrated = true
     }
 
+    // Under migrationMutex, and that is not incidental.
+    //
+    // ensureTokenMigrated reads the legacy plaintext row and, if the encrypted store is empty,
+    // writes it back in. A sign-out running concurrently could clear the store between that read
+    // and that write, and the migration would then restore the credential the user had just
+    // revoked — a sign-out that undoes itself, which is the failure this whole area is about.
+    // Holding the same lock makes the two mutually exclusive.
     override suspend fun clearToken() {
-        tokenStore.clear()
-        ignoringFailure { dao.clearToken() }
-        migrated = true
+        migrationMutex.withLock {
+            tokenStore.clear()
+            ignoringFailure { dao.clearToken() }
+            migrated = true
+        }
     }
 
-    private val migrationMutex = Mutex()
-    @Volatile
-    private var migrated = false
+    override suspend fun clearTokenIfCurrent(token: String): Boolean = migrationMutex.withLock {
+        val cleared = tokenStore.clearIfCurrent(token)
+        if (cleared) {
+            ignoringFailure { dao.clearToken() }
+            migrated = true
+        }
+        cleared
+    }
 
     // One-time move of the legacy plaintext token (tracker_tokens row) into the encrypted store,
     // then clear the row. Runs at most once per process; safe if the row is already gone.

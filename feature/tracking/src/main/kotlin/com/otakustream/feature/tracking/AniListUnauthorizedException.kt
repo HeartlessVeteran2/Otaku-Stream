@@ -28,6 +28,12 @@ class AniListUnauthorizedException : RuntimeException("Your AniList sign-in has 
 internal fun isTokenRejection(token: String?, code: Int, message: String?): Boolean {
     if (token == null) return false
     if (code == 401) return true
+    // Only on a 400, which is the status AniList actually answers a dead token with. Matching the
+    // message on any status was too wide by a long way: a 200 GraphQL response carrying an
+    // "unauthorized" error for one field of a query — or a 5xx whose HTML body happens to contain
+    // the word — would sign the user out of an account nothing had rejected. The word appears in
+    // plenty of errors that are not about this token.
+    if (code != 400) return false
     val text = message?.lowercase() ?: return false
     return "invalid token" in text || "unauthorized" in text || "unauthenticated" in text
 }

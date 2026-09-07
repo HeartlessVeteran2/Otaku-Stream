@@ -304,6 +304,11 @@ class MediaDetailsViewModel @Inject constructor(
 
     fun setLibraryStatus(status: String) {
         val mediaUrl = currentMediaUrl.value ?: return
+        // Snapshotted before launching, alongside mediaUrl, because libraryRepository.setStatus
+        // suspends: reading _selectedSeason after it resumes means a season switched during the
+        // write decides where the status lands, and it lands on an AniList entry the user was not
+        // looking at when they chose it.
+        val season = _selectedSeason.value
         viewModelScope.launch {
             libraryRepository.setStatus(mediaUrl, status)
             // Local Library is the source of truth; mirror the change up to AniList when linked.
@@ -313,7 +318,7 @@ class MediaDetailsViewModel @Inject constructor(
             // for the status to land on — and marking it Completed used to reach nothing at all.
             // Same link resolution the trackerLink row on screen uses, so the status goes to the
             // entry the user can see it going to.
-            trackingManager.onLibraryStatusChanged(mediaUrl, status, _selectedSeason.value)
+            trackingManager.onLibraryStatusChanged(mediaUrl, status, season)
         }
     }
 
