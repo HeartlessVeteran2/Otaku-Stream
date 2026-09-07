@@ -1,5 +1,6 @@
 package com.otakustream.core.sources.stremio
 
+import com.otakustream.core.network.await
 import com.otakustream.core.sources.api.SourceHttpException
 import com.otakustream.core.sources.stremio.model.AddonListOrigin
 import com.otakustream.core.sources.stremio.model.OfficialAddonListing
@@ -140,7 +141,7 @@ class StremioAddonDirectoryClient @Inject constructor(
         // finishes on its own. Same pattern as SourceCatalogClient.
         val cancellation = currentCoroutineContext()[Job]?.invokeOnCompletion { call.cancel() }
         val content = try {
-            call.execute().use { response ->
+            call.await().use { response ->
                 if (!response.isSuccessful) throw SourceHttpException(response.code)
                 response.body?.string() ?: error("Empty response body")
             }

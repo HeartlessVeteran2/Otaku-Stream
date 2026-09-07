@@ -30,6 +30,9 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.rhino)
     implementation(libs.okhttp)
+    // Call.await() — the installer downloads a script on a suspend path, and a blocking execute()
+    // there could not be cancelled when the user left the screen.
+    implementation(project(":core:network"))
 
     implementation(libs.hilt.android)
     kapt(libs.hilt.compiler)

@@ -17,6 +17,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 
 data class StremioCatalogItem(val type: String, val id: String, val name: String, val enabled: Boolean)
@@ -143,12 +145,36 @@ class ManageStremioSourcesViewModel @Inject constructor(
         val index = list.indexOfFirst { it.record.manifestUrl == item.record.manifestUrl }
         val targetIndex = index + direction
         if (index < 0 || targetIndex !in list.indices) return
-        val other = list[targetIndex]
+        // The whole new order, written as 0..n-1 in one transaction, rather than swapping the
+        // pair's two priority values with two separate writes.
+        //
+        // The swap had two failure modes and the second one was permanent. Two unbatched writes can
+        // be cancelled between, leaving both rows on the same priority — and once two rows tie,
+        // swapping their priorities changes nothing, so those buttons never work again. Ties also
+        // arrived without any crash at all: "Add by URL" installs with the default priority of 0,
+        // so a user who added their add-ons that way had every row at 0 and the arrows did nothing
+        // from the first tap.
         viewModelScope.launch {
-            stremioRepository.setAddonPriority(item.record.manifestUrl, other.record.priority)
-            stremioRepository.setAddonPriority(other.record.manifestUrl, item.record.priority)
+            // Serialized, and re-read inside the lock.
+            //
+            // addonItems is fed by observeAddons, which is a Room Flow: it catches up some frames
+            // after a write. Tapping the arrow twice quickly meant both moves were computed from
+            // the same pre-move snapshot and both wrote the same one-step order, so two taps moved
+            // the row once — and two moves on different rows could overwrite each other outright.
+            // Reading the persisted order inside the lock means each tap composes onto the last.
+            reorderMutex.withLock {
+                val order = stremioRepository.getAllAddons().map { it.manifestUrl }
+                val from = order.indexOf(item.record.manifestUrl)
+                val to = from + direction
+                if (from < 0 || to !in order.indices) return@withLock
+                stremioRepository.setAddonOrder(
+                    order.toMutableList().apply { add(to, removeAt(from)) },
+                )
+            }
         }
     }
+
+    private val reorderMutex = Mutex()
 
     fun toggleCatalogEnabled(item: StremioAddonItem, catalog: StremioCatalogItem) {
         val newEnabled = !catalog.enabled

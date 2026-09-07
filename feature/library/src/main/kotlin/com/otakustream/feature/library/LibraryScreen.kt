@@ -28,6 +28,8 @@ import androidx.compose.material.icons.outlined.History
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -472,6 +474,32 @@ private fun DownloadsTab(
         )
     }
     LazyColumn(modifier = Modifier.fillMaxSize()) {
+        // A removal that could not be confirmed, shown above the list it is about — the row is
+        // still there and its Delete button still works, which is the whole reason to keep this on
+        // this screen rather than in a snackbar the user would read on some other tab.
+        uiState.downloadError?.let { message ->
+            item(key = "download-error") {
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    ),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 8.dp),
+                    ) {
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = viewModel::consumeDownloadError) { Text("Dismiss") }
+                    }
+                }
+            }
+        }
         items(uiState.downloads, key = { it.entry.videoUrl }) { row ->
             val progress = row.progress
             val finished = progress?.isFinished == true
