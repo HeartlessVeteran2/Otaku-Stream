@@ -97,6 +97,14 @@ class SubtitleStylePrefsTest {
                 prefs.style.value.textScale,
                 0f,
             )
+            // Settled before the next iteration, and this is not tidiness.
+            //
+            // Each `set` above arms a debounced write on that instance's *own* app-lifetime scope,
+            // and every instance writes the same shared file. Left alone, fifty of them would fire
+            // a few hundred milliseconds later — during whichever test ran next — and drop a stale
+            // 1.9 into the file that test was asserting on. The suite would fail somewhere else,
+            // intermittently, with nothing pointing back here.
+            prefs.settle()
         }
     }
 
@@ -109,8 +117,16 @@ class SubtitleStylePrefsTest {
         val prefs = SubtitleStylePrefs(context)
         prefs.loadedStyle()
         prefs.set(SubtitleStyle(textScale = 1.6f))
-        // No waiting: straight to flush, the way a screen destroyed mid-drag would.
-        prefs.flush()
+        // Straight to flush, the way a screen destroyed mid-drag would — no waiting out the
+        // debounce first. What is under test is that the change is written at all: without flush
+        // this value is still sitting behind a 300ms timer.
+        //
+        // The poll is for flush's *dispatch*, not for its debounce. flush queues the write onto the
+        // store's single-threaded scope rather than running it inline, so that it cannot become a
+        // second writer racing a debounced write that has already passed its delay — the ordering
+        // is what makes the result deterministic, at the cost of the write landing a scheduling hop
+        // later than the call.
+        prefs.settle()
 
         assertEquals(1.6f, prefsFile().getFloat("text_scale", -1f), 0f)
     }
@@ -134,7 +150,7 @@ class SubtitleStylePrefsTest {
         val prefs = SubtitleStylePrefs(context)
         prefs.loadedStyle()
         prefs.set(SubtitleStyle(background = SubtitleBackground.SEMI, textScale = 1.1f))
-        prefs.flush()
+        prefs.settle()
 
         val relaunched = SubtitleStylePrefs(context)
         assertNotSame(prefs, relaunched)
@@ -149,6 +165,17 @@ class SubtitleStylePrefsTest {
     private fun SubtitleStylePrefs.loadedStyle(): SubtitleStyle {
         runBlocking { awaitLoaded() }
         return style.value
+    }
+
+    // Runs a pending debounced write to completion, so no instance this test built is still holding
+    // a timer over the shared preferences file when the test returns.
+    private fun SubtitleStylePrefs.settle() {
+        flush()
+        var waited = 0L
+        while (prefsFile().getFloat("text_scale", -1f) != style.value.textScale && waited < TIMEOUT_MS) {
+            Thread.sleep(POLL_MS)
+            waited += POLL_MS
+        }
     }
 
     private companion object {

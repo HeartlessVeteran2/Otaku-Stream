@@ -304,7 +304,15 @@ class PlayerController @Inject constructor(
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                _uiState.value = _uiState.value.copy(error = error.message)
+                _uiState.value = _uiState.value.copy(
+                    error = error.message,
+                    // This failure is always about currentMediaUrl — it came from the player, which
+                    // is playing that url — so Retry is always the right offer. Setting it here as
+                    // well as at the two `error = null` resets is what keeps a torrent refusal from
+                    // suppressing Retry on the episode that was playing at the time: that episode
+                    // keeps playing after the refusal, so neither reset has run when it later fails.
+                    canRetry = true,
+                )
             }
 
             override fun onTracksChanged(tracks: Tracks) {
@@ -696,15 +704,23 @@ class PlayerController @Inject constructor(
 
             player.setMediaSource(mediaSource, resumeMs)
             player.prepare()
-            player.playWhenReady = true
 
             // Apply the remembered default speed to every new video (boost is separate and resets).
+            //
             // Awaited rather than read: the prefs load off the main thread, so on the first video of
             // a session `.value` is still the 1x placeholder and the user's saved speed is lost on
             // exactly the video they opened the app to watch.
+            //
+            // And awaited *before* playWhenReady, not after. A downloaded episode or a warm cache
+            // can reach the ready state inside the microseconds the await costs, so setting the
+            // speed afterwards let the first moment of the video play at the wrong rate and then
+            // visibly snap. The load happens once per process and is over long before the second
+            // video, so the cost of ordering it this way is a frame on the first one, at most.
             val defaultSpeed = playerSettingsPrefs.awaitDefaultSpeed()
             player.setPlaybackSpeed(defaultSpeed)
             _uiState.value = _uiState.value.copy(playbackSpeed = defaultSpeed)
+
+            player.playWhenReady = true
         }
 
         torrentSubtitleJob?.cancel()

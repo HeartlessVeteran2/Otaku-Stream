@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -129,12 +130,16 @@ class LibraryViewModel @Inject constructor(
                 // about a download that is now gone would otherwise sit there naming rows it has
                 // nothing to do with — but a *different* row that is still stranded has to keep
                 // saying so.
-                _downloadFailures.value = _downloadFailures.value - url
+                // update(), not `value = value - url`. Both callers run on viewModelScope's main
+                // dispatcher today, where a read-modify-write in a single non-suspending statement
+                // cannot be interleaved — but that is a property of the call sites, not of this
+                // line, and it stops being true the first time one of them moves to a background
+                // dispatcher. update() is a compare-and-set loop and costs nothing.
+                _downloadFailures.update { it - url }
             } else {
-                _downloadFailures.value = _downloadFailures.value + (
-                    url to "Couldn't finish removing ${row.entry.episodeName ?: row.entry.mediaTitle}. " +
-                        "It's still listed — try again."
-                    )
+                val message = "Couldn't finish removing ${row.entry.episodeName ?: row.entry.mediaTitle}. " +
+                    "It's still listed — try again."
+                _downloadFailures.update { it + (url to message) }
             }
         }
     }

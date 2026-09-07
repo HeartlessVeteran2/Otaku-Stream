@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlin.coroutines.coroutineContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -128,21 +129,36 @@ class SubtitleStylePrefs @Inject constructor(@ApplicationContext context: Contex
                 // slips past a concurrent cancel still stores the newest style, not an older frame
                 // of the same drag.
                 runCatching { write(_style.value) }
+                // Cleared so flush() can tell "a change is waiting" from "the last change already
+                // went". Under the lock, and by identity — read out of the context here because a
+                // synchronized block is not a suspending one — so a newer job installed while this
+                // one was finishing is not discarded by the one it replaced.
+                val self = coroutineContext[Job]
+                synchronized(editLock) { if (saveJob === self) saveJob = null }
             }
         }
     }
 
-    // Writes any pending debounced change immediately. Synchronous, deliberately: SharedPreferences
-    // .apply() returns at once and flushes on its own thread, so this costs the caller nothing, and
-    // the callers that want it (a screen being destroyed) have no scope left to launch on.
+    // Writes any pending debounced change immediately, for a screen that is being destroyed and
+    // would otherwise leave the change to a timer that a process death could beat.
+    //
+    // The write goes onto the same single-threaded scope as the debounce rather than running here,
+    // which is what makes it safe to call from anywhere. Cancelling a job that has already passed
+    // its delay does nothing — it is inside write() by then — so a flush that wrote inline would be
+    // a second writer on a second thread. Queued, it is simply the next write on the one thread
+    // that does them, and it writes _style.value, so whichever order they land in the file ends up
+    // holding the newest style.
+    //
+    // Nothing is queued when no change is pending: saveJob is null before the first set and again
+    // after each debounce completes, so an onCleared() on a screen where nothing was adjusted does
+    // not rewrite the file.
     fun flush() {
-        val pending = synchronized(editLock) {
+        synchronized(editLock) {
             val job = saveJob ?: return
             job.cancel()
             saveJob = null
-            _style.value
         }
-        runCatching { write(pending) }
+        scope.launch { runCatching { write(_style.value) } }
     }
 
     private fun read(): SubtitleStyle {

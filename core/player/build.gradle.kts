@@ -80,5 +80,4 @@ dependencies {
     // map cannot reproduce and a real SharedPreferences on a real dispatcher can.
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
-    testImplementation(libs.kotlinx.coroutines.test)
 }

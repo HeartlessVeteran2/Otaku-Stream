@@ -404,6 +404,22 @@ class MediaDetailsViewModel @Inject constructor(
         } else {
             unconfirmedRemovals -= episodeUrl
         }
+        // And reconciled against what is actually left, not only against this call's result.
+        //
+        // removeAndAwait is a deadline, not a verdict: the service routinely finishes a removal
+        // just after the wait gives up, and the same download can be removed from Library ›
+        // Downloads by a different screen entirely. Either way the row is gone and the message
+        // naming it is not, and this screen renders it as plain text with no Retry and no dismiss —
+        // so it would sit there pointing at a download that no longer exists until the user happened
+        // to cancel that exact episode again. Anything with no rows left has nothing to report.
+        val stillStranded = unconfirmedRemovals.filter { url ->
+            runCatchingCancellable { downloadRepository.entriesForEpisode(url).isNotEmpty() }
+                // A lookup that failed says nothing about whether the file is there, so the message
+                // stays: dropping it on a database hiccup is the one direction that loses
+                // information the user needs.
+                .getOrDefault(true)
+        }
+        unconfirmedRemovals.retainAll(stillStranded.toSet())
         // Its own field, not `error`.
         //
         // `error` is the details *loader's* failure, and the screen renders a Retry beside it that
