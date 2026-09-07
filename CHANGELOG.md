@@ -74,8 +74,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   scripted-source entry point holds a mutex across a *blocking* interpreter call, which coroutine
   cancellation cannot interrupt — so a timeout returned on schedule while the lock stayed held, and
   every later search or episode resolve for that source blocked forever. Retrying could not help,
-  because the retry queued behind the same lock. There is now an instruction-count deadline that
-  unwinds the interpreter, and both HTTP bridges use cancellable calls with bounded timeouts.
+  because the retry queued behind the same lock. There is now a wall-clock deadline, checked by the
+  interpreter's instruction observer, that unwinds the interpreter and releases the lock — and both
+  HTTP bridges use cancellable calls with bounded timeouts.
 - **"Push my saves" no longer resets your Stremio watch progress** (#128). It wrote a complete
   library item with a zeroed `state` and a fresh `_mtime`, so it won last-write-wins against every
   other Stremio client: one press flattened resume positions, watched-episode marks and

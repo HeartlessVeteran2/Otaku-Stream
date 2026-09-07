@@ -115,15 +115,20 @@ class InFlightCache<K : Any, V>(
     // Counts as an access, so peeking a key keeps it from being the next one evicted. A caller that
     // peeks is about to ask for it properly.
     @OptIn(ExperimentalCoroutinesApi::class)
-    fun peek(key: K): V? {
-        val entry = synchronized(lock) { entries[key]?.takeIf { it.isUsable() } } ?: return null
+    fun peek(key: K): V? = synchronized(lock) {
+        // All of it under the lock, deliberately. Split across the boundary — usability checked
+        // inside, the value read outside — the entry can complete, expire, or be evicted and
+        // replaced in between, and the answer handed back is one this cache had already decided was
+        // too old to reuse. getCompleted() is a field read on a finished job, so holding the lock
+        // across it costs nothing.
+        val entry = entries[key]?.takeIf { it.isUsable() } ?: return null
         val job = entry.job
         // isUsable admits an unfinished job — joinable, but with nothing to hand back yet — so
-        // completion is checked again here rather than assumed. getCompleted() throws on a job that
-        // failed, and a failed job can be visible for the moment between its completion and the
+        // completion is checked as well rather than assumed. getCompleted() throws on a job that
+        // failed, and a failed job is visible for the moment between its completion and the
         // eviction its own handler performs.
         if (!job.isCompleted || job.isCancelled) return null
-        return runCatching { job.getCompleted() }.getOrNull()
+        runCatching { job.getCompleted() }.getOrNull()
     }
 
     // Evicts everything, cancelling nothing: an entry can still be awaited by a caller that has not
