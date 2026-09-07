@@ -26,6 +26,13 @@ android {
     buildFeatures {
         compose = true
     }
+
+    testOptions {
+        unitTests {
+            // Robolectric needs the merged manifest and resources to build its simulated app.
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 dependencies {
@@ -67,4 +74,11 @@ dependencies {
     // while the duration was unknown survived. The parts of playback that are pure arithmetic now
     // live in PlaybackRules.kt so they can be exercised on the JVM runners CI already has.
     testImplementation(libs.junit)
+    // Robolectric for the settings stores. They are the other half of "playback works": the values
+    // that decide how a video starts. Their bugs are all about *when* a value is available — a load
+    // that lands after a tap, a read taken before the load — which is exactly what a fake in-memory
+    // map cannot reproduce and a real SharedPreferences on a real dispatcher can.
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

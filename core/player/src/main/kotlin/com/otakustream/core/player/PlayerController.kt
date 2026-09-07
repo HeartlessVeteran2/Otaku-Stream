@@ -584,6 +584,10 @@ class PlayerController @Inject constructor(
         _uiState.value = _uiState.value.copy(
             isMarkingSegment = false,
             error = null,
+            // Cleared with the error it qualifies. A torrent refused while another episode played
+            // left this false; without restoring it here that one refusal would strip the Retry
+            // button off every later playback failure for the life of the controller.
+            canRetry = true,
             droppedFrameCount = 0,
             codecName = null,
             videoBitrateBps = 0,
@@ -695,7 +699,10 @@ class PlayerController @Inject constructor(
             player.playWhenReady = true
 
             // Apply the remembered default speed to every new video (boost is separate and resets).
-            val defaultSpeed = playerSettingsPrefs.defaultSpeed.value
+            // Awaited rather than read: the prefs load off the main thread, so on the first video of
+            // a session `.value` is still the 1x placeholder and the user's saved speed is lost on
+            // exactly the video they opened the app to watch.
+            val defaultSpeed = playerSettingsPrefs.awaitDefaultSpeed()
             player.setPlaybackSpeed(defaultSpeed)
             _uiState.value = _uiState.value.copy(playbackSpeed = defaultSpeed)
         }
@@ -913,6 +920,7 @@ class PlayerController @Inject constructor(
             hasNext = false,
             activeSkipSegment = null,
             error = null,
+            canRetry = true,
             notice = null,
         )
         _progress.value = PlaybackProgress()

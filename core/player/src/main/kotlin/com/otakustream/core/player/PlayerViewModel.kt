@@ -6,8 +6,6 @@ import androidx.media3.common.C
 import com.otakustream.core.database.skip.SkipSegmentType
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,21 +25,10 @@ class PlayerViewModel @Inject constructor(
     // time labels, not the whole player screen.
     val progress: StateFlow<PlaybackProgress> = controller.progress
 
-    // Seeded with the defaults and replaced once the saved style has been read off disk.
-    //
-    // The read used to happen right here, in a field initializer — so constructing this ViewModel
-    // opened and parsed a SharedPreferences file on the main thread, on the frame where the user has
-    // just tapped an episode and is waiting for video. The defaults render correctly, and the real
-    // style lands a frame or two later; subtitles are not even decoded yet at that point.
-    private val _subtitleStyle = MutableStateFlow(SubtitleStyle())
-    val subtitleStyle: StateFlow<SubtitleStyle> = _subtitleStyle.asStateFlow()
-    private var saveStyleJob: Job? = null
-
-    // Whether the user has already edited the style in this session. The load below must not
-    // overwrite an edit: opening the subtitle sheet and dragging a slider immediately can easily
-    // beat a slow disk read, and the saved value landing afterwards would visibly snap the text
-    // back to what it was.
-    private var styleEdited = false
+    // The saved subtitle style, owned by SubtitleStylePrefs — the loading, the edit guard and the
+    // debounced write all live there now. Observing it rather than copying it is what makes a style
+    // changed on the Playback settings screen show up here without a restart.
+    val subtitleStyle: StateFlow<SubtitleStyle> = subtitleStylePrefs.style
 
     // Null while unknown, so the overlay can tell "not loaded yet" from "genuinely not seen".
     // A StateFlow rather than a plain field: the screen reads this into remembered state, so a value
@@ -51,32 +38,19 @@ class PlayerViewModel @Inject constructor(
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
-            val style = subtitleStylePrefs.load()
-            val seenCoach = onboardingPrefs.hasSeenGestureCoach
-            if (!styleEdited) _subtitleStyle.value = style
-            _hasSeenGestureCoach.value = seenCoach
+            _hasSeenGestureCoach.value = onboardingPrefs.hasSeenGestureCoach
         }
     }
 
-    fun setSubtitleStyle(style: SubtitleStyle) {
-        // Slider drags emit many updates: keep the live preview/apply instant but debounce the
-        // disk write so we don't flood QueuedWork with SharedPreferences commits.
-        styleEdited = true
-        _subtitleStyle.value = style
-        saveStyleJob?.cancel()
-        saveStyleJob = viewModelScope.launch {
-            delay(SUBTITLE_STYLE_SAVE_DEBOUNCE_MS)
-            subtitleStylePrefs.save(style)
-        }
-    }
+    fun setSubtitleStyle(style: SubtitleStyle) = subtitleStylePrefs.set(style)
 
     override fun onCleared() {
         super.onCleared()
-        // Flush a still-pending debounced change before viewModelScope is cancelled.
-        if (saveStyleJob?.isActive == true) {
-            saveStyleJob?.cancel()
-            subtitleStylePrefs.save(_subtitleStyle.value)
-        }
+        // Write a still-pending debounced change now rather than leaving it to a timer that a
+        // process death in the next few hundred milliseconds would beat. This works where the
+        // previous version didn't: the debounce lives on an app-lifetime scope, so viewModelScope
+        // being cancelled just above no longer decides whether there is anything left to save.
+        subtitleStylePrefs.flush()
     }
 
     fun markGestureCoachSeen() {
@@ -148,7 +122,4 @@ class PlayerViewModel @Inject constructor(
 
     fun setEqualizerPreset(preset: EqualizerPreset) = controller.setEqualizerPreset(preset)
 
-    private companion object {
-        const val SUBTITLE_STYLE_SAVE_DEBOUNCE_MS = 300L
-    }
 }

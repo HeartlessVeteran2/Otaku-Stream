@@ -187,4 +187,26 @@ class ScriptTimeoutTest {
         }
         assertTrue(threwSomethingElse)
     }
+
+    // The two timeouts are one mechanism, and they live in different files.
+    //
+    // A script blocked on a socket executes no instructions, so the observer that enforces the
+    // deadline cannot see it. The request giving up first is the only thing that hands control back
+    // for the observer to act on — which means the call timeout has to expire *before* the deadline
+    // does. Raise one without the other and a stalled fetch stops being interruptible at all, and
+    // that failure shows up as a source that is wedged until the app is force-stopped, not as a
+    // failing assertion anywhere near either constant. So the relationship is asserted directly.
+    @Test
+    fun `a fetch gives up before the script deadline does`() {
+        assertTrue(
+            "callTimeout ${SCRIPT_CALL_TIMEOUT_SECONDS}s must expire before the ${SCRIPT_DEADLINE_MS}ms deadline",
+            SCRIPT_CALL_TIMEOUT_SECONDS * 1_000L < SCRIPT_DEADLINE_MS,
+        )
+        // And a stalled stage must fail well inside the total, or the two are the same timeout
+        // wearing different names and a dead host still costs the full budget.
+        assertTrue(
+            "stage timeout ${SCRIPT_STAGE_TIMEOUT_SECONDS}s must be under the ${SCRIPT_CALL_TIMEOUT_SECONDS}s total",
+            SCRIPT_STAGE_TIMEOUT_SECONDS < SCRIPT_CALL_TIMEOUT_SECONDS,
+        )
+    }
 }

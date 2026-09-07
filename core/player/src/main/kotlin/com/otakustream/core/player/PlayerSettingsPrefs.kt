@@ -2,6 +2,7 @@ package com.otakustream.core.player
 
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -57,37 +58,71 @@ class PlayerSettingsPrefs @Inject constructor(@ApplicationContext context: Conte
     // Set the moment a user changes something, so the asynchronous initial load cannot land
     // afterwards and put the old value back on screen. Same guard PlayerViewModel uses for the
     // subtitle style, and needed for the same reason: the load is a disk read racing a tap.
-    @Volatile private var autoSkipEdited = false
+    //
+    // Guarded by `editLock` rather than merely @Volatile. The load ran `if (!edited) value = disk`
+    // as two separate steps, so a setter landing between them set the flag, published the user's
+    // value, and then had the load overwrite it with the stale one from disk anyway — the exact
+    // failure the flag was added to prevent, just narrowed to a window instead of closed. Reading
+    // the flag and writing the value have to happen together, on both sides.
+    private val editLock = Any()
 
-    @Volatile private var seekEdited = false
+    private var autoSkipEdited = false
 
-    @Volatile private var speedEdited = false
+    private var seekEdited = false
+
+    private var speedEdited = false
+
+    // Completed once the initial read has finished (or failed), so a caller that needs the *stored*
+    // value rather than the placeholder can wait for it. `defaultSpeed.value` is indistinguishable
+    // from a real 1x until this completes, and the player applies it to the first video of the
+    // session — reading it early silently discarded the user's saved speed on exactly that video.
+    private val loaded = CompletableDeferred<Unit>()
 
     init {
         scope.launch {
             runCatching {
-                if (!autoSkipEdited) _autoSkipEnabled.value = prefs.getBoolean(KEY_AUTO_SKIP, false)
-                if (!seekEdited) _seekDurationMs.value = prefs.getLong(KEY_SEEK_DURATION_MS, DEFAULT_SEEK_DURATION_MS)
-                if (!speedEdited) _defaultSpeed.value = prefs.getFloat(KEY_DEFAULT_SPEED, DEFAULT_SPEED)
+                val storedAutoSkip = prefs.getBoolean(KEY_AUTO_SKIP, false)
+                val storedSeek = prefs.getLong(KEY_SEEK_DURATION_MS, DEFAULT_SEEK_DURATION_MS)
+                val storedSpeed = prefs.getFloat(KEY_DEFAULT_SPEED, DEFAULT_SPEED)
+                synchronized(editLock) {
+                    if (!autoSkipEdited) _autoSkipEnabled.value = storedAutoSkip
+                    if (!seekEdited) _seekDurationMs.value = storedSeek
+                    if (!speedEdited) _defaultSpeed.value = storedSpeed
+                }
             }
+            // Completed even when the read threw: a caller waiting on it would otherwise wait
+            // forever, and the placeholder is the right answer if there is nothing readable.
+            loaded.complete(Unit)
         }
     }
 
+    // The stored default speed, waiting for the initial read if it has not landed yet.
+    suspend fun awaitDefaultSpeed(): Float {
+        loaded.await()
+        return _defaultSpeed.value
+    }
+
     fun setAutoSkipEnabled(enabled: Boolean) {
-        autoSkipEdited = true
-        _autoSkipEnabled.value = enabled
+        synchronized(editLock) {
+            autoSkipEdited = true
+            _autoSkipEnabled.value = enabled
+        }
         scope.launch { runCatching { prefs.edit().putBoolean(KEY_AUTO_SKIP, enabled).apply() } }
     }
 
     fun setSeekDurationMs(durationMs: Long) {
-        seekEdited = true
-        _seekDurationMs.value = durationMs
+        synchronized(editLock) {
+            seekEdited = true
+            _seekDurationMs.value = durationMs
+        }
         scope.launch { runCatching { prefs.edit().putLong(KEY_SEEK_DURATION_MS, durationMs).apply() } }
     }
 
     fun setDefaultSpeed(speed: Float) {
-        speedEdited = true
-        _defaultSpeed.value = speed
+        synchronized(editLock) {
+            speedEdited = true
+            _defaultSpeed.value = speed
+        }
         scope.launch { runCatching { prefs.edit().putFloat(KEY_DEFAULT_SPEED, speed).apply() } }
     }
 

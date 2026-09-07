@@ -373,6 +373,10 @@ class MediaDetailsViewModel @Inject constructor(
         viewModelScope.launch { clearDownloadsFor(episode.url) }
     }
 
+    // Episode urls whose download removal did not complete. Confined to viewModelScope's main
+    // dispatcher, which is where every caller of clearDownloadsFor runs.
+    private val unconfirmedRemovals = mutableSetOf<String>()
+
     // Returns whether every row for this episode is confirmed gone, because one caller has to
     // change what it does when they are not.
     private suspend fun clearDownloadsFor(episodeUrl: String): Boolean {
@@ -390,21 +394,31 @@ class MediaDetailsViewModel @Inject constructor(
         }
         // One message however many rows an episode had, and only when something is genuinely left
         // behind — where the user can still get at it.
+        //
+        // Tracked per episode rather than as one string. This screen lists a whole season, so
+        // removing episode 3 and having it time out, then removing episode 4 successfully, used to
+        // clear episode 3's message while episode 3's file was still stranded — the only notice the
+        // user had that anything went wrong, erased by an unrelated success.
         if (unconfirmed > 0) {
-            // Its own field, not `error`.
-            //
-            // `error` is the details *loader's* failure, and the screen renders a Retry beside it
-            // that re-runs load(). A removal that timed out is neither retryable that way nor
-            // cleared by a later successful load, so putting it there offered the wrong action and
-            // left a stale message behind. This one is cleared the moment a removal succeeds.
-            _uiState.value = _uiState.value.copy(
-                downloadError = "Couldn't finish removing this episode's download. It's still " +
-                    "listed in Library › Downloads.",
-            )
+            unconfirmedRemovals += episodeUrl
+        } else {
+            unconfirmedRemovals -= episodeUrl
         }
-        if (unconfirmed == 0) {
-            _uiState.value = _uiState.value.copy(downloadError = null)
-        }
+        // Its own field, not `error`.
+        //
+        // `error` is the details *loader's* failure, and the screen renders a Retry beside it that
+        // re-runs load(). A removal that timed out is neither retryable that way nor cleared by a
+        // later successful load, so putting it there offered the wrong action and left a stale
+        // message behind.
+        _uiState.value = _uiState.value.copy(
+            downloadError = when (unconfirmedRemovals.size) {
+                0 -> null
+                1 -> "Couldn't finish removing this episode's download. It's still listed in " +
+                    "Library › Downloads."
+                else -> "Couldn't finish removing ${unconfirmedRemovals.size} episodes' downloads. " +
+                    "They're still listed in Library › Downloads."
+            },
+        )
         return unconfirmed == 0
     }
 
