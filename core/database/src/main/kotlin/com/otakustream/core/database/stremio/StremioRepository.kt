@@ -17,6 +17,10 @@ data class StremioCatalogToggle(val manifestUrl: String, val type: String, val i
 interface StremioRepository {
     fun observeAddons(): Flow<List<StremioAddonRecord>>
     suspend fun getAllAddons(): List<StremioAddonRecord>
+
+    // One row's enabled flag. The installer needs exactly this after a re-install and nothing else;
+    // getAllAddons would sort and materialise the whole table for one boolean.
+    suspend fun isAddonEnabled(manifestUrl: String): Boolean?
     // The only way to save an add-on. A plain saveAddon existed alongside this and had no callers
     // left once the installer switched over — and it is the destructive one, carrying the caller's
     // `enabled` and `priority` over whatever the user had chosen. Leaving a destructive twin next to
@@ -46,6 +50,8 @@ class StremioRepositoryImpl @Inject constructor(
         dao.observeAddons().map { list -> list.map { it.toRecord() } }
 
     override suspend fun getAllAddons(): List<StremioAddonRecord> = dao.getAllAddons().map { it.toRecord() }
+
+    override suspend fun isAddonEnabled(manifestUrl: String): Boolean? = dao.getAddonEnabled(manifestUrl)
 
     override suspend fun saveAddonKeepingUserSettings(record: StremioAddonRecord) =
         dao.upsertAddonKeepingUserSettings(record.toEntity())

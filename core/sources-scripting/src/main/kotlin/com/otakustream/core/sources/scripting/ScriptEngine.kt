@@ -88,8 +88,9 @@ internal class ScriptDeadlineError : Error(
 
 // A script that ran past its deadline. Distinct from a script that threw, because the two mean
 // different things to the user: one source is broken, the other is stuck.
-class ScriptTimeoutException : RuntimeException(
+class ScriptTimeoutException(cause: Throwable? = null) : RuntimeException(
     "The source script took too long and was stopped.",
+    cause,
 )
 
 // Roughly how often Rhino checks in. Small enough that a runaway loop is caught within
@@ -135,7 +136,9 @@ class ScriptEngine @Inject constructor(
             return ScriptScope(scope)
         } catch (deadline: ScriptDeadlineError) {
             // Converted here, at the edge of the span Rhino controls — see ScriptDeadlineError.
-            throw ScriptTimeoutException()
+            // The Error is kept as the cause: its stack is the only record of where inside the
+            // interpreter the script was stuck, which is the one useful thing in the log.
+            throw ScriptTimeoutException(deadline)
         } finally {
             Context.exit()
         }
@@ -152,7 +155,7 @@ class ScriptEngine @Inject constructor(
             val result = function.call(context, scope.scriptable, scope.scriptable, args)
             return Context.toString(result)
         } catch (deadline: ScriptDeadlineError) {
-            throw ScriptTimeoutException()
+            throw ScriptTimeoutException(deadline)
         } finally {
             Context.exit()
         }

@@ -326,6 +326,18 @@ fun MediaDetailsScreen(
                         }
                     }
 
+                    // A removal that could not be confirmed, separate from the load error above and
+                    // without its Retry — re-running load() would do nothing for it. The download
+                    // is still listed where it can be removed again, so that is where it points.
+                    uiState.downloadError?.let { message ->
+                        Text(
+                            text = message,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        )
+                    }
+
                     if (seasons.isNotEmpty()) {
                         LazyRow(modifier = Modifier.padding(top = 16.dp)) {
                             items(seasons, key = { it }) { season ->

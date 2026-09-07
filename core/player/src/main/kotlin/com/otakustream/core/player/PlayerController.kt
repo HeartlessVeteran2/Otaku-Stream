@@ -96,6 +96,12 @@ data class PlayerUiState(
     val playbackSpeed: Float = 1f,
     val volume: Float = 1f,
     val error: String? = null,
+    // Whether the error on screen is one Retry can actually act on. True for every ordinary
+    // playback failure — Retry replays the url that failed. False only where the failure is about a
+    // url this controller is deliberately not holding, which today means a torrent refused while a
+    // different episode is still playing: retrying there would restart that episode instead, which
+    // is not what the message offers.
+    val canRetry: Boolean = true,
     val audioTracks: List<TrackInfo> = emptyList(),
     val subtitleTracks: List<TrackInfo> = emptyList(),
     val videoQualityTracks: List<TrackInfo> = emptyList(),
@@ -529,14 +535,27 @@ class PlayerController @Inject constructor(
             //
             // Null is exactly the case the fix was for — the refusal being the first play of the
             // session, where nothing is playing and Retry had nothing to read.
-            if (currentMediaUrl == null) currentMediaUrl = url
+            // Recorded only when the field is free — see below for why not unconditionally — and
+            // the error is worded to match what Retry will actually do.
+            //
+            // Two failures live here and the first fix only closed one. Setting this
+            // unconditionally overwrote the url of an episode that was still playing, filing its
+            // progress and completion under the refused torrent. Guarding it left the opposite
+            // mismatch: the message still said to press Retry, and Retry reads currentMediaUrl,
+            // which now points at the live episode — so it restarted the video the user was
+            // watching instead of re-attempting the torrent they tapped.
+            val canRetryThisUrl = currentMediaUrl == null
+            if (canRetryThisUrl) currentMediaUrl = url
+            val refusal = torrentRefusalMessage(
+                isAvailable = torrentEngine.isAvailable,
+                torrentsEnabled = torrentEngine.torrentsEnabled,
+                unmeteredOnly = torrentEngine.unmeteredOnly,
+                isOnUnmeteredNetwork = torrentEngine.isOnUnmeteredNetwork,
+            )
             _uiState.value = _uiState.value.copy(
-                error = torrentRefusalMessage(
-                    isAvailable = torrentEngine.isAvailable,
-                    torrentsEnabled = torrentEngine.torrentsEnabled,
-                    unmeteredOnly = torrentEngine.unmeteredOnly,
-                    isOnUnmeteredNetwork = torrentEngine.isOnUnmeteredNetwork,
-                ),
+                error = refusal,
+                // Retry is offered only when it would retry the thing the message is about.
+                canRetry = canRetryThisUrl,
             )
             return
         }

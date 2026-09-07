@@ -104,11 +104,7 @@ class MangayomiExtensionsViewModel @Inject constructor(
         load()
     }
 
-    // Puts a suggested repo in the URL field and loads it, for someone who wants that one on its
-    // own. The curated repos are already merged into the list without this — it is here for the
-    // case where a repo has an extension the merge deduped away, or the user simply wants to see
-    // one repo's contents.
-    // Fills the field; does not save.
+    // Fills the field. Does not save, and does not load.
     //
     // It used to call saveRepoUrl(), which persists over repoUrl — a single stored string — so
     // tapping a suggestion silently destroyed whatever custom repository the user had added. That

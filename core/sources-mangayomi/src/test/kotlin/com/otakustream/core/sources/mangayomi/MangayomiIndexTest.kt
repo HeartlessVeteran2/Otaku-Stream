@@ -21,7 +21,10 @@ class MangayomiIndexTest {
         val parsed = parseMangayomiIndex(json)
         assertEquals(1, parsed.listings.size)
         assertEquals("AnimeJs", parsed.listings.first().name)
-        assertEquals(10L, parsed.listings.first().id)
+        // Derived from the declared id and the language rather than used raw — see listingId.
+        // Deterministic, which is the property that matters: the same entry always parses to the
+        // same id, whatever else is in the directory.
+        assertEquals(parsed.listings.first().id, parseMangayomiIndex(json).listings.first().id)
         // The two it dropped are reported rather than vanishing: the screen tells the user how many
         // entries a repo carries that this app cannot run.
         assertEquals(2, parsed.unsupportedCount)
@@ -97,9 +100,11 @@ class MangayomiIndexTest {
         val repoB = """[{"id":42,"name":"Animeonsen","lang":"ja","sourceCodeUrl":"https://b.example/x.js"}]"""
 
         val parsed = parseMangayomiIndex(repoA, "A").listings + parseMangayomiIndex(repoB, "B").listings
-        // Both indexes are individually fine — the collision only exists once they are merged.
+        // Distinct at parse time now, not merely after the merge deduped them. The declared id is
+        // folded together with the language, so the two variants never share an id in the first
+        // place — which is what makes the id independent of what else loaded.
         assertEquals(2, parsed.size)
-        assertEquals(1, parsed.map { it.id }.toSet().size)
+        assertEquals(2, parsed.map { it.id }.toSet().size)
 
         val merged = withUniqueIds(parsed)
 
@@ -122,5 +127,58 @@ class MangayomiIndexTest {
         assertEquals(1, merged.size)
         // The first repo wins, so ordering decides provenance rather than chance.
         assertEquals("https://a.example/all.js", merged.single().sourceCodeUrl)
+    }
+
+    // The property the first version of this rule did not have: an extension's id does not depend
+    // on what else loaded.
+    //
+    // A curated repo being briefly unreachable used to change the id of a *different* repo's
+    // listing, because the old rule handed the declared id to whoever claimed it first in fetch
+    // order. Since installedIds, the source registry and the database primary key all key on that
+    // id, the same extension read as installed, then not installed, then installed again — and
+    // installing it twice made two rows.
+    @Test
+    fun `an id does not change when another repo is unreachable`() {
+        val theirs = """[{"id":42,"name":"Animeonsen","lang":"en","sourceCodeUrl":"https://a.example/x.js"}]"""
+        val mine = """[{"id":42,"name":"Animeonsen","lang":"ja","sourceCodeUrl":"https://b.example/x.js"}]"""
+
+        // Both reachable.
+        val together = withUniqueIds(
+            parseMangayomiIndex(theirs, "A").listings + parseMangayomiIndex(mine, "B").listings,
+        )
+        // Only the user's own reachable, as when a curated repo is down.
+        val aloneMine = withUniqueIds(parseMangayomiIndex(mine, "B").listings)
+        val aloneTheirs = withUniqueIds(parseMangayomiIndex(theirs, "A").listings)
+
+        assertEquals(2, together.size)
+        assertEquals(
+            "the ja listing's id must not depend on whether repo A loaded",
+            aloneMine.single().id,
+            together.first { it.lang == "ja" }.id,
+        )
+        assertEquals(
+            "nor the en listing's on whether repo B loaded",
+            aloneTheirs.single().id,
+            together.first { it.lang == "en" }.id,
+        )
+    }
+
+    // Order must not decide identity either — the merge concatenates repos in whatever order their
+    // fetches completed.
+    @Test
+    fun `ids do not depend on the order repos are merged in`() {
+        val a = parseMangayomiIndex(
+            """[{"id":7,"name":"AllAnime","lang":"en","sourceCodeUrl":"https://a.example/all.js"}]""",
+            "A",
+        ).listings
+        val b = parseMangayomiIndex(
+            """[{"id":7,"name":"AllAnime","lang":"ja","sourceCodeUrl":"https://b.example/all.js"}]""",
+            "B",
+        ).listings
+
+        assertEquals(
+            withUniqueIds(a + b).map { it.lang to it.id }.toSet(),
+            withUniqueIds(b + a).map { it.lang to it.id }.toSet(),
+        )
     }
 }

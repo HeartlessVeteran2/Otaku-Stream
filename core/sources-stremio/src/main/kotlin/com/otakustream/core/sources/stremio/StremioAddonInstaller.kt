@@ -55,8 +55,7 @@ class StremioAddonInstaller @Inject constructor(
         // caller to register — so it was off in the list and contributing to playback anyway, which
         // is worse than the bug it half-fixed. An add-on that is off registers nothing and returns
         // nothing to register.
-        val enabled = stremioRepository.getAllAddons()
-            .firstOrNull { it.manifestUrl == normalizedUrl }?.enabled ?: true
+        val enabled = stremioRepository.isAddonEnabled(normalizedUrl) ?: true
         if (!enabled) return@withContext emptyList()
         registerProviderIfAny(normalizedUrl, content)
         sources

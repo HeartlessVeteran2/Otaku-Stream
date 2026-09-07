@@ -485,7 +485,15 @@ fun PlayerScreen(
                     ) {
                         // retryCurrent(), not play(videoUrl): videoUrl is the episode this screen
                         // was opened on, and auto-play has very likely moved past it.
-                        Button(onClick = { viewModel.retryCurrent() }) { Text("Retry") }
+                        //
+                        // Drawn only when Retry would act on the failure being described. A torrent
+                        // refused while a different episode is still playing leaves currentMediaUrl
+                        // pointing at that episode, so Retry would restart it — a button that does
+                        // something other than what the message above it offers is worse than no
+                        // button, and "Go back" remains.
+                        if (uiState.canRetry) {
+                            Button(onClick = { viewModel.retryCurrent() }) { Text("Retry") }
+                        }
                         OutlinedButton(onClick = onBack) { Text("Go back") }
                     }
                 }

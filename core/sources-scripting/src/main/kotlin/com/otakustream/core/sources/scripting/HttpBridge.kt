@@ -23,6 +23,13 @@ class HttpBridge @Inject constructor(
     // one unresponsive host therefore held that source's lock for a minute per call. Twenty
     // seconds is long enough for a slow page and short enough that a dead host is an annoyance
     // rather than an outage.
+    // Bounded below the script deadline, deliberately.
+    //
+    // The instruction observer that enforces that deadline only runs between Rhino instructions,
+    // and a script sitting inside a synchronous httpGet is executing no instructions at all — so a
+    // stalled request is exactly the case the deadline cannot see, and it holds the source's mutex
+    // for as long as the socket does. A call timeout shorter than the deadline means the request
+    // gives up first, control returns to the script, and the observer gets its chance.
     private val scriptClient: OkHttpClient = httpClient.newBuilder()
         .callTimeout(SCRIPT_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
@@ -41,4 +48,4 @@ class HttpBridge @Inject constructor(
 }
 
 // Bounds how long a single in-script fetch can hold its source's lock.
-private const val SCRIPT_CALL_TIMEOUT_SECONDS = 20L
+private const val SCRIPT_CALL_TIMEOUT_SECONDS = 10L
