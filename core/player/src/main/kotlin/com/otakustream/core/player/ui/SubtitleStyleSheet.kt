@@ -23,12 +23,15 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import com.otakustream.core.player.SubtitleBackground
 import com.otakustream.core.player.SubtitleEdgeStyle
 import com.otakustream.core.player.SubtitleStyle
 import com.otakustream.core.player.SubtitleTextColor
+import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SubtitleStyleSheet(
     style: SubtitleStyle,
@@ -38,6 +41,26 @@ fun SubtitleStyleSheet(
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(text = "Subtitle style", style = MaterialTheme.typography.titleMedium)
+            SubtitleStyleControls(style = style, onStyleChange = onStyleChange)
+        }
+    }
+}
+
+// The controls themselves, without the sheet around them.
+//
+// Split out so Settings can host the same thing. Subtitle appearance used to be reachable only from
+// the track menu of a video that was already playing, which meant the only way to set up subtitles
+// was to start something, fiddle mid-episode, and hope it looked right — and someone who wanted to
+// check the app's settings before watching anything could not find them at all. Two copies of these
+// controls would have drifted; one composable in two hosts cannot.
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun SubtitleStyleControls(
+    style: SubtitleStyle,
+    onStyleChange: (SubtitleStyle) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
 
             // Live preview over a dark strip so colors and outlines read the same as on video.
             Box(
@@ -67,6 +90,12 @@ fun SubtitleStyleSheet(
                 value = style.textScale,
                 onValueChange = { onStyleChange(style.copy(textScale = it)) },
                 valueRange = SubtitleStyle.MIN_TEXT_SCALE..SubtitleStyle.MAX_TEXT_SCALE,
+                // Without this a screen reader announces a bare percentage of the range — "62
+                // percent" — which says nothing about text size. PlayerControlsOverlay already
+                // does this for the scrubber; these two sliders were the ones that missed it.
+                modifier = Modifier.semantics {
+                    stateDescription = "${(style.textScale * 100).roundToInt()}% of normal size"
+                },
             )
 
             Text(text = "Outline", style = MaterialTheme.typography.labelLarge)
@@ -98,8 +127,10 @@ fun SubtitleStyleSheet(
                 value = style.bottomMarginFraction,
                 onValueChange = { onStyleChange(style.copy(bottomMarginFraction = it)) },
                 valueRange = 0f..SubtitleStyle.MAX_BOTTOM_MARGIN,
+                modifier = Modifier.semantics {
+                    stateDescription = "${(style.bottomMarginFraction * 100).roundToInt()}% up from the bottom"
+                },
             )
-        }
     }
 }
 

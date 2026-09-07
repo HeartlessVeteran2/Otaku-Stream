@@ -73,6 +73,8 @@ import com.otakustream.feature.sources.ui.AniListSearchScreen
 import com.otakustream.feature.sources.ui.AniListWatchScreen
 import com.otakustream.feature.sources.ui.BrowseSourceCatalogScreen
 import com.otakustream.feature.sources.ui.BrowseStremioAddonsScreen
+import com.otakustream.app.settings.PlaybackSettingsScreen
+import com.otakustream.app.settings.SettingsScreen
 import com.otakustream.feature.sources.ui.CatalogScreen
 import com.otakustream.feature.sources.ui.CloudflareSettingRow
 import com.otakustream.feature.sources.ui.MangayomiExtensionsScreen
@@ -93,6 +95,7 @@ private const val ROUTE_SETTINGS = "settings"
 private const val ROUTE_SOURCES = "sources"
 private const val ROUTE_MANAGE_SOURCES = "manage-sources"
 private const val ROUTE_TRACKING_SETTINGS = "tracking-settings"
+private const val ROUTE_PLAYBACK_SETTINGS = "playback-settings"
 private const val ROUTE_MANAGE_STREMIO = "manage-stremio"
 private const val ROUTE_STREMIO_ACCOUNT = "stremio-account"
 private const val ROUTE_MANAGE_STREMIO_PATTERN = "manage-stremio?installUrl={installUrl}"
@@ -336,6 +339,7 @@ fun AppNavHost(
             composable(ROUTE_SETTINGS) {
                 SettingsScreen(
                     onSourcesClick = { navController.navigate(ROUTE_SOURCES) },
+                    onPlaybackClick = { navController.navigate(ROUTE_PLAYBACK_SETTINGS) },
                     onTrackingClick = { navController.navigate(ROUTE_TRACKING_SETTINGS) },
                     onStremioAccountClick = { navController.navigate(ROUTE_STREMIO_ACCOUNT) },
                 )
@@ -370,6 +374,9 @@ fun AppNavHost(
                 arguments = listOf(navArgument("sourceId") { type = NavType.StringType }),
             ) {
                 MangayomiPreferencesScreen(onBack = { navController.popBackStack() })
+            }
+            composable(ROUTE_PLAYBACK_SETTINGS) {
+                PlaybackSettingsScreen(onBack = { navController.popBackStack() })
             }
             composable(ROUTE_TRACKING_SETTINGS) {
                 TrackingSettingsScreen(
@@ -560,110 +567,3 @@ private fun NavHostController.navigateToDetails(
             "&coverUrl=${Uri.encode(coverUrl.orEmpty())}",
     )
 }
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun SettingsScreen(
-    onSourcesClick: () -> Unit,
-    onTrackingClick: () -> Unit,
-    onStremioAccountClick: () -> Unit,
-) {
-    // Same fake-title problem the Library tab had: a Text styled like a title, with its own padding,
-    // instead of the TopAppBar every other screen uses. The scroll container moves inside so the
-    // bar stays put while the list moves under it.
-    Column(modifier = Modifier.fillMaxSize()) {
-        TopAppBar(title = { Text("Settings") })
-        Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        SectionHeader("Content")
-        ListItem(
-            headlineContent = { Text("Sources") },
-            supportingContent = { Text("Find and manage your sources") },
-            modifier = Modifier.clickable(onClick = onSourcesClick),
-        )
-
-        SectionHeader("Appearance")
-        ThemeModeRow()
-
-        SectionHeader("Accounts & sync")
-        ListItem(
-            headlineContent = { Text("AniList tracking") },
-            supportingContent = { Text("Sync watch progress to your AniList account") },
-            modifier = Modifier.clickable(onClick = onTrackingClick),
-        )
-        ListItem(
-            headlineContent = { Text("Stremio account") },
-            supportingContent = { Text("Sign in to sync your Stremio library") },
-            modifier = Modifier.clickable(onClick = onStremioAccountClick),
-        )
-
-        SectionHeader("Advanced")
-        CloudflareSettingRow()
-
-        SectionHeader("About")
-        val context = LocalContext.current
-        // Read the version from the package rather than BuildConfig so :app doesn't need the
-        // buildConfig feature turned on — same approach the crash reporter already uses.
-        val versionName = remember(context) {
-            runCatching {
-                context.packageManager.getPackageInfo(context.packageName, 0).versionName
-            }.getOrNull().orEmpty()
-        }
-        ListItem(
-            headlineContent = { Text("Otaku Stream") },
-            supportingContent = { Text(if (versionName.isBlank()) "Version unavailable" else "Version $versionName") },
-        )
-        ListItem(
-            headlineContent = { Text("Source code & releases") },
-            supportingContent = { Text(PROJECT_URL) },
-            modifier = Modifier.clickable {
-                runCatching {
-                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PROJECT_URL)))
-                }
-            },
-        )
-        Text(
-            text = "Otaku Stream is a player and library app: it ships no content and no " +
-                "third-party add-ons. What you play with it is up to you.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 24.dp),
-        )
-        }
-    }
-}
-
-// Dark, light, or whatever the phone is set to. Three chips rather than a switch because there
-// are genuinely three answers: a switch would have to drop "follow the system", which is the
-// default and the one most people want.
-@Composable
-private fun ThemeModeRow(viewModel: AppearanceViewModel = hiltViewModel()) {
-    val mode by viewModel.themeMode.collectAsState()
-    ListItem(
-        headlineContent = { Text("Theme") },
-        supportingContent = {
-            // Scrollable rather than a fixed Row: at a large font scale three chips do not fit a
-            // narrow window, and a clipped chip is an option the user cannot reach. Same bug, same
-            // fix as the add-on directory's filter row.
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(top = 8.dp).horizontalScroll(rememberScrollState()),
-            ) {
-                ThemeMode.entries.forEach { option ->
-                    FilterChip(
-                        selected = mode == option,
-                        onClick = { viewModel.setThemeMode(option) },
-                        label = { Text(option.label()) },
-                    )
-                }
-            }
-        },
-    )
-}
-
-private fun ThemeMode.label(): String = when (this) {
-    ThemeMode.SYSTEM -> "System"
-    ThemeMode.DARK -> "Dark"
-    ThemeMode.LIGHT -> "Light"
-}
-
-private const val PROJECT_URL = "https://github.com/HeartlessVeteran2/Otaku-Stream"

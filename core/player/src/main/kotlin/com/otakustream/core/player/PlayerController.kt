@@ -251,10 +251,18 @@ class PlayerController @Inject constructor(
         instantiated = true
         // Read persisted toggles off the main thread — this @Singleton is built during activity
         // creation, so touching the prefs file here would be a StrictMode disk read on cold start.
-        scope.launch(Dispatchers.IO) {
-            val autoSkip = playerSettingsPrefs.autoSkipEnabled
-            val seek = playerSettingsPrefs.seekDurationMs
-            _uiState.value = _uiState.value.copy(autoSkipEnabled = autoSkip, seekDurationMs = seek)
+        // Collected, not read once. These are owned by PlayerSettingsPrefs now, so a change made
+        // anywhere — the player's own menu, or the Playback settings screen — reaches this state
+        // without the two having to remember to tell each other.
+        scope.launch {
+            playerSettingsPrefs.autoSkipEnabled.collect { enabled ->
+                _uiState.value = _uiState.value.copy(autoSkipEnabled = enabled)
+            }
+        }
+        scope.launch {
+            playerSettingsPrefs.seekDurationMs.collect { durationMs ->
+                _uiState.value = _uiState.value.copy(seekDurationMs = durationMs)
+            }
         }
         player.addListener(object : Player.Listener {
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
@@ -668,7 +676,7 @@ class PlayerController @Inject constructor(
             player.playWhenReady = true
 
             // Apply the remembered default speed to every new video (boost is separate and resets).
-            val defaultSpeed = playerSettingsPrefs.defaultSpeed
+            val defaultSpeed = playerSettingsPrefs.defaultSpeed.value
             player.setPlaybackSpeed(defaultSpeed)
             _uiState.value = _uiState.value.copy(playbackSpeed = defaultSpeed)
         }
@@ -958,22 +966,22 @@ class PlayerController @Inject constructor(
         _uiState.value.activeSkipSegment?.let { seekTo(it.endMs) }
     }
 
+    // No local uiState write: the collector above turns the prefs change back into state, so this
+    // and the settings screen cannot disagree about which one is authoritative.
     fun setAutoSkipEnabled(enabled: Boolean) {
-        playerSettingsPrefs.autoSkipEnabled = enabled
-        _uiState.value = _uiState.value.copy(autoSkipEnabled = enabled)
+        playerSettingsPrefs.setAutoSkipEnabled(enabled)
     }
 
     // A user-chosen speed also becomes the remembered default for future videos (unlike the
     // transient long-press boost, which uses setPlaybackSpeed directly).
     fun setUserPlaybackSpeed(speed: Float) {
         val clamped = speed.coerceAtLeast(0.25f)
-        playerSettingsPrefs.defaultSpeed = clamped
+        playerSettingsPrefs.setDefaultSpeed(clamped)
         setPlaybackSpeed(clamped)
     }
 
     fun setSeekDurationMs(durationMs: Long) {
-        playerSettingsPrefs.seekDurationMs = durationMs
-        _uiState.value = _uiState.value.copy(seekDurationMs = durationMs)
+        playerSettingsPrefs.setSeekDurationMs(durationMs)
     }
 
     fun setVolumeBoostMillibels(millibels: Int) {
