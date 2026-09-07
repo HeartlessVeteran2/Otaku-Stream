@@ -11,7 +11,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 
-private val SPEED_OPTIONS = listOf(0.25f, 0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
+// Shared with the Playback settings screen — see PLAYBACK_SPEED_OPTIONS.
+private val SPEED_OPTIONS = com.otakustream.core.player.PLAYBACK_SPEED_OPTIONS
 
 @Composable
 fun SpeedPickerMenu(currentSpeed: Float, onSpeedSelected: (Float) -> Unit) {

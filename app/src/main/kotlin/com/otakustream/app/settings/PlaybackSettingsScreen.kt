@@ -19,6 +19,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.otakustream.core.player.PLAYBACK_SPEED_OPTIONS
 import com.otakustream.core.player.ui.SubtitleStyleControls
 import com.otakustream.core.ui.BackTopBar
 import com.otakustream.core.ui.SectionHeader
@@ -39,7 +40,10 @@ fun PlaybackSettingsScreen(
     onBack: () -> Unit,
     viewModel: PlaybackSettingsViewModel = hiltViewModel(),
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val autoSkipEnabled by viewModel.autoSkipEnabled.collectAsState()
+    val seekDurationMs by viewModel.seekDurationMs.collectAsState()
+    val defaultSpeed by viewModel.defaultSpeed.collectAsState()
+    val subtitleStyle by viewModel.subtitleStyle.collectAsState()
 
     Column(modifier = Modifier.fillMaxSize()) {
         BackTopBar(title = "Playback", onBack = onBack)
@@ -54,7 +58,7 @@ fun PlaybackSettingsScreen(
                     )
                 },
                 trailingContent = {
-                    Switch(checked = uiState.autoSkipEnabled, onCheckedChange = viewModel::setAutoSkip)
+                    Switch(checked = autoSkipEnabled, onCheckedChange = viewModel::setAutoSkip)
                 },
             )
 
@@ -63,7 +67,7 @@ fun PlaybackSettingsScreen(
                 title = "Double-tap seek",
                 description = "How far a double-tap on either side of the video jumps.",
                 options = SEEK_STEPS,
-                selected = uiState.seekDurationMs,
+                selected = seekDurationMs,
                 label = { "${it / 1000}s" },
                 onSelect = viewModel::setSeekDuration,
             )
@@ -72,7 +76,7 @@ fun PlaybackSettingsScreen(
                 description = "Applied at the start of every video. Changing speed mid-episode " +
                     "does not change this.",
                 options = SPEEDS,
-                selected = uiState.defaultSpeed,
+                selected = defaultSpeed,
                 label = { speedLabel(it) },
                 onSelect = viewModel::setDefaultSpeed,
             )
@@ -80,7 +84,7 @@ fun PlaybackSettingsScreen(
             SectionHeader("Subtitles")
             // The player's own controls, hosted here rather than copied — see SubtitleStyleControls.
             SubtitleStyleControls(
-                style = uiState.subtitleStyle,
+                style = subtitleStyle,
                 onStyleChange = viewModel::setSubtitleStyle,
                 modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 24.dp),
             )
@@ -124,7 +128,9 @@ private fun <T> ChipSetting(
 }
 
 private val SEEK_STEPS = listOf(5_000L, 10_000L, 15_000L, 30_000L)
-private val SPEEDS = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
+// The player's own list, not a subset of it: a stored default the chips can't show would
+// leave this row with nothing selected and no way back to the speed the user actually has.
+private val SPEEDS = PLAYBACK_SPEED_OPTIONS
 
 // "1x" rather than "1.0x", and "1.25x" rather than "1.25000001x" — a Float formatted with toString
 // leaks its representation into the UI.
