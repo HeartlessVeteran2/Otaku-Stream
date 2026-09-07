@@ -6,6 +6,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -49,11 +51,13 @@ import com.otakustream.feature.sources.ui.HomeContent
 // The app's "front door": a content-forward home in the Stremio mold. Quick actions up top
 // (open a local file, paste a link, browse add-ons), then Continue Watching and Popular/Latest
 // rails fanned out across the installed sources.
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun PlayScreen(
     onPlayVideo: (String) -> Unit,
     onBrowseAddons: () -> Unit,
+    onBrowseExtensions: () -> Unit,
+    onOpenSources: () -> Unit,
     onMediaClick: (sourceId: Long, mediaUrl: String, title: String, coverUrl: String?) -> Unit,
     onAniListClick: (mediaId: Long, title: String) -> Unit,
     onAniListSearch: () -> Unit,
@@ -102,24 +106,34 @@ fun PlayScreen(
         },
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
-            Row(
+            // FlowRow, not Row: three equal-weight buttons each carrying an icon and a label do
+            // not fit a narrow phone at a large font scale, and a clipped label on the only
+            // permanent route to Sources is the worst one to lose. Wrapping puts the third on its
+            // own line instead of squeezing all three.
+            FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
             ) {
-                OutlinedButton(onClick = { filePicker.launch(arrayOf("video/*")) }, modifier = Modifier.weight(1f)) {
+                OutlinedButton(onClick = { filePicker.launch(arrayOf("video/*")) }) {
                     Icon(Icons.Filled.FolderOpen, contentDescription = null)
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Open file")
                 }
-                OutlinedButton(onClick = { showUrlDialog = true }, modifier = Modifier.weight(1f)) {
+                OutlinedButton(onClick = { showUrlDialog = true }) {
                     Icon(Icons.Filled.Link, contentDescription = null)
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Play link")
                 }
-                OutlinedButton(onClick = onBrowseAddons, modifier = Modifier.weight(1f)) {
+                // Sources, not Add-ons. This was the only permanent "get more to watch"
+                // affordance on the Play tab and it went straight to the Stremio directory — so
+                // the app's most visible answer to "where do sources come from" never mentioned
+                // that JavaScript extensions exist. The Sources screen lists both directories plus
+                // what is already installed, which is the question this button is actually asked.
+                OutlinedButton(onClick = onOpenSources) {
                     Icon(Icons.Filled.Extension, contentDescription = null)
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Add-ons")
+                    Text("Sources")
                 }
             }
 
@@ -127,6 +141,7 @@ fun PlayScreen(
                 onMediaClick = onMediaClick,
                 onPlayDirect = onPlayVideo,
                 onBrowseAddons = onBrowseAddons,
+                onBrowseExtensions = onBrowseExtensions,
                 onAniListClick = onAniListClick,
                 onSeeSchedule = onSeeSchedule,
             )

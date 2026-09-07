@@ -1,5 +1,6 @@
 package com.otakustream.feature.tracking
 
+import com.otakustream.core.network.await
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -30,7 +31,7 @@ class AniSkipClient @Inject constructor(
             val url = "https://api.aniskip.com/v2/skip-times/$malId/$episodeNumber" +
                 "?types[]=op&types[]=ed&types[]=recap&episodeLength=$episodeLengthSec"
             val request = Request.Builder().url(url).get().build()
-            httpClient.newCall(request).execute().use { response ->
+            httpClient.newCall(request).await().use { response ->
                 if (!response.isSuccessful) return@withContext emptyList()
                 val bodyString = response.body?.string()
                 if (bodyString.isNullOrBlank()) return@withContext emptyList()

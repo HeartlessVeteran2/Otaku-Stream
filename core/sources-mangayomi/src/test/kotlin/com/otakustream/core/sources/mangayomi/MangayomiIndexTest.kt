@@ -2,6 +2,7 @@ package com.otakustream.core.sources.mangayomi
 
 import com.otakustream.core.sources.api.stableSourceId
 import com.otakustream.core.sources.mangayomi.repo.parseMangayomiIndex
+import com.otakustream.core.sources.mangayomi.repo.withUniqueIds
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -80,5 +81,46 @@ class MangayomiIndexTest {
             ]
         """.trimIndent()
         assertTrue(parseMangayomiIndex(json).listings.isEmpty())
+    }
+
+    // Two repositories, each internally consistent, that together crash the browse list.
+    //
+    // This is the shape the merged directory hits and a single index never does: repo A publishes
+    // id 42 in English, repo B publishes id 42 in Japanese. Neither index has a duplicate, so the
+    // per-index rule passes both through untouched — and the merge that only deduped on
+    // (id, lang) kept both, handing Compose two list items with the same key. Compose throws on
+    // that, so the extensions screen crashes on open, from data neither repo did anything wrong to
+    // produce. A user's own custom repo makes it reachable with no coordination at all.
+    @Test
+    fun `two repos claiming the same id under different languages both survive with distinct ids`() {
+        val repoA = """[{"id":42,"name":"Animeonsen","lang":"en","sourceCodeUrl":"https://a.example/x.js"}]"""
+        val repoB = """[{"id":42,"name":"Animeonsen","lang":"ja","sourceCodeUrl":"https://b.example/x.js"}]"""
+
+        val parsed = parseMangayomiIndex(repoA, "A").listings + parseMangayomiIndex(repoB, "B").listings
+        // Both indexes are individually fine — the collision only exists once they are merged.
+        assertEquals(2, parsed.size)
+        assertEquals(1, parsed.map { it.id }.toSet().size)
+
+        val merged = withUniqueIds(parsed)
+
+        assertEquals("both sources must survive", 2, merged.size)
+        assertEquals("and must have distinct ids", 2, merged.map { it.id }.toSet().size)
+        assertEquals(setOf("en", "ja"), merged.map { it.lang }.toSet())
+    }
+
+    // The other half of the rule: a genuine duplicate — same id, same language, same extension
+    // carried by two repos — collapses to one row rather than being given a second identity.
+    @Test
+    fun `the same extension in two repos shows once`() {
+        val repoA = """[{"id":7,"name":"AllAnime","lang":"en","sourceCodeUrl":"https://a.example/all.js"}]"""
+        val repoB = """[{"id":7,"name":"AllAnime","lang":"en","sourceCodeUrl":"https://b.example/all.js"}]"""
+
+        val merged = withUniqueIds(
+            parseMangayomiIndex(repoA, "A").listings + parseMangayomiIndex(repoB, "B").listings,
+        )
+
+        assertEquals(1, merged.size)
+        // The first repo wins, so ordering decides provenance rather than chance.
+        assertEquals("https://a.example/all.js", merged.single().sourceCodeUrl)
     }
 }

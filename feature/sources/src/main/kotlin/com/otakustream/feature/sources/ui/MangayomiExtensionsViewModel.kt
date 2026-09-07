@@ -108,9 +108,19 @@ class MangayomiExtensionsViewModel @Inject constructor(
     // own. The curated repos are already merged into the list without this — it is here for the
     // case where a repo has an extension the merge deduped away, or the user simply wants to see
     // one repo's contents.
+    // Fills the field; does not save.
+    //
+    // It used to call saveRepoUrl(), which persists over repoUrl — a single stored string — so
+    // tapping a suggestion silently destroyed whatever custom repository the user had added. That
+    // is a real loss: a custom repo is a URL they found and typed, and nothing in the app records
+    // it anywhere else.
+    //
+    // Saving buys nothing anyway. The curated repos are fetched on every load whether or not one is
+    // stored, so their extensions are already in the list; what the chip is actually useful for is
+    // showing what a repo URL looks like and putting it somewhere editable. Pressing Load is then
+    // the user's own decision, made with the field in front of them.
     fun useSuggestedRepo(repo: RecommendedExtensionRepos.Repo) {
         _uiState.value = _uiState.value.copy(repoUrl = repo.indexUrl)
-        saveRepoUrl()
     }
 
     fun install(listing: MangayomiExtensionListing) {

@@ -40,6 +40,11 @@ interface MangayomiSourceRepository {
     // One transaction, because reading the old preferences and writing the new row are otherwise
     // two suspending calls with a window between them.
     suspend fun saveKeepingPrefs(record: MangayomiSourceRecord)
+
+    // The saved preferences for one extension, so a re-install can build its new runtime with them
+    // instead of with defaults. saveKeepingPrefs alone only fixes the database row; the source
+    // object handed back to be registered is constructed before that write.
+    suspend fun getPrefs(id: Long): String?
     suspend fun updatePrefs(id: Long, prefsJson: String?)
     suspend fun delete(id: Long)
 }
@@ -73,6 +78,8 @@ class MangayomiSourceRepositoryImpl @Inject constructor(
             ),
         )
     }
+
+    override suspend fun getPrefs(id: Long): String? = dao.getPrefs(id)
 
     override suspend fun saveKeepingPrefs(record: MangayomiSourceRecord) = database.withTransaction {
         save(record.copy(prefsJson = dao.getPrefs(record.id) ?: record.prefsJson))

@@ -1,5 +1,6 @@
 package com.otakustream.core.sources.scripting
 
+import com.otakustream.core.network.await
 import com.otakustream.core.database.scripted.ScriptedSourceRecord
 import com.otakustream.core.database.scripted.ScriptedSourceRepository
 import com.otakustream.core.sources.api.RemoteCodeUrl
@@ -23,7 +24,7 @@ class ScriptSourceInstaller @Inject constructor(
         // may not.
         RemoteCodeUrl.require(scriptUrl, "A source script")
         val request = Request.Builder().url(scriptUrl).build()
-        val content = httpClient.newCall(request).execute().use { response ->
+        val content = httpClient.newCall(request).await().use { response ->
             require(response.isSuccessful) { "Failed to download script: HTTP ${response.code}" }
             response.body?.string() ?: error("Empty script body")
         }

@@ -73,9 +73,23 @@ class StremioAccountViewModel @Inject constructor(
     }
 
     fun logout() {
-        accountStore.clear()
+        // The screen clears on this frame: accountStore.clear() drops its in-memory state before
+        // suspending, and the durable wipe runs on the store's own scope, so leaving the screen
+        // straight after tapping this can't strand the authKey on disk.
         _uiState.value = _uiState.value.copy(library = emptyList(), message = null, error = null)
-        UiMessages.show("Signed out of Stremio")
+        viewModelScope.launch {
+            // The store reports whether the authKey actually left the disk. Saying "Signed out"
+            // when it did not would be the exact lie this change is about: the credential comes
+            // back on the next launch and nothing ever said so.
+            if (accountStore.clear()) {
+                UiMessages.show("Signed out of Stremio")
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    error = "Signed out on this screen, but the saved sign-in couldn't be removed " +
+                        "from storage. It may come back when the app restarts.",
+                )
+            }
+        }
     }
 
     fun refreshLibrary() {
