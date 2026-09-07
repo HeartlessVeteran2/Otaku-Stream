@@ -434,18 +434,33 @@ private fun HistoryTab(
     }
 
     LazyColumn(modifier = Modifier.fillMaxSize()) {
+        // Keyed on the unfiltered history: a search that matches nothing has not made clearing
+        // meaningless, and hiding the button would suggest there is nothing there to clear.
         if (uiState.history.isNotEmpty()) {
             item {
                 TextButton(onClick = { confirmingClear = true }, modifier = Modifier.padding(horizontal = 8.dp)) {
                     Text("Clear history")
                 }
             }
-        } else {
+        }
+
+        // The same two nothings the Watchlist tab distinguishes, and this tab was missing the
+        // second: a search matching none of your history rendered the Clear button over a blank
+        // list, which reads as a screen that failed to load rather than as a search with no hits.
+        if (uiState.history.isEmpty()) {
             item {
                 EmptyState(
                     icon = Icons.Outlined.History,
                     title = "No watch history yet",
                     message = "Anything you play — a file, a link, or an episode — shows up here so you can pick it back up.",
+                )
+            }
+        } else if (history.isEmpty()) {
+            item {
+                EmptyState(
+                    icon = Icons.Filled.SearchOff,
+                    title = "No matches",
+                    message = "Nothing in your history matches \"$query\".",
                 )
             }
         }

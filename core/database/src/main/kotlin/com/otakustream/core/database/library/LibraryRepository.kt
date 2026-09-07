@@ -43,9 +43,14 @@ interface LibraryRepository {
     // have changed in between.
     suspend fun removeHistoryEntryAndReturn(id: Long): WatchHistoryEntry?
 
-    // Puts a deleted history row back. Room's autoGenerate ignores a non-zero id on insert, so the
-    // restored row gets a new one — which is why undo restores the entry rather than the id, and
-    // why the snackbar's action does not try to preserve it.
+    // Puts a deleted history row back. The implementation resets the auto-generated id to zero so
+    // SQLite allocates a fresh one — Room does *not* ignore a non-zero id, it would reuse it — which
+    // is why undo restores the entry rather than the id, and why the snackbar's action does not try
+    // to preserve it.
+    //
+    // The row keeps its original watchedAtEpochMs, so it returns to where it was in the list rather
+    // than jumping to the top. Restoring it with a fresh timestamp would claim the user had watched
+    // it just now, which is false and reorders Continue Watching around a deletion they undid.
     suspend fun restoreHistoryEntry(entry: WatchHistoryEntry)
 
     suspend fun clearHistory()
