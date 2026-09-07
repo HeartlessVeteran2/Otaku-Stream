@@ -180,6 +180,39 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
+    // One row, with an undo — matching what Watchlist and Downloads already offer. History was
+    // the only list where the sole way to remove anything was to clear all of it, so a single
+    // mistyped search or a video opened by accident could only be tidied away by destroying the
+    // rest of the history with it.
+    fun removeHistoryEntry(id: Long) {
+        viewModelScope.launch {
+            val removed = libraryRepository.removeHistoryEntryAndReturn(id) ?: return@launch
+            UiMessages.showUndoable("Removed ${removed.entry.mediaTitle} from history") {
+                // Runs on the snackbar host's scope, not this one — see UiMessages.Message. A
+                // straight restore rather than insert-if-absent: history rows are append-only and
+                // carry no user-editable state, so there is nothing here for a concurrent write to
+                // overwrite, unlike the watchlist entry this pattern came from.
+                //
+                // But the undo has to expire. The snackbar outlives the row it is about: delete one
+                // entry, then Clear history — which asks first and says it cannot be undone — and a
+                // still-visible Undo would put that one row back into a history the user had just
+                // been told was gone for good. `removed` carries which history it came from, and
+                // the repository refuses the restore if that history has since been wiped.
+                //
+                // The check lives there rather than here for two reasons this ViewModel cannot fix:
+                // it has to be atomic with the insert, and it has to survive this ViewModel, which
+                // a rotation replaces while the snackbar it created is still on screen.
+                //
+                // And say so when it refuses, for the same reason the watchlist undo above does: a
+                // snackbar that closes exactly as it does on success, having done nothing, is the
+                // one case worth telling the user about.
+                if (!libraryRepository.restoreHistoryEntry(removed)) {
+                    UiMessages.show("History was cleared — ${removed.entry.mediaTitle} wasn't restored")
+                }
+            }
+        }
+    }
+
     fun clearHistory() {
         viewModelScope.launch { libraryRepository.clearHistory() }
     }

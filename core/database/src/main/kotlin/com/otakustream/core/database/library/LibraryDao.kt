@@ -59,6 +59,12 @@ interface WatchHistoryDao {
     @Query("SELECT mediaTitle FROM watch_history WHERE mediaUrl = :mediaUrl ORDER BY watchedAtEpochMs DESC, id DESC LIMIT 1")
     suspend fun lastTitleFor(mediaUrl: String): String?
 
+    @Query("SELECT * FROM watch_history WHERE id = :id")
+    suspend fun getHistoryEntry(id: Long): WatchHistoryEntry?
+
+    @Query("DELETE FROM watch_history WHERE id = :id")
+    suspend fun deleteHistoryEntry(id: Long)
+
     @Insert
     suspend fun insert(entry: WatchHistoryEntry)
 
