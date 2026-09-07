@@ -100,10 +100,14 @@ class MangayomiRepoClient @Inject constructor(
 
         val parsed = curatedResults.mapNotNull { it.parsed } + listOfNotNull(customResult?.getOrNull())
 
-        // Curated first, then the user's own — deduped on the same (id, lang) key the parser uses,
-        // so an extension carried by two repos shows once, keeping the repo it was found in first.
-        val merged = parsed.flatMap { it.listings }
-            .distinctBy { it.id to it.lang }
+        // Curated first, then the user's own, through the same unique-id rule the parser applies —
+        // not a bare distinctBy on (id, lang), which was what this used to do.
+        //
+        // That guaranteed (id, lang) uniqueness across the merge while every consumer downstream is
+        // keyed on the id alone: two repos carrying the same declared id under different languages
+        // both survived, and the browse list's Compose key threw on the duplicate. Per-index
+        // uniqueness is not the invariant the screen needs; merged uniqueness is.
+        val merged = withUniqueIds(parsed.flatMap { it.listings })
             .filter { showAdult || !it.isNsfw }
 
         ExtensionDirectory(

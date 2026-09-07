@@ -2,6 +2,7 @@ package com.otakustream.core.sources.mangayomi
 
 import com.otakustream.core.sources.mangayomi.repo.RecommendedExtensionRepos
 import com.otakustream.core.sources.mangayomi.repo.parseMangayomiIndex
+import com.otakustream.core.sources.mangayomi.repo.withUniqueIds
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -129,5 +130,36 @@ class RealExtensionIndexTest {
                 listing.sourceCodeUrl.startsWith("https://"),
             )
         }
+    }
+
+    // The invariant the screen actually depends on, asserted the way the screen gets its data.
+    //
+    // The per-index test above is necessary and is not sufficient: MangayomiRepoClient merges all
+    // three curated repos plus the user's own into one list, and the browse list keys on the id
+    // alone. This does not fail against the merge it replaced — the three repos as published today
+    // happen not to collide across each other — so it is a standing guard rather than a
+    // reproduction. MangayomiIndexTest holds the case that does reproduce it.
+    @Test
+    fun `every id in the merged directory is unique`() {
+        val fixtures = listOf(
+            "anime_index_m2k3a.json",
+            "anime_index_mallyd11.json",
+            "anime_index_swakshan.json",
+        )
+        val parsed = fixtures.flatMap { parseMangayomiIndex(fixture(it), it).listings }
+        val merged = withUniqueIds(parsed)
+
+        val duplicates = merged.groupBy { it.id }.filterValues { it.size > 1 }
+        assertTrue(
+            "duplicate ids in the merged directory would crash the browse list: " +
+                duplicates.mapValues { entry -> entry.value.map { it.name to it.lang } },
+            duplicates.isEmpty(),
+        )
+        // And the merge must not be buying that by throwing sources away: every (name, lang) pair
+        // that went in still comes out.
+        assertEquals(
+            parsed.map { it.name to it.lang }.toSet(),
+            merged.map { it.name to it.lang }.toSet(),
+        )
     }
 }

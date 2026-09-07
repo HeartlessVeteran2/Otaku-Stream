@@ -510,9 +510,18 @@ class PlayerController @Inject constructor(
             // Retry button under "Torrent playback is turned off" did nothing at all. Turning the
             // setting on and pressing Retry is the obvious next move, and it has to work.
             //
-            // Only this field: the session and chain stay where they are, so a screen holding the
-            // previous chain still owns whatever is genuinely playing.
-            currentMediaUrl = url
+            // Only this field, and only when it is free.
+            //
+            // The unconditional version of this line was itself a bug, and a worse one than the
+            // no-op Retry it fixed: the refusal returns before player.stop(), so a previous episode
+            // can still be playing, and overwriting its url meant maybePersistProgress and
+            // PlaybackCompletion.takeHandler filed that episode's progress and completion under the
+            // refused torrent. Retry then re-attempted the torrent instead of the live episode,
+            // forever.
+            //
+            // Null is exactly the case the fix was for — the refusal being the first play of the
+            // session, where nothing is playing and Retry had nothing to read.
+            if (currentMediaUrl == null) currentMediaUrl = url
             _uiState.value = _uiState.value.copy(
                 error = torrentRefusalMessage(
                     isAvailable = torrentEngine.isAvailable,
