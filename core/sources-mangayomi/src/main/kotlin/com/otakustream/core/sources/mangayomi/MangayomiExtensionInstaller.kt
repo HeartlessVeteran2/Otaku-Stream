@@ -32,6 +32,13 @@ class MangayomiExtensionInstaller @Inject constructor(
         // runtime with default settings while the database held the user's, and the two only agreed
         // again at the next cold start. Reachable whenever a re-install happens with the extension
         // already registered, which is exactly what the directory's Install button does.
+        //
+        // A pref edit landing between this read and the save below leaves the live source one
+        // snapshot behind the database until the next cold start. That window is left open on
+        // purpose: closing it by writing this snapshot back would discard the newer edit, and
+        // losing a setting the user just made is worse than a stale one that self-heals. Creating
+        // the source after the save is not an option either — building it first is what validates
+        // the script under QuickJS, and a script that fails to load must never reach the database.
         val existingPrefs = repository.getPrefs(listing.id)
         val source = factory.create(content, override = listing.toMetadata(), prefsJson = existingPrefs)
         try {

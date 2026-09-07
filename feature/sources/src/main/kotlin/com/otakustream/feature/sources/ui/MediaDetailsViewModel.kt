@@ -76,6 +76,10 @@ data class MediaDetailsUiState(
     val episodes: List<Episode> = emptyList(),
     val resolvedVideoUrl: String? = null,
     val error: String? = null,
+    // A download removal that could not be confirmed. Separate from `error` because the screen
+    // renders a Retry beside that one which re-runs load() — an action that would do nothing for
+    // this failure — and because a later successful load must not appear to have resolved it.
+    val downloadError: String? = null,
     // The pooled stream list, best first. One list, gathered from every source linked to the same
     // AniList entry, rather than only the source whose page the user happens to be on.
     val pendingStreams: List<StreamOption> = emptyList(),
@@ -387,13 +391,19 @@ class MediaDetailsViewModel @Inject constructor(
         // One message however many rows an episode had, and only when something is genuinely left
         // behind — where the user can still get at it.
         if (unconfirmed > 0) {
-            // This screen's own error slot, not a global snackbar: it is an error, and the app's
-            // rule is that errors stay next to the thing that failed rather than following the user
-            // to whatever tab they opened next.
+            // Its own field, not `error`.
+            //
+            // `error` is the details *loader's* failure, and the screen renders a Retry beside it
+            // that re-runs load(). A removal that timed out is neither retryable that way nor
+            // cleared by a later successful load, so putting it there offered the wrong action and
+            // left a stale message behind. This one is cleared the moment a removal succeeds.
             _uiState.value = _uiState.value.copy(
-                error = "Couldn't finish removing this episode's download. It's still listed in " +
-                    "Library › Downloads.",
+                downloadError = "Couldn't finish removing this episode's download. It's still " +
+                    "listed in Library › Downloads.",
             )
+        }
+        if (unconfirmed == 0) {
+            _uiState.value = _uiState.value.copy(downloadError = null)
         }
         return unconfirmed == 0
     }

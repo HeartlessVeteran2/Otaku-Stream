@@ -82,7 +82,7 @@ private fun parseEntry(obj: JSONObject?, repoName: String?): MangayomiExtensionL
     val lang = obj.optString("lang").ifEmpty { "en" }
     val declaredId = obj.optLong("id", 0L)
     return MangayomiExtensionListing(
-        id = if (declaredId != 0L) declaredId else stableSourceId(name, lang),
+        id = listingId(declaredId, name, lang),
         name = name,
         lang = lang,
         baseUrl = obj.optString("baseUrl"),
@@ -96,36 +96,38 @@ private fun parseEntry(obj: JSONObject?, repoName: String?): MangayomiExtensionL
     )
 }
 
-// The unique-id rule, as a function, because it has to hold in two places and only held in one.
+// An extension's id, derived from the extension and from nothing else.
 //
-// It was applied inside parseMangayomiIndex — per repository — while the screen renders the *merged*
-// directory from three curated repos plus the user's own. Two repos carrying the same declared id
-// under different languages therefore reached the list with a duplicate id, and Compose throws on a
-// duplicate list key: a crash on opening the extensions screen, from data neither repo did anything
-// wrong to produce. Fixing the per-index case and leaving the merge is the same mistake one layer
-// up, which is why the rule now lives somewhere both callers use.
+// This is the second attempt, and the first one's failure is the reason it reads like this. That
+// version kept the declared id for whichever listing claimed it first and derived one for any later
+// claimant in a different language. It produced unique ids, which was the crash it was written to
+// fix — but "first" meant first in fetch order, so an extension's identity depended on which
+// repositories happened to be reachable at the time. A curated repo being briefly down changed the
+// id of somebody else's listing; when it came back, the id changed again. `installedIds`, the
+// source registry and the database primary key are all keyed on that id, so the same extension read
+// as installed, then not installed, then installed — and installing it twice made two rows.
+// Identity that moves with the network is worse than the duplicate key it replaced.
 //
-// Two things have to be true at once. Swakshan's index gives Animeonsen `en` and Animeonsen `ja` the
-// same declared id, and they are genuinely two sources — deduping on the id alone throws one away.
-// But keeping both under one id is worse: besides the Compose key, `installedIds` and the database
-// primary key are id-only, so installing either variant would mark and overwrite the other.
+// So the id is now a pure function of the listing: the declared id and the language together, or
+// the name and the language when no id is declared. Same properties as before where it mattered —
+// Animeonsen `en` and Animeonsen `ja` sharing a declared id come out as two sources, and the same
+// extension carried by two repos comes out as one — with none of the order dependence.
 //
-// So a declared id is honoured once. A second entry claiming an id already taken by a different
-// language gets a derived one — the same stableSourceId(name, lang) already used for entries that
-// declare no id at all, so nothing new is invented here. A repeat of the same id *and* language is a
-// genuine duplicate and is dropped.
-internal fun withUniqueIds(listings: List<MangayomiExtensionListing>): List<MangayomiExtensionListing> {
-    val seenIds = mutableSetOf<Long>()
-    val seenKeys = mutableSetOf<Pair<Long, String>>()
-    return listings.mapNotNull { listing ->
-        if (!seenKeys.add(listing.id to listing.lang)) return@mapNotNull null
-        if (seenIds.add(listing.id)) {
-            listing
-        } else {
-            val derived = stableSourceId(listing.name, listing.lang)
-            // Only if the derived id is itself free; otherwise this entry cannot be told apart from
-            // one already listed and is dropped rather than colliding.
-            if (seenIds.add(derived)) listing.copy(id = derived) else null
-        }
-    }
-}
+// This does change ids for anything installed under the old rule: such an extension is offered as
+// "Install" again, and installing it writes a new row beside the orphaned one. That cost is
+// accepted rather than dismissed. The alternative — keeping declared ids and disambiguating only on
+// collision — is exactly what cannot be made order-independent, and the exposure is small: the
+// extension directory only became usable at all in #126, so almost nothing predates this rule.
+internal fun listingId(declaredId: Long, name: String, lang: String): Long =
+    if (declaredId != 0L) stableSourceId(declaredId.toString(), lang) else stableSourceId(name, lang)
+
+// Drops genuine duplicates from a merged directory.
+//
+// With listingId above, two listings collide only when they are the same extension — same declared
+// id (or name) and same language — which is what happens when two repositories carry it. Keeping
+// the first means the curated repos win over the user's custom one, so provenance is decided by
+// order rather than by chance. A duplicate key in the browse list is impossible by construction
+// now rather than by this function's diligence, but the dedupe is still wanted: the same extension
+// listed twice is noise, and Compose would still throw on it.
+internal fun withUniqueIds(listings: List<MangayomiExtensionListing>): List<MangayomiExtensionListing> =
+    listings.distinctBy { it.id }

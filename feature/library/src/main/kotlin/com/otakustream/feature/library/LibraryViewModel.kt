@@ -110,6 +110,10 @@ class LibraryViewModel @Inject constructor(
             // service has caught up.
             if (episodeDownloads.removeAndAwait(row.entry.videoUrl)) {
                 downloadRepository.forget(row.entry.videoUrl)
+                // Cleared on success, because this ViewModel outlives the tab: a failure left
+                // standing would keep naming a download that is no longer listed, next to rows it
+                // has nothing to do with.
+                _downloadError.value = null
             } else {
                 _downloadError.value =
                     "Couldn't finish removing ${row.entry.episodeName ?: row.entry.mediaTitle}. " +
