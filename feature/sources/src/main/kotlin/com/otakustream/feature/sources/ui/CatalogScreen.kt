@@ -72,6 +72,7 @@ fun CatalogScreen(
     onMediaClick: (sourceId: Long, mediaUrl: String, title: String, coverUrl: String?) -> Unit,
     onManageSourcesClick: () -> Unit,
     onBrowseAddons: () -> Unit,
+    onBrowseExtensions: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: CatalogViewModel = hiltViewModel(),
 ) {
@@ -95,7 +96,10 @@ fun CatalogScreen(
         modifier = modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text("Catalog") },
+                // "Browse", matching the tab that gets here. The tab said Browse and the screen
+                // said Catalog, which reads as two different places — and "catalog" is Stremio's
+                // internal word for a source's listing, not a name for this screen.
+                title = { Text("Browse") },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
@@ -180,9 +184,13 @@ fun CatalogScreen(
                     EmptyState(
                         icon = Icons.Filled.Extension,
                         title = "No sources yet",
-                        message = "Install an add-on to fill your catalog with things to watch.",
+                        // Both ecosystems, because offering only one implies the other isn't there.
+                        message = "Install a Stremio add-on or a Mangayomi/AnymeX extension, and " +
+                            "this fills up with things to watch.",
                         actionLabel = "Browse add-ons",
                         onAction = onBrowseAddons,
+                        secondaryActionLabel = "Browse extensions",
+                        onSecondaryAction = onBrowseExtensions,
                     )
                 }
                 uiState.entries.isEmpty() -> {

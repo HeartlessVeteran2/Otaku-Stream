@@ -60,7 +60,11 @@ fun SourcesScreen(
             )
             ListItem(
                 headlineContent = { Text("Extensions") },
-                supportingContent = { Text("Anime extensions from AnymeX/Mangayomi repositories") },
+                // Names the format, because the obvious guess is wrong and costs an afternoon:
+                // these are Mangayomi/AnymeX JavaScript extensions, and Aniyomi's .apk extensions —
+                // which is what most people mean by "anime extensions" — cannot be loaded here at
+                // all. Different ecosystem, many of the same sites.
+                supportingContent = { Text("JavaScript extensions from AnymeX/Mangayomi repos (not Aniyomi .apk files)") },
                 modifier = Modifier.clickable(onClick = onAnymexExtensions),
             )
             ListItem(
