@@ -16,6 +16,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
@@ -28,6 +29,11 @@ data class LibraryUiState(
     // Most recent history row per media — the "continue watching" rail.
     val continueWatching: List<WatchHistoryEntry> = emptyList(),
     val downloads: List<DownloadRow> = emptyList(),
+    // A removal that could not be confirmed. Screen state rather than a UiMessages snackbar,
+    // because it is an error about a row on this screen and the app's rule for those is that they
+    // stay next to the thing that failed, with a way to try again — UiMessages says so in its own
+    // header, and a global snackbar would surface this on whatever tab the user had moved to.
+    val downloadError: String? = null,
 )
 
 // A download as the list shows it: what it is called, joined to how far along it is.
@@ -52,6 +58,13 @@ class LibraryViewModel @Inject constructor(
     private val episodeDownloads: EpisodeDownloads,
 ) : ViewModel() {
 
+    // One-shot, screen-scoped, and merged into the state below.
+    private val _downloadError = MutableStateFlow<String?>(null)
+
+    fun consumeDownloadError() {
+        _downloadError.value = null
+    }
+
     val uiState: StateFlow<LibraryUiState> = combine(
         libraryRepository.observeLibrary(),
         libraryRepository.observeHistory(),
@@ -59,7 +72,8 @@ class LibraryViewModel @Inject constructor(
         // Emits on every download state change, so a row's progress bar advances without the
         // screen polling for it.
         episodeDownloads.observe(),
-    ) { watchlist, history, downloads, inFlight ->
+        _downloadError,
+    ) { watchlist, history, downloads, inFlight, downloadError ->
         val byUrl = inFlight.associateBy { it.url }
         // A finished download is not in currentDownloads at all, so it would join to null and be
         // indistinguishable from one that never started. The index is the only place that knows.
@@ -71,6 +85,7 @@ class LibraryViewModel @Inject constructor(
             downloads = downloads.map { entry ->
                 DownloadRow(entry, byUrl[entry.videoUrl] ?: finished[entry.videoUrl])
             },
+            downloadError = downloadError,
         )
     }
         // The combine body walks Media3's download index, which is a synchronous SQLite read, and it
@@ -96,7 +111,9 @@ class LibraryViewModel @Inject constructor(
             if (episodeDownloads.removeAndAwait(row.entry.videoUrl)) {
                 downloadRepository.forget(row.entry.videoUrl)
             } else {
-                UiMessages.show("Couldn't finish removing that download. It's still listed — try again.")
+                _downloadError.value =
+                    "Couldn't finish removing ${row.entry.episodeName ?: row.entry.mediaTitle}. " +
+                        "It's still listed — try again."
             }
         }
     }

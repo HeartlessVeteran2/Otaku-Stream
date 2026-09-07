@@ -17,15 +17,20 @@ object PlaybackCompletion {
     // and three primitives, never a ViewModel — see registerAniListSync), but nothing ever removed
     // them, and browsing is exactly the activity that starts a lot of streams without finishing any.
     //
-    // An LRU rather than an expiry: only one stream plays at a time, and the most that are ever
-    // legitimately live at once is two — the current episode and the next one auto-play resolved
-    // ahead of it. MAX is well clear of that, so eviction can't reach a handler that still has an
-    // episode behind it. Same LinkedHashMap idiom AniListClient already uses for its detail cache.
+    // An LRU rather than an expiry, and sized so eviction is not a mechanism the app relies on.
+    //
+    // At most two handlers are ever legitimately live — the current episode and the one auto-play
+    // resolved ahead of it — so a cap of 8 looked generous. It was not generous enough to be safe:
+    // it puts a real ceiling nine abandoned streams away, and evicting a live handler means an
+    // episode the user genuinely finishes never syncs its progress, silently. 64 is still bounded,
+    // still trivial in memory (a string and a closure over a singleton and three primitives), and
+    // far enough from two that reaching it means something else is wrong. Same LinkedHashMap idiom
+    // AniListClient already uses for its detail cache.
     //
     // core:sources-api stays free of kotlinx-coroutines by design; `suspend` is a language feature,
     // not a dependency, so the handler can suspend without pulling the library in here. That also
     // rules out a coroutine-based cache, hence the plain map under a lock.
-    private const val MAX_PENDING = 8
+    private const val MAX_PENDING = 64
 
     private val handlers = object : LinkedHashMap<String, suspend () -> Unit>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, suspend () -> Unit>): Boolean =

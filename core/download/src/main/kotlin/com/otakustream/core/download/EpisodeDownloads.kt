@@ -11,7 +11,9 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -90,10 +92,16 @@ class EpisodeDownloads @Inject constructor(
             url,
             /* foreground = */ false,
         )
-        return withTimeoutOrNull(timeoutMs) {
-            changes().first { isAbsentFromIndex(url) }
-            true
-        } ?: false
+        // On IO, not the caller's dispatcher. Both callers await this from viewModelScope, which is
+        // Dispatchers.Main — and isAbsentFromIndex is a synchronous SQLite read re-run on every
+        // change the manager reports, several a second while a download is being torn down. That is
+        // a database read per frame on the main thread.
+        return withContext(Dispatchers.IO) {
+            withTimeoutOrNull(timeoutMs) {
+                changes().first { isAbsentFromIndex(url) }
+                true
+            } ?: false
+        }
     }
 
     // Ticks once immediately and then on every change the manager reports. The tick carries no

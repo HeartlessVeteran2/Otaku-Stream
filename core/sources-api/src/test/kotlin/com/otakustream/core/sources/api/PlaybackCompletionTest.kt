@@ -3,6 +3,7 @@ package com.otakustream.core.sources.api
 import org.junit.After
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -44,7 +45,10 @@ class PlaybackCompletionTest {
         val surviving = (0 until 200).count {
             PlaybackCompletion.takeHandler("https://cdn.example/abandoned-$it.mp4") != null
         }
-        assert(surviving <= 8) { "expected the registry to stay bounded, found $surviving handlers" }
+        // assertTrue, not Kotlin's `assert`: the latter compiles to a check guarded by the JVM's
+        // -ea flag and is a silent no-op without it, so the bound would go unverified exactly where
+        // it matters. The other assertions in this file are JUnit's and always run.
+        assertTrue("expected the registry to stay bounded, found $surviving handlers", surviving <= 64)
     }
 
     @Test
@@ -52,7 +56,9 @@ class PlaybackCompletionTest {
         // Eviction has to take the oldest, because the live ones are the current episode and the
         // next one auto-play resolved ahead of it — dropping either would silently stop progress
         // syncing for an episode the user actually finished.
-        repeat(20) { register("https://cdn.example/old-$it.mp4") }
+        // Past the cap on purpose: below it nothing is evicted at all, which is the normal case and
+        // is covered by the test above. This is about which end goes when the bound does bite.
+        repeat(200) { register("https://cdn.example/old-$it.mp4") }
         register("https://cdn.example/playing-now.mp4")
 
         assertNotNull(PlaybackCompletion.takeHandler("https://cdn.example/playing-now.mp4"))

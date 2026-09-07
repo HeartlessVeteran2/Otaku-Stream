@@ -49,6 +49,15 @@ class StremioAddonInstaller @Inject constructor(
         stremioRepository.saveAddonKeepingUserSettings(
             StremioAddonRecord(manifestUrl = normalizedUrl, manifestJson = content, name = manifest.name, priority = priority),
         )
+        // Preserving `enabled` in the database is only half of it: the runtime has to agree.
+        // Re-installing an add-on the user had switched off left it disabled in the row and still
+        // registered its stream/subtitle providers and handed back its catalog sources for the
+        // caller to register — so it was off in the list and contributing to playback anyway, which
+        // is worse than the bug it half-fixed. An add-on that is off registers nothing and returns
+        // nothing to register.
+        val enabled = stremioRepository.getAllAddons()
+            .firstOrNull { it.manifestUrl == normalizedUrl }?.enabled ?: true
+        if (!enabled) return@withContext emptyList()
         registerProviderIfAny(normalizedUrl, content)
         sources
     }

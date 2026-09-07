@@ -346,7 +346,9 @@ class MediaDetailsViewModel @Inject constructor(
         viewModelScope.launch { clearDownloadsFor(episode.url) }
     }
 
-    private suspend fun clearDownloadsFor(episodeUrl: String) {
+    // Returns whether every row for this episode is confirmed gone, because one caller has to
+    // change what it does when they are not.
+    private suspend fun clearDownloadsFor(episodeUrl: String): Boolean {
         // Same ordering rule as LibraryViewModel.removeDownload, and for the same reason: this row
         // is the app's only handle on the downloaded bytes, so it is deleted once the removal is
         // confirmed rather than alongside the request for it. Dropping it first stranded the file
@@ -362,8 +364,15 @@ class MediaDetailsViewModel @Inject constructor(
         // One message however many rows an episode had, and only when something is genuinely left
         // behind — where the user can still get at it.
         if (unconfirmed > 0) {
-            UiMessages.show("Couldn't finish removing this download. It's still in Library › Downloads.")
+            // This screen's own error slot, not a global snackbar: it is an error, and the app's
+            // rule is that errors stay next to the thing that failed rather than following the user
+            // to whatever tab they opened next.
+            _uiState.value = _uiState.value.copy(
+                error = "Couldn't finish removing this episode's download. It's still listed in " +
+                    "Library › Downloads.",
+            )
         }
+        return unconfirmed == 0
     }
 
     // Ask everything that has this show, not just the source whose page is open.
@@ -666,7 +675,11 @@ class MediaDetailsViewModel @Inject constructor(
         viewModelScope.launch {
             // One download per episode. Re-downloading after the source rotated its stream url
             // would otherwise leave the previous attempt on disk with nothing pointing at it.
-            clearDownloadsFor(episode.url)
+            //
+            // And if the old one could not be confirmed gone, do not start a new one: that is how
+            // the episode ends up with two rows and two downloads, which is precisely the state
+            // this call exists to prevent. clearDownloadsFor has already told the user.
+            if (!clearDownloadsFor(episode.url)) return@launch
             downloadRepository.remember(
                 DownloadEntry(
                     videoUrl = video.url,
