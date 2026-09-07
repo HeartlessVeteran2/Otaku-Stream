@@ -61,11 +61,13 @@ fun NoSourcesBanner(
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("No sources installed yet", style = MaterialTheme.typography.titleSmall)
                 Text(
-                    // Says where episodes come from, because nothing else in the app does. The
-                    // rails above and below this card are AniList metadata — covers, titles,
-                    // schedules — and none of it can play anything on its own.
-                    "Everything above is AniList browsing. To actually play episodes you need at " +
-                        "least one add-on or extension installed.",
+                    // "below", because this card is the first item in the list — an earlier draft
+                    // said "above" and described nothing, which is worse than saying nothing at
+                    // all. What it points at is the AniList rails underneath: covers, titles and
+                    // schedules that render perfectly with no sources installed and cannot play
+                    // anything on their own. Nothing else in the app says where episodes come from.
+                    "The rails below are AniList browsing. Playing an episode needs at least one " +
+                        "add-on or extension installed.",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Row(

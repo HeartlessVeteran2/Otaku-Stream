@@ -56,7 +56,10 @@ fun EmptyState(
             textAlign = TextAlign.Center,
         )
         if (actionLabel != null && onAction != null) {
-            Button(onClick = onAction, modifier = Modifier.padding(top = 8.dp)) { Text(actionLabel) }
+            // No extra top padding. The Column already spaces its children by 8dp, and the extra
+            // 8dp here put the primary 16dp below the message while the secondary sat 8dp below the
+            // primary — two actions with visibly different gaps around them.
+            Button(onClick = onAction) { Text(actionLabel) }
         }
         // Lower emphasis than the primary, and only drawn when both halves are present — a label
         // with no handler would be a button that does nothing, the same trap UiMessages.Message
