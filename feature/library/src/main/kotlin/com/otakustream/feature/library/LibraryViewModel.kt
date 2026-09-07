@@ -176,6 +176,23 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
+    // One row, with an undo — matching what Watchlist and Downloads already offer. History was
+    // the only list where the sole way to remove anything was to clear all of it, so a single
+    // mistyped search or a video opened by accident could only be tidied away by destroying the
+    // rest of the history with it.
+    fun removeHistoryEntry(id: Long) {
+        viewModelScope.launch {
+            val removed = libraryRepository.removeHistoryEntryAndReturn(id) ?: return@launch
+            UiMessages.showUndoable("Removed ${removed.mediaTitle} from history") {
+                // Runs on the snackbar host's scope, not this one — see UiMessages.Message. A
+                // straight restore rather than insert-if-absent: history rows are append-only and
+                // carry no user-editable state, so there is nothing here for a concurrent write to
+                // overwrite, unlike the watchlist entry this pattern came from.
+                libraryRepository.restoreHistoryEntry(removed)
+            }
+        }
+    }
+
     fun clearHistory() {
         viewModelScope.launch { libraryRepository.clearHistory() }
     }

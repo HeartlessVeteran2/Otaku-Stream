@@ -37,6 +37,17 @@ interface LibraryRepository {
     fun observeWatchedEpisodeUrls(mediaUrl: String): Flow<List<String>>
     suspend fun recordWatch(entry: WatchHistoryEntry)
     suspend fun lastTitleFor(mediaUrl: String): String?
+    // Deletes one history row and hands back exactly what was deleted, in one transaction — the
+    // same shape removeAndReturn uses for the watchlist, and for the same reason: undo has to
+    // restore the row that actually went, not a snapshot read beforehand that something else may
+    // have changed in between.
+    suspend fun removeHistoryEntryAndReturn(id: Long): WatchHistoryEntry?
+
+    // Puts a deleted history row back. Room's autoGenerate ignores a non-zero id on insert, so the
+    // restored row gets a new one — which is why undo restores the entry rather than the id, and
+    // why the snackbar's action does not try to preserve it.
+    suspend fun restoreHistoryEntry(entry: WatchHistoryEntry)
+
     suspend fun clearHistory()
 }
 
@@ -80,6 +91,16 @@ class LibraryRepositoryImpl @Inject constructor(
     }
 
     override suspend fun lastTitleFor(mediaUrl: String): String? = historyDao.lastTitleFor(mediaUrl)
+
+    override suspend fun removeHistoryEntryAndReturn(id: Long): WatchHistoryEntry? =
+        database.withTransaction {
+            val entry = historyDao.getHistoryEntry(id)
+            historyDao.deleteHistoryEntry(id)
+            entry
+        }
+
+    override suspend fun restoreHistoryEntry(entry: WatchHistoryEntry) =
+        historyDao.insert(entry.copy(id = 0))
 
     override suspend fun clearHistory() = historyDao.clear()
 }

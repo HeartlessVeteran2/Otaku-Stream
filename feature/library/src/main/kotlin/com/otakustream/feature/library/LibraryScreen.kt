@@ -28,7 +28,17 @@ import androidx.compose.material.icons.outlined.History
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SearchOff
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.Card
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SearchOff
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -39,6 +49,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -114,6 +125,16 @@ fun LibraryScreen(
     // A real TopAppBar rather than a Text styled to look like one. Two of the four tabs did that —
     // with different padding from each other — so the app's title bar changed height and alignment
     // depending on which tab you were on. It is also where a search field and a sort menu can go.
+    // Search and sort apply to the two tabs that are lists of titles. Downloads is short by nature
+    // and On device is a filesystem scan with its own controls, so putting a filter above them
+    // would be chrome that does nothing.
+    val showsFilters = selectedTab == 0 || selectedTab == 1
+    var query by rememberSaveable { mutableStateOf("") }
+    var sort by rememberSaveable { mutableStateOf(WatchlistSort.RecentlyAdded) }
+    // Cleared when the filters go away, so switching to Downloads and back does not leave a hidden
+    // query silently filtering the list.
+    LaunchedEffect(showsFilters) { if (!showsFilters) query = "" }
+
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(title = { Text("Library") })
         TabRow(selectedTabIndex = selectedTab) {
@@ -145,13 +166,35 @@ fun LibraryScreen(
             Tab(selected = selectedTab == 3, onClick = { selectedTab = 3 }, text = { Text("On device") })
         }
 
+        if (showsFilters) {
+            LibraryFilterRow(
+                query = query,
+                onQueryChange = { query = it },
+                sort = sort,
+                onSortChange = { sort = it },
+                // Sorting applies to the watchlist only. History is a log — it is in the order
+                // things happened, and reordering it by title would make it something else.
+                showSort = selectedTab == 0,
+            )
+        }
+
         when (selectedTab) {
-            0 -> WatchlistTab(uiState, viewModel, onEntryClick)
-            1 -> HistoryTab(uiState, viewModel, onEntryClick)
+            0 -> WatchlistTab(uiState, viewModel, onEntryClick, query, sort)
+            1 -> HistoryTab(uiState, viewModel, onEntryClick, query)
             2 -> DownloadsTab(uiState, viewModel, onPlayDirect)
             else -> OnDeviceTab(onPlayDirect)
         }
     }
+}
+
+// How the watchlist is ordered inside each status section.
+//
+// Session-scoped rather than persisted: a sort is a way of looking at the list right now, and the
+// default — what you saved most recently — is the one that is right most of the time. Persisting it
+// would mostly mean coming back to an order you picked once for a reason that has passed.
+private enum class WatchlistSort(val label: String) {
+    RecentlyAdded("Recently added"),
+    Title("Title A-Z"),
 }
 
 // Watchlist status buckets, in the order they're shown.
@@ -161,23 +204,103 @@ private val LIBRARY_STATUS_SECTIONS = listOf(
     LIBRARY_STATUS_COMPLETED to "Completed",
 )
 
+// The search field and sort menu, above whichever list they apply to.
+@Composable
+private fun LibraryFilterRow(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    sort: WatchlistSort,
+    onSortChange: (WatchlistSort) -> Unit,
+    showSort: Boolean,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        OutlinedTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            singleLine = true,
+            label = { Text("Search") },
+            leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+            trailingIcon = {
+                // Only when there is something to clear — an always-present X on an empty field is
+                // a control that does nothing.
+                if (query.isNotEmpty()) {
+                    IconButton(onClick = { onQueryChange("") }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Clear search")
+                    }
+                }
+            },
+            modifier = Modifier.weight(1f),
+        )
+        if (showSort) {
+            var expanded by remember { mutableStateOf(false) }
+            Box {
+                IconButton(onClick = { expanded = true }) {
+                    Icon(Icons.Filled.Sort, contentDescription = "Sort: ${sort.label}")
+                }
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    WatchlistSort.entries.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option.label) },
+                            onClick = {
+                                onSortChange(option)
+                                expanded = false
+                            },
+                            // The current choice is readable without opening the menu twice.
+                            trailingIcon = {
+                                if (option == sort) Icon(Icons.Filled.Check, contentDescription = null)
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Case-insensitive substring on the title. Deliberately not fuzzy: a library is a list somebody
+// built themselves, so they know roughly what the thing is called, and a match that is hard to
+// predict is worse than one that is strict.
+private fun matchesQuery(title: String, query: String): Boolean =
+    query.isBlank() || title.contains(query.trim(), ignoreCase = true)
+
 @Composable
 private fun WatchlistTab(
     uiState: LibraryUiState,
     viewModel: LibraryViewModel,
     onMediaClick: (Long, String, String, String?) -> Unit,
+    query: String,
+    sort: WatchlistSort,
 ) {
     // One section per non-empty status bucket. Unmigrated rows (status not one of the known values)
     // fall back into "Plan to watch" so nothing is ever hidden. Remembered and hoisted above the
     // LazyColumn: the content lambda re-runs whenever the list is re-laid out, so grouping inside it
-    // rebuilt the map and all its sublists each time.
-    val byStatus = remember(uiState.watchlist) {
-        uiState.watchlist.groupBy { entry ->
-            if (LIBRARY_STATUS_SECTIONS.any { it.first == entry.status }) entry.status else LIBRARY_STATUS_PLANNED
-        }
+    // rebuilt the map and all its sublists each time — and the filter and sort belong in the same
+    // remember for the same reason.
+    val byStatus = remember(uiState.watchlist, query, sort) {
+        uiState.watchlist
+            .filter { matchesQuery(it.title, query) }
+            .let { entries ->
+                when (sort) {
+                    // observeAll already orders by addedAtEpochMs DESC, so this is the list as it
+                    // arrives — named rather than left implicit, because the menu has to be able
+                    // to say what the default is.
+                    WatchlistSort.RecentlyAdded -> entries
+                    WatchlistSort.Title -> entries.sortedBy { it.title.lowercase() }
+                }
+            }
+            .groupBy { entry ->
+                if (LIBRARY_STATUS_SECTIONS.any { it.first == entry.status }) entry.status else LIBRARY_STATUS_PLANNED
+            }
     }
+    val matches = remember(byStatus) { byStatus.values.sumOf { it.size } }
     LazyColumn(modifier = Modifier.fillMaxSize()) {
-        if (uiState.continueWatching.isNotEmpty()) {
+        // Hidden while searching. It is a rail of recent activity, not part of the watchlist
+        // being filtered, so leaving it up would show titles that do not match the query directly
+        // above a list that excluded them.
+        if (uiState.continueWatching.isNotEmpty() && query.isBlank()) {
             item {
                 Text(
                     text = "Continue watching",
@@ -190,12 +313,22 @@ private fun WatchlistTab(
             }
         }
 
+        // Two different nothings, and telling them apart matters: one means go and save
+        // something, the other means your search matched none of what you already have.
         if (uiState.watchlist.isEmpty()) {
             item {
                 EmptyState(
                     icon = Icons.Outlined.BookmarkBorder,
                     title = "Nothing saved yet",
                     message = "Tap the bookmark on any title — or on a poster in Browse — and it lands here.",
+                )
+            }
+        } else if (matches == 0) {
+            item {
+                EmptyState(
+                    icon = Icons.Filled.SearchOff,
+                    title = "No matches",
+                    message = "Nothing in your watchlist matches \"$query\".",
                 )
             }
         }
@@ -272,7 +405,11 @@ private fun HistoryTab(
     uiState: LibraryUiState,
     viewModel: LibraryViewModel,
     onMediaClick: (Long, String, String, String?) -> Unit,
+    query: String,
 ) {
+    val history = remember(uiState.history, query) {
+        uiState.history.filter { matchesQuery(it.mediaTitle, query) }
+    }
     // Clearing history is not undoable and the button sits directly above the list it destroys, so
     // it asks first. It is also the only destructive action on this screen with no other route back
     // — the rows themselves came from playback, and nothing rebuilds them.
@@ -312,16 +449,35 @@ private fun HistoryTab(
                 )
             }
         }
-        items(uiState.history, key = { it.id }) { entry ->
-            HistoryRow(entry) { onMediaClick(entry.sourceId, entry.mediaUrl, entry.mediaTitle, entry.coverUrl) }
+        items(history, key = { it.id }) { entry ->
+            HistoryRow(
+                entry = entry,
+                onRemove = { viewModel.removeHistoryEntry(entry.id) },
+            ) { onMediaClick(entry.sourceId, entry.mediaUrl, entry.mediaTitle, entry.coverUrl) }
         }
     }
 }
 
 @Composable
-private fun HistoryRow(entry: WatchHistoryEntry, onClick: () -> Unit) {
+private fun HistoryRow(
+    entry: WatchHistoryEntry,
+    // Null on the Continue-watching rail, which reuses this row: removing a history entry from
+    // there would look like removing the show from the rail and do something else.
+    onRemove: (() -> Unit)? = null,
+    onClick: () -> Unit,
+) {
     ListItem(
         headlineContent = { Text(entry.mediaTitle) },
+        trailingContent = onRemove?.let {
+            {
+                IconButton(onClick = it) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "Remove ${entry.mediaTitle} from history",
+                    )
+                }
+            }
+        },
         leadingContent = {
             CoverImage(
                 url = entry.coverUrl,
