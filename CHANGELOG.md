@@ -49,6 +49,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   community add-on index.
 - **Playback settings in Settings** (#133). Auto-skip, seek step, default speed and subtitle styling
   were reachable only from inside the player, mid-playback.
+- **Library search, sort, and per-row history deletion** (#135). History was the only list where the
+  sole way to remove one thing was to clear all of it. The per-row delete has an undo, and the undo
+  expires when the history it came from is wiped — the Clear dialog says it cannot be undone, and
+  that has to stay true even while an older snackbar is still on screen.
 - **Colour taken from the cover art.** A show's page tints itself from its poster, clamped for
   contrast against the surface it sits on and recomputed per colour scheme.
 - **A light scheme**, and a theme choice that holds from the first frame and inside the player.
