@@ -9,10 +9,17 @@ interface LibraryRepository {
     fun observeLibrary(): Flow<List<LibraryEntry>>
     fun observeInLibrary(mediaUrl: String): Flow<Boolean>
     fun observeStatus(mediaUrl: String): Flow<String?>
-    suspend fun add(entry: LibraryEntry)
-
-    // Restores an entry only if its mediaUrl is free. Returns whether it was actually inserted, so
-    // a caller undoing a removal can tell "put back" from "someone saved it again first".
+    // The only way to save a title, and deliberately the non-destructive one.
+    //
+    // There used to be an `add` alongside this that wrapped a whole-row @Upsert, and every caller
+    // that reached for it did so from a stale "is this saved?" flag — so on a stale read it
+    // replaced an existing row, resetting the user's watch status to Plan-to-watch and the entry's
+    // added-at to now. Nothing needs replace semantics here; setStatus covers the one field that
+    // legitimately changes. Leaving a destructive twin next to this one is how that bug comes back,
+    // so it is gone.
+    //
+    // Returns whether the row was actually inserted, so a caller undoing a removal can tell
+    // "put back" from "someone saved it again first".
     suspend fun addIfAbsent(entry: LibraryEntry): Boolean
     suspend fun remove(mediaUrl: String)
 
@@ -41,7 +48,6 @@ class LibraryRepositoryImpl @Inject constructor(
     override fun observeLibrary(): Flow<List<LibraryEntry>> = libraryDao.observeAll()
     override fun observeInLibrary(mediaUrl: String): Flow<Boolean> = libraryDao.observeInLibrary(mediaUrl)
     override fun observeStatus(mediaUrl: String): Flow<String?> = libraryDao.observeStatus(mediaUrl)
-    override suspend fun add(entry: LibraryEntry) = libraryDao.upsert(entry)
     override suspend fun addIfAbsent(entry: LibraryEntry): Boolean =
         libraryDao.insertIfAbsent(entry) != -1L
     override suspend fun remove(mediaUrl: String) = libraryDao.delete(mediaUrl)

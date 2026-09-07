@@ -5,6 +5,8 @@ import com.otakustream.core.database.security.openEncryptedPrefs
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -31,7 +33,10 @@ class StremioAccountStore @Inject constructor(
     var email: String? = null
         private set
 
-    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // Single-threaded, so the initial load, a save and a clear run in call order instead of
+    // racing over one file. See EncryptedTokenStore for the three races this closes.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
 
     init {
         ioScope.launch {
@@ -42,20 +47,33 @@ class StremioAccountStore @Inject constructor(
     }
 
     fun save(authKey: String, email: String?) {
-        runCatching {
-            prefs?.edit()
-                ?.putString(KEY_AUTH, authKey)
-                ?.putString(KEY_EMAIL, email)
-                ?.apply()
-        }
         this.email = email
         _authKey.value = authKey
+        // Queued on the same scope as clear(), so signing in during a sign-out's write cannot end
+        // with memory and disk disagreeing about which one won.
+        ioScope.launch {
+            runCatching {
+                prefs?.edit()
+                    ?.putString(KEY_AUTH, authKey)
+                    ?.putString(KEY_EMAIL, email)
+                    ?.apply()
+            }
+        }
     }
 
-    fun clear() {
-        runCatching { prefs?.edit()?.remove(KEY_AUTH)?.remove(KEY_EMAIL)?.apply() }
+    // suspend, and commit() rather than apply(), because this is a credential revocation — see
+    // EncryptedTokenStore.clear() for the argument in full. Returns whether the authKey is actually
+    // gone from disk, rather than discarding commit()'s answer for the one operation where it
+    // matters most.
+    suspend fun clear(): Boolean {
         email = null
         _authKey.value = null
+        return ioScope.async {
+            email = null
+            _authKey.value = null
+            runCatching { prefs?.edit()?.remove(KEY_AUTH)?.remove(KEY_EMAIL)?.commit() }
+                .getOrNull() ?: false
+        }.await()
     }
 
     companion object {

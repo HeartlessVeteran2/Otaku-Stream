@@ -304,10 +304,21 @@ class MediaDetailsViewModel @Inject constructor(
 
     fun setLibraryStatus(status: String) {
         val mediaUrl = currentMediaUrl.value ?: return
+        // Snapshotted before launching, alongside mediaUrl, because libraryRepository.setStatus
+        // suspends: reading _selectedSeason after it resumes means a season switched during the
+        // write decides where the status lands, and it lands on an AniList entry the user was not
+        // looking at when they chose it.
+        val season = _selectedSeason.value
         viewModelScope.launch {
             libraryRepository.setStatus(mediaUrl, status)
             // Local Library is the source of truth; mirror the change up to AniList when linked.
-            trackingManager.onLibraryStatusChanged(mediaUrl, status)
+            //
+            // The selected season, not the whole series: AniList models each season as its own
+            // media entry, so a show whose seasons are linked individually has no whole-series row
+            // for the status to land on — and marking it Completed used to reach nothing at all.
+            // Same link resolution the trackerLink row on screen uses, so the status goes to the
+            // entry the user can see it going to.
+            trackingManager.onLibraryStatusChanged(mediaUrl, status, season)
         }
     }
 
@@ -317,7 +328,19 @@ class MediaDetailsViewModel @Inject constructor(
             if (inLibrary.value) {
                 libraryRepository.remove(mediaUrl)
             } else {
-                libraryRepository.add(
+                // addIfAbsent, not add: add() is a whole-row @Upsert, and `inLibrary` is a
+                // StateFlow two async hops behind Room that starts false. Open a saved title and
+                // press the bookmark before the flow has caught up — or press it twice quickly —
+                // and the upsert replaced the existing row with a fresh one, resetting `status`
+                // to its PLANNED default and `addedAtEpochMs` to now. A show marked Completed
+                // silently became Plan-to-watch and jumped to the top of the Library, from a tap
+                // that was only ever meant to save something.
+                //
+                // The branch itself is still driven by the flag on purpose: the flag is what the
+                // button on screen says, so it is the user's intent. addIfAbsent makes acting on a
+                // stale "not saved" harmless instead of destructive — SQLite does the check and the
+                // insert in one statement, so an existing row is left exactly as it is.
+                libraryRepository.addIfAbsent(
                     LibraryEntry(
                         mediaUrl = mediaUrl,
                         sourceId = currentSourceId,
