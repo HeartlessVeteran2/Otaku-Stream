@@ -273,4 +273,86 @@ class InFlightCacheTest {
         assertEquals("value-a", cache.get("a"))
         assertEquals("value-b", cache.get("b"))
     }
+    // peek is the synchronous read: it must answer from the cache and start nothing.
+    @Test
+    fun `peek returns a cached value without producing`() = runTest {
+        val produced = AtomicInteger()
+        val cache = InFlightCache<String, String>(
+            scope = cacheScope(),
+            maxEntries = 4,
+            ttlMs = 1_000,
+            nowMs = { clock },
+        ) { key ->
+            produced.incrementAndGet()
+            "value-$key"
+        }
+
+        assertEquals(null, cache.peek("a"))
+        assertEquals(0, produced.get())
+
+        assertEquals("value-a", cache.get("a"))
+        assertEquals("value-a", cache.peek("a"))
+        // Still one: peeking must not have queued a second production behind the first.
+        advanceUntilIdle()
+        assertEquals(1, produced.get())
+    }
+
+    // A caller that peeks while the work is running has to be told there is no answer yet, not
+    // handed one that does not exist. getCompleted() on a running job throws, so a peek that
+    // assumed completion would take the whole UI down instead of rendering a placeholder.
+    @Test
+    fun `peek returns null while the value is still being produced`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val cache = InFlightCache<String, String>(
+            scope = cacheScope(),
+            maxEntries = 4,
+            ttlMs = 1_000,
+            nowMs = { clock },
+        ) { key ->
+            gate.await()
+            "value-$key"
+        }
+
+        val inFlight = async { cache.get("a") }
+        advanceUntilIdle()
+        assertEquals(null, cache.peek("a"))
+
+        gate.complete(Unit)
+        assertEquals("value-a", inFlight.await())
+        assertEquals("value-a", cache.peek("a"))
+    }
+
+    // The same rule the awaiting path follows: a failure is not an answer. A peek that returned
+    // something for a failed key would cache the failure in the one place that never retries.
+    @Test
+    fun `peek returns null for a key whose production failed`() = runTest {
+        val cache = InFlightCache<String, String>(
+            scope = cacheScope(),
+            maxEntries = 4,
+            ttlMs = 1_000,
+            nowMs = { clock },
+        ) { error("no") }
+
+        runCatching { cache.get("a") }
+        advanceUntilIdle()
+        assertEquals(null, cache.peek("a"))
+    }
+
+    // And it expires with everything else, or a screen would keep rendering a value the awaiting
+    // path had already decided was too old to reuse.
+    @Test
+    fun `peek stops answering once the ttl has passed`() = runTest {
+        val cache = InFlightCache<String, String>(
+            scope = cacheScope(),
+            maxEntries = 4,
+            ttlMs = 1_000,
+            nowMs = { clock },
+        ) { key -> "value-$key" }
+
+        assertEquals("value-a", cache.get("a"))
+        assertEquals("value-a", cache.peek("a"))
+
+        clock += 1_001
+        assertEquals(null, cache.peek("a"))
+    }
 }

@@ -5,6 +5,7 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 
 // A cache of in-flight work: concurrent callers asking for the same key join one job rather than
@@ -97,6 +98,37 @@ class InFlightCache<K : Any, V>(
         // second would discard a request still running for everyone else. Eviction is the job's own
         // business, in newEntry.
         return entry.job.await()
+    }
+
+    // The value if one is already cached and still usable, without starting any work.
+    //
+    // For a caller that has somewhere to render an answer *now* and cannot suspend to get one — a
+    // Compose initial state, say, which has to return a value in the frame it is composed in and
+    // can only start the real request from an effect afterwards. Returning the cached value there
+    // is what stops a screen you have already visited fading in from the placeholder again.
+    //
+    // Null covers three different things — nothing cached, still running, expired — and that is
+    // deliberate: the answer to all three is the same, render the placeholder and ask properly. A
+    // key whose cached value is itself null is indistinguishable from those, which is correct for
+    // this purpose: the placeholder is what a null value renders as anyway.
+    //
+    // Counts as an access, so peeking a key keeps it from being the next one evicted. A caller that
+    // peeks is about to ask for it properly.
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun peek(key: K): V? = synchronized(lock) {
+        // All of it under the lock, deliberately. Split across the boundary — usability checked
+        // inside, the value read outside — the entry can complete, expire, or be evicted and
+        // replaced in between, and the answer handed back is one this cache had already decided was
+        // too old to reuse. getCompleted() is a field read on a finished job, so holding the lock
+        // across it costs nothing.
+        val entry = entries[key]?.takeIf { it.isUsable() } ?: return null
+        val job = entry.job
+        // isUsable admits an unfinished job — joinable, but with nothing to hand back yet — so
+        // completion is checked as well rather than assumed. getCompleted() throws on a job that
+        // failed, and a failed job is visible for the moment between its completion and the
+        // eviction its own handler performs.
+        if (!job.isCompleted || job.isCancelled) return null
+        runCatching { job.getCompleted() }.getOrNull()
     }
 
     // Evicts everything, cancelling nothing: an entry can still be awaited by a caller that has not

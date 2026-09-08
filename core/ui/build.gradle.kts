@@ -36,6 +36,10 @@ android {
 }
 
 dependencies {
+    // InFlightCache — the shared in-flight/TTL cache the accent extractor is built on. Its own
+    // header calls duplicating it a standing hazard, and this module had duplicated it.
+    implementation(project(":core:common"))
+
     // Reads the dominant colours out of a poster. Small (~50 KB) and worth it over hand-rolling:
     // the colour quantiser and the swatch-population bookkeeping are the fiddly parts, and this
     // one is well-tested. The part that decides whether a colour is *usable* is ours, in

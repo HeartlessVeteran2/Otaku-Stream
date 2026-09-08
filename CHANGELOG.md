@@ -24,10 +24,84 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   add-on you were browsing was asked for subtitles, which meant a subtitle-only add-on such as
   OpenSubtitles would install successfully and then never be queried. Tracks from other providers are
   labelled with their source so several "English" entries are distinguishable.
+- **Torrent streaming, on device** (#86, #89, #91, #94, #96). A libtorrent4j session behind a Media3
+  data source: a `torrent://` URL is a stable identity, so resume position, skip markers and history
+  key off it exactly as they do for an HTTP stream. Sequential piece selection for playback, a
+  foreground service while a torrent is active, a storage quota, and a session that stops when the
+  last reader closes. Magnet links resolve their metadata before playing, subtitles found inside the
+  torrent are offered as tracks, and trackers are remembered per torrent so a resumed playback finds
+  peers again.
+- **Offline downloads** (#115). Save an episode for later; a Media3 download store serves it back
+  through the same URL, so nothing at the call site knows or cares whether an episode is local.
+  Per-row progress, pause/resume, retry for a failed download, and a Downloads tab in Library.
+- **Streams pooled across every source that has the show.** The details screen used to
+  ask only the source you happened to be browsing, so a title present in four add-ons still failed if
+  the one you opened had nothing. Every source linked to the same AniList entry is asked, results
+  merged and labelled by origin, and a source that contributes nothing says why.
+- **An airing schedule and a "New episodes" rail**, built from AniList data the home screen was
+  already fetching.
+- **A curated extension-repository directory.** The Mangayomi/AnymeX side had no equivalent of the
+  Stremio add-on directory: with no repo URL set it showed a single sample extension pointing at
+  `example.invalid`, and asked you to paste a URL it never told you where to find. Three real
+  anime repositories are now one tap each, loaded and merged together rather than one at a time,
+  with counts for what the index carried that this app cannot run.
+- **Adult content behind a switch** that is off by default and covers both ecosystems, with a bundled
+  community add-on index.
+- **Playback settings in Settings** (#133). Auto-skip, seek step, default speed and subtitle styling
+  were reachable only from inside the player, mid-playback.
+- **Library search, sort, and per-row history deletion** (#135). History was the only list where the
+  sole way to remove one thing was to clear all of it. The per-row delete has an undo, and the undo
+  expires when the history it came from is wiped — the Clear dialog says it cannot be undone, and
+  that has to stay true even while an older snackbar is still on screen.
+- **Colour taken from the cover art.** A show's page tints itself from its poster, clamped for
+  contrast against the surface it sits on and recomputed per colour scheme.
+- **A light scheme**, and a theme choice that holds from the first frame and inside the player.
+- **Tablet layout for the details screen**: the episode list sits beside the show rather than below
+  it (#116).
 - Licensing and project documentation: `LICENSE` (GPL-3.0-or-later, with a Google Cast linking
   exception), `CONTRIBUTING.md`, `SECURITY.md`, `docs/building-and-releasing.md`, and this changelog.
 
+### Changed
+
+- **Source failures are named.** A source that fails now says which one and why, instead of an empty
+  list that reads identically to "nothing matched".
+- **Shared components across screens**: one poster tile, one back bar, one empty state, one loading
+  state, one confirmation dialog — replacing near-identical private copies that had already drifted.
+- **Undo, everywhere it belongs**, and confirmation dialogs for the destructive actions that cannot
+  have one (deleting a download's bytes, clearing watch history).
+- Executable Room migration tests: the harness now runs every migration against a real database
+  rather than only diffing the exported schemas (#99).
+
 ### Fixed
+
+- **A hung extension no longer disables its source for the life of the process** (#127). Every
+  scripted-source entry point holds a mutex across a *blocking* interpreter call, which coroutine
+  cancellation cannot interrupt — so a timeout returned on schedule while the lock stayed held, and
+  every later search or episode resolve for that source blocked forever. Retrying could not help,
+  because the retry queued behind the same lock. There is now a wall-clock deadline, checked by the
+  interpreter's instruction observer, that unwinds the interpreter and releases the lock — and both
+  HTTP bridges use cancellable calls with bounded timeouts.
+- **"Push my saves" no longer resets your Stremio watch progress** (#128). It wrote a complete
+  library item with a zeroed `state` and a fresh `_mtime`, so it won last-write-wins against every
+  other Stremio client: one press flattened resume positions, watched-episode marks and
+  season/episode pointers on your TV, desktop and the web. Existing items now round-trip the
+  server's own state untouched.
+- **Signing out no longer un-signs-out.** `clear()` used `apply()`, so a process kill in that window
+  left the credential on disk to be read back next launch.
+- **Bookmarking a Completed show no longer downgrades it to Plan-to-watch** (#129), and AniList sync
+  no longer dies silently on an expired token while Settings keeps saying "signed in".
+- **Removing a download no longer strands its bytes** (#130). The metadata row was deleted before
+  the service confirmed the removal, leaving the file in the cache with nothing able to reach it.
+- **Extension ids no longer depend on which repositories happened to load** (#134), which had made
+  the same extension a different source depending on fetch order and reachability — and could crash
+  the merged directory on a duplicate key.
+- **"You have no sources" is somewhere you can see it** (#131). It rendered after three rails of
+  posters, off-screen on every phone, and was suppressed entirely if you had any watch history.
+- **The player survives an episode** (#125): a chain of fixes to leaks, races, and a player that
+  would not stop.
+- Security hardening across deep links, the OAuth redirect, the challenge WebView's cookie scope,
+  torrent path containment, and where the app will accept executable code from (#100, #102, #105).
+- Account traffic runs on its own HTTP client, so source-host settings cannot reach it (#104).
 
 - A Stremio special (season 0) no longer advances the whole-series AniList entry. Specials carry
   ordinary positive episode numbers, so watching one was pushing that number at the series (#82).
