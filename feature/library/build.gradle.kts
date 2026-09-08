@@ -52,4 +52,11 @@ dependencies {
     implementation(libs.hilt.android)
     implementation(libs.hilt.navigation.compose)
     kapt(libs.hilt.compiler)
+
+    // This module had no tests, which is how the same download-bookkeeping bug shipped three times:
+    // a failure message keyed wrongly, then a fix that cleared the wrong entry, then a fix that
+    // could throw. None of it was testable while two of LibraryViewModel's four collaborators were
+    // concrete classes built on Media3 and the network — hence the interfaces they are now.
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

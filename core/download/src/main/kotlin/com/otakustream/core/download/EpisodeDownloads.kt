@@ -41,20 +41,57 @@ data class DownloadProgress(
 // only the service route starts the foreground service. Calling the manager straight would work
 // right up until the user backgrounded the app, at which point the download would stop with no
 // notification to explain it.
+// An interface for the same reason LibraryRepository is one: the ViewModels that depend on this are
+// otherwise untestable. The implementation is built on Media3's DownloadManager and its foreground
+// DownloadService, neither of which can be stood up on a JVM runner — so every screen that lists or
+// removes a download had no unit test at all, and the download-removal bookkeeping has now been
+// wrong three separate times.
+//
+// Only what callers use. Everything about *how* a download is queued — the service route, the
+// per-video headers, the stop-reason encoding of "paused" — stays in the implementation.
+// Long enough for the service to start and unlink a file, short enough that a user who tapped
+// Remove is not left watching a spinner. Exceeding it is not an error — it means the row stays and
+// can be removed again.
+//
+// Top-level rather than in the implementation's companion because the interface's default argument
+// has to see it.
+const val REMOVE_TIMEOUT_MS = 10_000L
+
+interface EpisodeDownloads {
+
+    // The url doubles as the download id, so the same stream cannot be queued twice.
+    fun start(url: String, isM3U8: Boolean = false, headers: Map<String, String> = emptyMap())
+
+    // Whether the removal was confirmed within the wait. False is a deadline expiring, not a
+    // verdict — the service may finish just after — which is why callers reconcile rather than
+    // trust it.
+    suspend fun removeAndAwait(url: String, timeoutMs: Long = REMOVE_TIMEOUT_MS): Boolean
+
+    fun pause(url: String)
+
+    fun resume(url: String)
+
+    // In-flight downloads, re-emitted on every progress change.
+    fun observe(): Flow<List<DownloadProgress>>
+
+    // A one-shot read of everything finished, which observe() does not carry.
+    fun completed(): List<DownloadProgress>
+}
+
 @Singleton
 @androidx.annotation.OptIn(UnstableApi::class)
-class EpisodeDownloads @Inject constructor(
+class EpisodeDownloadsImpl @Inject constructor(
     @ApplicationContext private val context: Context,
     private val downloadManager: DownloadManager,
     private val downloadHeaders: DownloadHeaders,
-) {
+) : EpisodeDownloads {
 
     // The url doubles as the download id, so the same stream cannot be queued twice and every
     // other part of the app can ask about a download using the identity it already holds.
     //
     // isM3U8 and headers are the two things the player is given per-video that a bare url does not
     // carry, and both decide whether the download works at all — see DownloadEntry.
-    fun start(url: String, isM3U8: Boolean = false, headers: Map<String, String> = emptyMap()) {
+    override fun start(url: String, isM3U8: Boolean, headers: Map<String, String>) {
         // Registered before the request, so the first segment fetch already has them.
         if (headers.isNotEmpty()) downloadHeaders.remember(url, headers)
         val request = DownloadRequest.Builder(url, android.net.Uri.parse(url))
@@ -84,7 +121,7 @@ class EpisodeDownloads @Inject constructor(
     // Returns whether it is confirmed gone. On false the caller must keep its row, which leaves the
     // download listed and the Remove button live — and a second press then succeeds immediately,
     // because a download that is already absent from the index satisfies this on the first check.
-    suspend fun removeAndAwait(url: String, timeoutMs: Long = REMOVE_TIMEOUT_MS): Boolean {
+    override suspend fun removeAndAwait(url: String, timeoutMs: Long): Boolean {
         downloadHeaders.forget(url)
         DownloadService.sendRemoveDownload(
             context,
@@ -138,9 +175,9 @@ class EpisodeDownloads @Inject constructor(
 
     // Media3 models pause as a manual stop reason on the individual download rather than as a
     // separate state, so "paused" here and STOP_REASON_PAUSED below are the same thing.
-    fun pause(url: String) = setStopReason(url, STOP_REASON_PAUSED)
+    override fun pause(url: String) = setStopReason(url, STOP_REASON_PAUSED)
 
-    fun resume(url: String) = setStopReason(url, Download.STOP_REASON_NONE)
+    override fun resume(url: String) = setStopReason(url, Download.STOP_REASON_NONE)
 
     private fun setStopReason(url: String, reason: Int) {
         DownloadService.sendSetStopReason(
@@ -158,7 +195,7 @@ class EpisodeDownloads @Inject constructor(
     // listener actually gives, and because the consumers are list screens that re-render anyway.
     // The initial emission is the current state, so a screen opened while a download is already
     // running shows it immediately instead of waiting for the next progress tick.
-    fun observe(): Flow<List<DownloadProgress>> = callbackFlow {
+    override fun observe(): Flow<List<DownloadProgress>> = callbackFlow {
         fun emitCurrent() {
             trySend(downloadManager.currentDownloads.map { it.toProgress() })
         }
@@ -182,7 +219,7 @@ class EpisodeDownloads @Inject constructor(
     //
     // currentDownloads holds only what is in flight, so a completed episode disappears from it —
     // which is exactly the set the Library needs to show. This walks the index instead.
-    fun completed(): List<DownloadProgress> {
+    override fun completed(): List<DownloadProgress> {
         val cursor = downloadManager.downloadIndex.getDownloads(Download.STATE_COMPLETED)
         return cursor.use { c ->
             buildList {
@@ -212,10 +249,5 @@ class EpisodeDownloads @Inject constructor(
     private companion object {
         // Any non-zero value means "stopped by us". Media3 reserves 0 for "not stopped".
         const val STOP_REASON_PAUSED = 1
-
-        // Long enough for the service to start and unlink a file, short enough that a user who
-        // tapped Remove is not left watching a spinner. Exceeding it is not an error — it means the
-        // row stays and can be removed again.
-        const val REMOVE_TIMEOUT_MS = 10_000L
     }
 }

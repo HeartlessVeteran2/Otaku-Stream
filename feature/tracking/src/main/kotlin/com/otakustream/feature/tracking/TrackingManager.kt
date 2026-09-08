@@ -11,11 +11,28 @@ private const val TAG = "TrackingManager"
 
 // Facade the rest of the app calls to sync watch progress — a no-op unless the user has both
 // signed in to AniList and linked the media, so playback never depends on tracking state.
+//
+// An interface, following LibraryRepository's shape in core/database, for one reason: the two
+// ViewModels that depend on it could not be unit-tested while it was a concrete class reaching
+// AniList over the network. That is not hypothetical — the undo guard that shipped in #135 was
+// wrong twice, and both versions were untestable for exactly this reason.
+//
+// The interface carries only what callers use. Everything else about the sync — which link a
+// season resolves to, how a token failure is handled — stays private to the implementation.
+interface TrackingManager {
+
+    // Called when an episode is actually watched to the end (see PlaybackCompletion).
+    suspend fun onEpisodeWatched(mediaUrl: String, episodeNumber: Float, season: Int? = null)
+
+    // Called when the user changes a title's status locally, to mirror it up.
+    suspend fun onLibraryStatusChanged(mediaUrl: String, localStatus: String, season: Int? = null)
+}
+
 @Singleton
-class TrackingManager @Inject constructor(
+class TrackingManagerImpl @Inject constructor(
     private val trackingRepository: TrackingRepository,
     private val aniListClient: AniListClient,
-) {
+) : TrackingManager {
     // Called when an episode is actually watched to the end (see PlaybackCompletion). Reads the
     // viewer's current AniList entry and only writes a forward move — it never lowers progress and
     // never downgrades a COMPLETED/REPEATING entry, so rewatching an earlier episode can't erase
@@ -25,10 +42,10 @@ class TrackingManager @Inject constructor(
     // media. It resolves to the season's own link when one exists and to the whole-series link
     // otherwise, so the episode number goes to the entry it actually counts against instead of
     // being pushed at season 1 forever.
-    suspend fun onEpisodeWatched(
+    override suspend fun onEpisodeWatched(
         mediaUrl: String,
         episodeNumber: Float,
-        season: Int? = null,
+        season: Int?,
     ) {
         // Stremio numbers specials as season 0, and they carry ordinary positive episode numbers
         // ("special 3"). Those don't count against any season's progress, so watching one must not
@@ -68,7 +85,7 @@ class TrackingManager @Inject constructor(
     //
     // Callers with no season concept — the Library screen, where status is per-title — pass
     // nothing and land on the whole-series link, which is what they were getting before.
-    suspend fun onLibraryStatusChanged(mediaUrl: String, localStatus: String, season: Int? = null) {
+    override suspend fun onLibraryStatusChanged(mediaUrl: String, localStatus: String, season: Int?) {
         val token = trackingRepository.getToken() ?: return
         val link = trackingRepository.getLink(mediaUrl, season.toTrackerSeason()) ?: return
         val desired = libraryStatusToAniList(localStatus) ?: return
