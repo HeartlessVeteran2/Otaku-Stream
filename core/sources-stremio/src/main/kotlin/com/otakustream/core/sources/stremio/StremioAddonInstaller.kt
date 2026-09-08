@@ -56,7 +56,15 @@ class StremioAddonInstaller @Inject constructor(
         // is worse than the bug it half-fixed. An add-on that is off registers nothing and returns
         // nothing to register.
         val enabled = stremioRepository.isAddonEnabled(normalizedUrl) ?: true
-        if (!enabled) return@withContext emptyList()
+        if (!enabled) {
+            // Unregister rather than merely skip registering. "An add-on that is off registers
+            // nothing" has to be enforced, not assumed: returning early left whatever was already
+            // in the registry under this base URL still serving streams, so a re-install of a
+            // switched-off add-on could leave it contributing to playback — the exact state this
+            // branch exists to prevent. Removing a key that isn't there is a no-op.
+            unregisterProvider(normalizedUrl)
+            return@withContext emptyList()
+        }
         registerProviderIfAny(normalizedUrl, content)
         sources
     }
@@ -74,7 +82,14 @@ class StremioAddonInstaller @Inject constructor(
         val manifest = parseManifest(manifestJson)
         val resources = manifest.resources.toSet()
         val routable = resources.intersect(setOf(STREMIO_RESOURCE_STREAM, STREMIO_RESOURCE_SUBTITLES))
-        if (routable.isEmpty()) return
+        if (routable.isEmpty()) {
+            // Also the un-register path, because this is called on re-install with a freshly
+            // fetched manifest. An add-on that used to declare "stream" and no longer does was
+            // left registered by a bare `return`, so the app kept asking it for streams it had
+            // stopped serving — and kept waiting on the timeout for each one.
+            unregisterProvider(manifestUrl)
+            return
+        }
         streamProviderRegistry.register(
             AddonProvider(
                 baseUrl = baseUrlOf(manifestUrl),

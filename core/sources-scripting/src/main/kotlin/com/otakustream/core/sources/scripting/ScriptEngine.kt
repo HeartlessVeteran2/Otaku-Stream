@@ -101,7 +101,12 @@ private const val DEADLINE_KEY = "otaku.script.deadline"
 
 // How long any one script call may run. Generous: a catalog page can legitimately parse a large
 // document. It exists to bound the pathological case, not to police slow-but-working sources.
-private const val SCRIPT_DEADLINE_MS = 15_000L
+//
+// Kept strictly above HttpBridge's SCRIPT_CALL_TIMEOUT_SECONDS. The two are one mechanism: a script
+// blocked on a socket runs no instructions, so the observer cannot see it, and the request timing
+// out first is what hands control back for the observer to act on. If this ever drops to or below
+// the call timeout, a stalled fetch stops being interruptible at all.
+internal const val SCRIPT_DEADLINE_MS = 20_000L
 
 class ScriptEngine @Inject constructor(
     private val httpBridge: HttpBridge,

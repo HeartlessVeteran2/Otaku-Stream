@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -35,6 +36,15 @@ data class LibraryUiState(
     // header, and a global snackbar would surface this on whatever tab the user had moved to.
     val downloadError: String? = null,
 )
+
+// One line for however many removals are outstanding. Naming the show is what makes the message
+// actionable when there is one, and a count is the honest summary when there are several — listing
+// four titles in a banner above the four rows that already show them helps nobody.
+private fun downloadErrorMessage(failures: Map<String, String>): String? = when (failures.size) {
+    0 -> null
+    1 -> failures.values.first()
+    else -> "Couldn't finish removing ${failures.size} downloads. They're still listed — try again."
+}
 
 // A download as the list shows it: what it is called, joined to how far along it is.
 //
@@ -58,11 +68,16 @@ class LibraryViewModel @Inject constructor(
     private val episodeDownloads: EpisodeDownloads,
 ) : ViewModel() {
 
-    // One-shot, screen-scoped, and merged into the state below.
-    private val _downloadError = MutableStateFlow<String?>(null)
+    // Keyed by the video url that failed, not a single string.
+    //
+    // A single string made any success clear any failure: removing one download that timed out and
+    // then removing a different one that worked wiped the first message, while the first download
+    // was still sitting in the list, still stranded, with nothing left on screen saying so. Keyed,
+    // a success clears only its own row's failure.
+    private val _downloadFailures = MutableStateFlow<Map<String, String>>(emptyMap())
 
     fun consumeDownloadError() {
-        _downloadError.value = null
+        _downloadFailures.value = emptyMap()
     }
 
     val uiState: StateFlow<LibraryUiState> = combine(
@@ -72,8 +87,8 @@ class LibraryViewModel @Inject constructor(
         // Emits on every download state change, so a row's progress bar advances without the
         // screen polling for it.
         episodeDownloads.observe(),
-        _downloadError,
-    ) { watchlist, history, downloads, inFlight, downloadError ->
+        _downloadFailures,
+    ) { watchlist, history, downloads, inFlight, downloadFailures ->
         val byUrl = inFlight.associateBy { it.url }
         // A finished download is not in currentDownloads at all, so it would join to null and be
         // indistinguishable from one that never started. The index is the only place that knows.
@@ -85,7 +100,7 @@ class LibraryViewModel @Inject constructor(
             downloads = downloads.map { entry ->
                 DownloadRow(entry, byUrl[entry.videoUrl] ?: finished[entry.videoUrl])
             },
-            downloadError = downloadError,
+            downloadError = downloadErrorMessage(downloadFailures),
         )
     }
         // The combine body walks Media3's download index, which is a synchronous SQLite read, and it
@@ -108,16 +123,23 @@ class LibraryViewModel @Inject constructor(
             // Keeping the row on failure is the recoverable direction: the download stays listed,
             // the Remove button stays live, and pressing it again succeeds straight away once the
             // service has caught up.
-            if (episodeDownloads.removeAndAwait(row.entry.videoUrl)) {
-                downloadRepository.forget(row.entry.videoUrl)
-                // Cleared on success, because this ViewModel outlives the tab: a failure left
-                // standing would keep naming a download that is no longer listed, next to rows it
-                // has nothing to do with.
-                _downloadError.value = null
+            val url = row.entry.videoUrl
+            if (episodeDownloads.removeAndAwait(url)) {
+                downloadRepository.forget(url)
+                // Only this row's failure is cleared. This ViewModel outlives the tab, so a message
+                // about a download that is now gone would otherwise sit there naming rows it has
+                // nothing to do with — but a *different* row that is still stranded has to keep
+                // saying so.
+                // update(), not `value = value - url`. Both callers run on viewModelScope's main
+                // dispatcher today, where a read-modify-write in a single non-suspending statement
+                // cannot be interleaved — but that is a property of the call sites, not of this
+                // line, and it stops being true the first time one of them moves to a background
+                // dispatcher. update() is a compare-and-set loop and costs nothing.
+                _downloadFailures.update { it - url }
             } else {
-                _downloadError.value =
-                    "Couldn't finish removing ${row.entry.episodeName ?: row.entry.mediaTitle}. " +
-                        "It's still listed — try again."
+                val message = "Couldn't finish removing ${row.entry.episodeName ?: row.entry.mediaTitle}. " +
+                    "It's still listed — try again."
+                _downloadFailures.update { it + (url to message) }
             }
         }
     }

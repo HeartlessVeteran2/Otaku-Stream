@@ -20,17 +20,27 @@ class HttpBridge @Inject constructor(
     // ScriptedVideoSource holds — and it is blocking, so neither coroutine cancellation nor the
     // interpreter's own deadline can interrupt it (the deadline is checked between instructions,
     // and no instructions run while a socket is waiting). At the app-wide 60-second call timeout,
-    // one unresponsive host therefore held that source's lock for a minute per call. Twenty
-    // seconds is long enough for a slow page and short enough that a dead host is an annoyance
-    // rather than an outage.
-    // Bounded below the script deadline, deliberately.
+    // one unresponsive host therefore held that source's lock for a minute per call.
     //
-    // The instruction observer that enforces that deadline only runs between Rhino instructions,
-    // and a script sitting inside a synchronous httpGet is executing no instructions at all — so a
-    // stalled request is exactly the case the deadline cannot see, and it holds the source's mutex
-    // for as long as the socket does. A call timeout shorter than the deadline means the request
-    // gives up first, control returns to the script, and the observer gets its chance.
+    // Two timeouts, not one, because a single call timeout cannot tell the two failures apart.
+    //
+    // Stage timeouts catch the case that actually happens: a host that accepts the connection and
+    // then goes quiet. `readTimeout` measures the gap *between bytes*, so a dead socket gives up in
+    // eight seconds however large the page was going to be.
+    //
+    // The call timeout is the total, and it has to stay under the script deadline: the instruction
+    // observer that enforces that deadline only runs between Rhino instructions, and a script
+    // sitting inside a synchronous httpGet is executing none — so the request must give up first,
+    // return control to the script, and let the observer have its chance.
+    //
+    // The total was ten seconds and covered the body read as well, which quietly made it a size
+    // limit: a page arriving steadily but slowly — a big catalog listing on a weak mobile signal —
+    // was aborted mid-transfer and reported as a broken source. Fifteen seconds of *progress* is
+    // what it buys now, while a stall still fails at eight.
     private val scriptClient: OkHttpClient = httpClient.newBuilder()
+        .connectTimeout(SCRIPT_STAGE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .readTimeout(SCRIPT_STAGE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .writeTimeout(SCRIPT_STAGE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .callTimeout(SCRIPT_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
 
@@ -47,5 +57,10 @@ class HttpBridge @Inject constructor(
     }
 }
 
-// Bounds how long a single in-script fetch can hold its source's lock.
-private const val SCRIPT_CALL_TIMEOUT_SECONDS = 10L
+// Bounds how long a single in-script fetch can hold its source's lock. Must stay below
+// SCRIPT_DEADLINE_MS — see the client above for why.
+internal const val SCRIPT_CALL_TIMEOUT_SECONDS = 15L
+
+// How long any one stage may stall: connect, or a gap between response bytes. Well under the total,
+// so a host that has stopped responding is recognised as such rather than running out the clock.
+internal const val SCRIPT_STAGE_TIMEOUT_SECONDS = 8L

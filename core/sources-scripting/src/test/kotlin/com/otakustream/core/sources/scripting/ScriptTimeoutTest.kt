@@ -187,4 +187,34 @@ class ScriptTimeoutTest {
         }
         assertTrue(threwSomethingElse)
     }
+
+    // A guard on two constants, not on the behaviour they configure — and worth being clear about
+    // which, because the name it first had ("a fetch gives up before the script deadline does")
+    // claimed the second and delivered the first.
+    //
+    // What it locks: the call timeout in HttpBridge must expire before the deadline in ScriptEngine.
+    // The two are one mechanism and live in different files. A script blocked on a socket executes
+    // no instructions, so the observer that enforces the deadline cannot see it; the request giving
+    // up first is the only thing that hands control back for the observer to act on. Raise one
+    // without the other and a stalled fetch stops being interruptible at all — which shows up as a
+    // source wedged until the app is force-stopped, not as a failing assertion anywhere near either
+    // number.
+    //
+    // What it does not cover: that the client actually applies those timeouts. Deleting the
+    // .callTimeout() call from HttpBridge would leave this green. Catching that needs a server that
+    // stalls on demand, which needs a dependency this module does not have (MockWebServer) — worth
+    // adding when there is a second reason to, and not worth pretending to have in the meantime.
+    @Test
+    fun `the fetch timeout constants stay under the script deadline`() {
+        assertTrue(
+            "callTimeout ${SCRIPT_CALL_TIMEOUT_SECONDS}s must expire before the ${SCRIPT_DEADLINE_MS}ms deadline",
+            SCRIPT_CALL_TIMEOUT_SECONDS * 1_000L < SCRIPT_DEADLINE_MS,
+        )
+        // And a stalled stage must fail well inside the total, or the two are the same timeout
+        // wearing different names and a dead host still costs the full budget.
+        assertTrue(
+            "stage timeout ${SCRIPT_STAGE_TIMEOUT_SECONDS}s must be under the ${SCRIPT_CALL_TIMEOUT_SECONDS}s total",
+            SCRIPT_STAGE_TIMEOUT_SECONDS < SCRIPT_CALL_TIMEOUT_SECONDS,
+        )
+    }
 }

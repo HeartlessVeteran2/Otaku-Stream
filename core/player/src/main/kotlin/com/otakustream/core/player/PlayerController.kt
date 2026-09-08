@@ -304,7 +304,15 @@ class PlayerController @Inject constructor(
             }
 
             override fun onPlayerError(error: PlaybackException) {
-                _uiState.value = _uiState.value.copy(error = error.message)
+                _uiState.value = _uiState.value.copy(
+                    error = error.message,
+                    // This failure is always about currentMediaUrl — it came from the player, which
+                    // is playing that url — so Retry is always the right offer. Setting it here as
+                    // well as at the two `error = null` resets is what keeps a torrent refusal from
+                    // suppressing Retry on the episode that was playing at the time: that episode
+                    // keeps playing after the refusal, so neither reset has run when it later fails.
+                    canRetry = true,
+                )
             }
 
             override fun onTracksChanged(tracks: Tracks) {
@@ -584,6 +592,10 @@ class PlayerController @Inject constructor(
         _uiState.value = _uiState.value.copy(
             isMarkingSegment = false,
             error = null,
+            // Cleared with the error it qualifies. A torrent refused while another episode played
+            // left this false; without restoring it here that one refusal would strip the Retry
+            // button off every later playback failure for the life of the controller.
+            canRetry = true,
             droppedFrameCount = 0,
             codecName = null,
             videoBitrateBps = 0,
@@ -690,14 +702,33 @@ class PlayerController @Inject constructor(
             currentMediaItem = mediaItem
             currentDataSourceFactory = dataSourceFactory
 
+            // Held back across the prepare, then released once the speed is set.
+            //
+            // playWhenReady is sticky: it survives setMediaSource, so on the second video of a
+            // session — auto-play next, or anything started while the previous episode was playing
+            // — it is *already* true when prepare() runs. A downloaded episode or a warm cache can
+            // reach the ready state immediately, and the video then plays its opening moments at
+            // whatever rate the last one was using, a held temporary speed boost included, before
+            // snapping to the right one. Clearing it first makes "prepared" and "playing" two
+            // separate steps with the speed applied in between.
+            //
+            // Only the first video of a session would have been caught by ordering the await alone:
+            // that is the one where playWhenReady starts false and the placeholder is still in the
+            // prefs. Both cases end up in the same place here.
+            player.playWhenReady = false
             player.setMediaSource(mediaSource, resumeMs)
             player.prepare()
-            player.playWhenReady = true
 
             // Apply the remembered default speed to every new video (boost is separate and resets).
-            val defaultSpeed = playerSettingsPrefs.defaultSpeed.value
+            //
+            // Awaited rather than read: the prefs load off the main thread, so on the first video of
+            // a session `.value` is still the 1x placeholder and the user's saved speed is lost on
+            // exactly the video they opened the app to watch.
+            val defaultSpeed = playerSettingsPrefs.awaitDefaultSpeed()
             player.setPlaybackSpeed(defaultSpeed)
             _uiState.value = _uiState.value.copy(playbackSpeed = defaultSpeed)
+
+            player.playWhenReady = true
         }
 
         torrentSubtitleJob?.cancel()
@@ -913,6 +944,7 @@ class PlayerController @Inject constructor(
             hasNext = false,
             activeSkipSegment = null,
             error = null,
+            canRetry = true,
             notice = null,
         )
         _progress.value = PlaybackProgress()

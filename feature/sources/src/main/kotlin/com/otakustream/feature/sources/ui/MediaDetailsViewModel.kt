@@ -373,6 +373,15 @@ class MediaDetailsViewModel @Inject constructor(
         viewModelScope.launch { clearDownloadsFor(episode.url) }
     }
 
+    // Episode urls whose download removal did not complete.
+    //
+    // Read and written only on viewModelScope's main dispatcher, which is where every caller of
+    // clearDownloadsFor runs — so each individual mutation is atomic against the others. That is
+    // *not* the same as the set being safe to iterate: clearDownloadsFor suspends, so two calls
+    // interleave, and anything that walks this set across a suspension point has to walk a
+    // snapshot. See the reconciliation below.
+    private val unconfirmedRemovals = mutableSetOf<String>()
+
     // Returns whether every row for this episode is confirmed gone, because one caller has to
     // change what it does when they are not.
     private suspend fun clearDownloadsFor(episodeUrl: String): Boolean {
@@ -390,21 +399,57 @@ class MediaDetailsViewModel @Inject constructor(
         }
         // One message however many rows an episode had, and only when something is genuinely left
         // behind — where the user can still get at it.
+        //
+        // Tracked per episode rather than as one string. This screen lists a whole season, so
+        // removing episode 3 and having it time out, then removing episode 4 successfully, used to
+        // clear episode 3's message while episode 3's file was still stranded — the only notice the
+        // user had that anything went wrong, erased by an unrelated success.
         if (unconfirmed > 0) {
-            // Its own field, not `error`.
-            //
-            // `error` is the details *loader's* failure, and the screen renders a Retry beside it
-            // that re-runs load(). A removal that timed out is neither retryable that way nor
-            // cleared by a later successful load, so putting it there offered the wrong action and
-            // left a stale message behind. This one is cleared the moment a removal succeeds.
-            _uiState.value = _uiState.value.copy(
-                downloadError = "Couldn't finish removing this episode's download. It's still " +
-                    "listed in Library › Downloads.",
-            )
+            unconfirmedRemovals += episodeUrl
+        } else {
+            unconfirmedRemovals -= episodeUrl
         }
-        if (unconfirmed == 0) {
-            _uiState.value = _uiState.value.copy(downloadError = null)
+        // And reconciled against what is actually left, not only against this call's result.
+        //
+        // removeAndAwait is a deadline, not a verdict: the service routinely finishes a removal
+        // just after the wait gives up, and the same download can be removed from Library ›
+        // Downloads by a different screen entirely. Either way the row is gone and the message
+        // naming it is not, and this screen renders it as plain text with no Retry and no dismiss —
+        // so it would sit there pointing at a download that no longer exists until the user happened
+        // to cancel that exact episode again. Anything with no rows left has nothing to report.
+        //
+        // Over a snapshot, and removing only what this call confirmed. The first version filtered
+        // the live set with a suspending predicate, which is two bugs: the iterator is fail-fast, so
+        // a second clearDownloadsFor mutating the set while this one was parked on a Room query
+        // threw ConcurrentModificationException; and `retainAll` of the surviving list would have
+        // dropped a url that other call had just added, erasing the message for an episode that was
+        // genuinely still stranded.
+        val toCheck = unconfirmedRemovals.toList()
+        val confirmedGone = mutableListOf<String>()
+        for (url in toCheck) {
+            // A lookup that failed says nothing about whether the file is there, so the message
+            // stays: dropping it on a database hiccup is the one direction that loses information
+            // the user needs. Hence isEmpty() with a `false` default rather than the inverse.
+            val gone = runCatchingCancellable { downloadRepository.entriesForEpisode(url).isEmpty() }
+                .getOrDefault(false)
+            if (gone) confirmedGone += url
         }
+        unconfirmedRemovals -= confirmedGone.toSet()
+        // Its own field, not `error`.
+        //
+        // `error` is the details *loader's* failure, and the screen renders a Retry beside it that
+        // re-runs load(). A removal that timed out is neither retryable that way nor cleared by a
+        // later successful load, so putting it there offered the wrong action and left a stale
+        // message behind.
+        _uiState.value = _uiState.value.copy(
+            downloadError = when (unconfirmedRemovals.size) {
+                0 -> null
+                1 -> "Couldn't finish removing this episode's download. It's still listed in " +
+                    "Library › Downloads."
+                else -> "Couldn't finish removing ${unconfirmedRemovals.size} episodes' downloads. " +
+                    "They're still listed in Library › Downloads."
+            },
+        )
         return unconfirmed == 0
     }
 
