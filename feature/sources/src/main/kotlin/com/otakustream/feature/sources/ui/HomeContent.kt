@@ -30,6 +30,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.database.library.DIRECT_PLAY_SOURCE_ID
 import com.otakustream.core.database.library.WatchHistoryEntry
 import com.otakustream.core.ui.PosterTile
+import com.otakustream.core.ui.RefreshableBox
 import com.otakustream.feature.tracking.AniListListEntry
 import com.otakustream.feature.tracking.AniListMedia
 import com.otakustream.feature.tracking.AiringDay
@@ -60,147 +61,161 @@ fun HomeContent(
     val aniListRailsEmpty = aniListState.trending.isEmpty() && aniListState.thisSeason.isEmpty() &&
         aniListState.allTimePopular.isEmpty() && aniListState.continueWatching.isEmpty()
 
-    // A LazyColumn, not a Column with verticalScroll. Both scroll; the difference is when the rails
-    // compose. A scrolling Column composes all of them on the first frame, so opening the app
-    // created every available rail — with maybe two on screen — before anything could be drawn. Each
-    // LazyRow only composed its visible tiles, but the rail itself, its header and its measurement
-    // were still work done up front. Lazily, the rails below the fold cost nothing until they are
-    // scrolled to. Each rail is one item with its header, so a header can never be stranded on
-    // screen without its row.
-    LazyColumn(modifier = modifier.fillMaxSize()) {
-        // First item, above everything, and shown whatever else is on screen.
-        //
-        // It used to be emitted after the AniList rails — about 660dp of posters down, off the
-        // bottom of every phone — and suppressed entirely when Continue Watching had anything in
-        // it, so a user with watch history and no sources never saw it at all. Both are the same
-        // mistake: the rails above it are AniList metadata that renders perfectly with zero sources
-        // installed, so the app looks finished until you tap something and nothing can play it.
-        // Having history makes that *more* likely to confuse, not less.
-        if (!uiState.hasAnySources && uiState.hasLoadedOnce) {
-            item(key = "no-sources") {
-                NoSourcesBanner(
-                    onBrowseAddons = onBrowseAddons,
-                    onBrowseExtensions = onBrowseExtensions,
-                )
-            }
-        }
-
-        // Leads the screen, above Continue Watching, because it answers the question someone opens
-        // a seasonal-anime app to ask: has anything I follow dropped? Continue Watching lists
-        // everything in progress whether or not there is a new episode, so on its own it cannot
-        // distinguish "three episodes waiting" from "caught up and waiting until Friday".
-        if (aniListState.readyToWatch.isNotEmpty()) {
-            item(key = "anilist-new-episodes") {
-                RailHeader(
-                    title = "New episodes",
-                    // Only offered when there is a schedule to show. Sending someone to an empty
-                    // screen is worse than not offering the link.
-                    actionLabel = "Schedule".takeIf { aniListState.airingDays.isNotEmpty() },
-                    onAction = onSeeSchedule,
-                )
-                ReadyToWatchRail(aniListState.readyToWatch, onAniListClick)
-            }
-        } else if (aniListState.airingDays.isNotEmpty()) {
-            // Caught up on everything, with episodes still on the way. Gating the schedule behind
-            // "something is waiting" hid it in exactly the state it is most useful: when there is
-            // nothing to watch, when the next episode arrives is the only thing left to say.
-            item(key = "anilist-airing-soon") {
-                RailHeader(title = "Airing soon", actionLabel = "Schedule", onAction = onSeeSchedule)
-                AiringSoonRail(aniListState.airingDays, onAniListClick)
-            }
-        }
-        // ---- AniList discovery (works logged-out) ----
-        if (aniListState.continueWatching.isNotEmpty()) {
-            item(key = "anilist-continue") {
-                RailHeader("Continue watching on AniList")
-                AniListEntryRail(aniListState.continueWatching, onAniListClick)
-            }
-        }
-        if (aniListState.trending.isNotEmpty()) {
-            item(key = "anilist-trending") {
-                RailHeader("Trending now")
-                AniListMediaRail(aniListState.trending, onAniListClick)
-            }
-        }
-        if (aniListState.thisSeason.isNotEmpty()) {
-            item(key = "anilist-season") {
-                RailHeader("Popular this season")
-                AniListMediaRail(aniListState.thisSeason, onAniListClick)
-            }
-        }
-        if (aniListState.allTimePopular.isNotEmpty()) {
-            item(key = "anilist-popular") {
-                RailHeader("All-time popular")
-                AniListMediaRail(aniListState.allTimePopular, onAniListClick)
-            }
-        }
-        if (aniListState.isLoading && !aniListState.hasLoadedOnce) {
-            item(key = "anilist-loading") {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier.fillMaxWidth().padding(24.dp),
-                ) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.tertiary)
+    // One gesture, both view models. The Play tab is two independent loaders composed into one
+    // list — AniList's rails and the installed sources' rails — and a pull that reloaded only one
+    // of them would leave half the screen stale with nothing to say which half. The indicator is
+    // the OR of the two so it stops when the screen has actually finished changing, not when
+    // whichever loader happens to be quicker has.
+    RefreshableBox(
+        isRefreshing = uiState.isRefreshing || aniListState.isRefreshing,
+        onRefresh = {
+            viewModel.refresh()
+            aniListViewModel.refresh()
+        },
+        modifier = modifier.fillMaxSize(),
+    ) {
+        // A LazyColumn, not a Column with verticalScroll. Both scroll; the difference is when the rails
+        // compose. A scrolling Column composes all of them on the first frame, so opening the app
+        // created every available rail — with maybe two on screen — before anything could be drawn. Each
+        // LazyRow only composed its visible tiles, but the rail itself, its header and its measurement
+        // were still work done up front. Lazily, the rails below the fold cost nothing until they are
+        // scrolled to. Each rail is one item with its header, so a header can never be stranded on
+        // screen without its row.
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            // First item, above everything, and shown whatever else is on screen.
+            //
+            // It used to be emitted after the AniList rails — about 660dp of posters down, off the
+            // bottom of every phone — and suppressed entirely when Continue Watching had anything in
+            // it, so a user with watch history and no sources never saw it at all. Both are the same
+            // mistake: the rails above it are AniList metadata that renders perfectly with zero sources
+            // installed, so the app looks finished until you tap something and nothing can play it.
+            // Having history makes that *more* likely to confuse, not less.
+            if (!uiState.hasAnySources && uiState.hasLoadedOnce) {
+                item(key = "no-sources") {
+                    NoSourcesBanner(
+                        onBrowseAddons = onBrowseAddons,
+                        onBrowseExtensions = onBrowseExtensions,
+                    )
                 }
             }
-        }
-        if (aniListState.error != null && aniListRailsEmpty && !aniListState.isLoading) {
-            item(key = "anilist-error") { AniListRailsError(onRetry = aniListViewModel::refresh) }
-        }
 
-        // ---- Local history + source-based rails ----
-        if (continueWatching.isNotEmpty()) {
-            item(key = "local-continue") {
-                RailHeader("Continue watching")
-                LazyRow(contentPadding = RailPadding, horizontalArrangement = RailSpacing) {
-                    items(continueWatching, key = { "cw-${it.id}" }) { entry ->
-                        ContinueWatchingTile(
-                            entry = entry,
-                            onClick = {
-                                if (entry.sourceId == DIRECT_PLAY_SOURCE_ID) {
-                                    onPlayDirect(entry.mediaUrl)
-                                } else {
-                                    onMediaClick(
-                                        entry.sourceId,
-                                        entry.mediaUrl,
-                                        entry.mediaTitle,
-                                        entry.coverUrl,
-                                    )
-                                }
-                            },
-                        )
-                    }
+            // Leads the screen, above Continue Watching, because it answers the question someone opens
+            // a seasonal-anime app to ask: has anything I follow dropped? Continue Watching lists
+            // everything in progress whether or not there is a new episode, so on its own it cannot
+            // distinguish "three episodes waiting" from "caught up and waiting until Friday".
+            if (aniListState.readyToWatch.isNotEmpty()) {
+                item(key = "anilist-new-episodes") {
+                    RailHeader(
+                        title = "New episodes",
+                        // Only offered when there is a schedule to show. Sending someone to an empty
+                        // screen is worse than not offering the link.
+                        actionLabel = "Schedule".takeIf { aniListState.airingDays.isNotEmpty() },
+                        onAction = onSeeSchedule,
+                    )
+                    ReadyToWatchRail(aniListState.readyToWatch, onAniListClick)
+                }
+            } else if (aniListState.airingDays.isNotEmpty()) {
+                // Caught up on everything, with episodes still on the way. Gating the schedule behind
+                // "something is waiting" hid it in exactly the state it is most useful: when there is
+                // nothing to watch, when the next episode arrives is the only thing left to say.
+                item(key = "anilist-airing-soon") {
+                    RailHeader(title = "Airing soon", actionLabel = "Schedule", onAction = onSeeSchedule)
+                    AiringSoonRail(aniListState.airingDays, onAniListClick)
                 }
             }
-        }
-
-        when {
-            // The no-sources case is handled at the top of the list, not here — see the banner above.
-            !uiState.hasAnySources && uiState.hasLoadedOnce -> Unit
-            uiState.isLoading && !uiState.hasLoadedOnce -> {
-                item(key = "sources-loading") {
+            // ---- AniList discovery (works logged-out) ----
+            if (aniListState.continueWatching.isNotEmpty()) {
+                item(key = "anilist-continue") {
+                    RailHeader("Continue watching on AniList")
+                    AniListEntryRail(aniListState.continueWatching, onAniListClick)
+                }
+            }
+            if (aniListState.trending.isNotEmpty()) {
+                item(key = "anilist-trending") {
+                    RailHeader("Trending now")
+                    AniListMediaRail(aniListState.trending, onAniListClick)
+                }
+            }
+            if (aniListState.thisSeason.isNotEmpty()) {
+                item(key = "anilist-season") {
+                    RailHeader("Popular this season")
+                    AniListMediaRail(aniListState.thisSeason, onAniListClick)
+                }
+            }
+            if (aniListState.allTimePopular.isNotEmpty()) {
+                item(key = "anilist-popular") {
+                    RailHeader("All-time popular")
+                    AniListMediaRail(aniListState.allTimePopular, onAniListClick)
+                }
+            }
+            if (aniListState.isLoading && !aniListState.hasLoadedOnce) {
+                item(key = "anilist-loading") {
                     Box(
                         contentAlignment = Alignment.Center,
-                        modifier = Modifier.fillMaxWidth().padding(32.dp),
+                        modifier = Modifier.fillMaxWidth().padding(24.dp),
                     ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.padding(8.dp),
-                            color = MaterialTheme.colorScheme.tertiary,
-                        )
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.tertiary)
                     }
                 }
             }
-            else -> {
-                if (uiState.popular.isNotEmpty()) {
-                    item(key = "sources-popular") {
-                        RailHeader("Popular")
-                        CatalogRail(uiState.popular, onMediaClick)
+            if (aniListState.error != null && aniListRailsEmpty && !aniListState.isLoading) {
+                item(key = "anilist-error") { AniListRailsError(onRetry = aniListViewModel::refresh) }
+            }
+
+            // ---- Local history + source-based rails ----
+            if (continueWatching.isNotEmpty()) {
+                item(key = "local-continue") {
+                    RailHeader("Continue watching")
+                    LazyRow(contentPadding = RailPadding, horizontalArrangement = RailSpacing) {
+                        items(continueWatching, key = { "cw-${it.id}" }) { entry ->
+                            ContinueWatchingTile(
+                                entry = entry,
+                                onClick = {
+                                    if (entry.sourceId == DIRECT_PLAY_SOURCE_ID) {
+                                        onPlayDirect(entry.mediaUrl)
+                                    } else {
+                                        onMediaClick(
+                                            entry.sourceId,
+                                            entry.mediaUrl,
+                                            entry.mediaTitle,
+                                            entry.coverUrl,
+                                        )
+                                    }
+                                },
+                            )
+                        }
                     }
                 }
-                if (uiState.latest.isNotEmpty()) {
-                    item(key = "sources-latest") {
-                        RailHeader("Latest")
-                        CatalogRail(uiState.latest, onMediaClick)
+            }
+
+            when {
+                // The no-sources case is handled at the top of the list, not here — see the banner above.
+                !uiState.hasAnySources && uiState.hasLoadedOnce -> Unit
+                uiState.isLoading && !uiState.hasLoadedOnce -> {
+                    item(key = "sources-loading") {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.fillMaxWidth().padding(32.dp),
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.padding(8.dp),
+                                color = MaterialTheme.colorScheme.tertiary,
+                            )
+                        }
+                    }
+                }
+                else -> {
+                    if (uiState.popular.isNotEmpty()) {
+                        item(key = "sources-popular") {
+                            RailHeader("Popular")
+                            CatalogRail(uiState.popular, onMediaClick)
+                        }
+                    }
+                    if (uiState.latest.isNotEmpty()) {
+                        item(key = "sources-latest") {
+                            RailHeader("Latest")
+                            CatalogRail(uiState.latest, onMediaClick)
+                        }
                     }
                 }
             }

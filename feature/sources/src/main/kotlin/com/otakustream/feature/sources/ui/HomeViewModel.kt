@@ -40,6 +40,10 @@ data class HomeUiState(
     val popular: List<CatalogEntry> = emptyList(),
     val latest: List<CatalogEntry> = emptyList(),
     val isLoading: Boolean = false,
+    // Separate from isLoading, which is also true during the *first* load. Binding the pull
+    // indicator to isLoading would spin it on every cold start, next to the in-content spinner the
+    // screen already shows for that case. This one is set only by refresh().
+    val isRefreshing: Boolean = false,
     val hasAnySources: Boolean = false,
     val hasLoadedOnce: Boolean = false,
 )
@@ -97,7 +101,10 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    // Pull-to-refresh, and the retry behind the rails' error state. Re-runs the fan-out against
+    // whatever is registered now.
     fun refresh() {
+        _uiState.value = _uiState.value.copy(isRefreshing = true)
         refreshRails(sourceRepository.getSources())
     }
 
@@ -113,6 +120,12 @@ class HomeViewModel @Inject constructor(
                     popular = popular.await(),
                     latest = latest.await(),
                     isLoading = false,
+                    // Cleared by whichever fan-out finishes, not only by one started from refresh().
+                    // A registration change cancels the running job and starts a replacement, so
+                    // clearing it only in refresh()'s own job would strand the indicator on screen
+                    // for a pull that was superseded a frame later by an add-on finishing its
+                    // install. Every path here ends in this one assignment.
+                    isRefreshing = false,
                     hasLoadedOnce = true,
                 )
             }
@@ -127,11 +140,22 @@ class HomeViewModel @Inject constructor(
     ): List<CatalogEntry> = coroutineScope {
         val perSource = sources.map { source ->
             async {
-                runCatching { fetch(source).items.map { CatalogEntry(source.id, it) } }
-                    .getOrElse { error ->
-                        if (error is CancellationException) throw error
-                        emptyList()
-                    }
+                // The cap RAIL_FETCH_TIMEOUT_MS was declared for and never applied: the constant and
+                // the withTimeoutOrNull import were both here, unused, so a source that never
+                // answered held the whole fan-out open indefinitely. Nothing showed it because the
+                // rails simply stayed on their previous contents — until pull-to-refresh gave that
+                // state a spinner that would never stop.
+                //
+                // Per source, inside the async, so a slow one costs only its own rail entries.
+                // Around the whole fan-out it would instead truncate every source at the deadline,
+                // discarding results that had already arrived.
+                withTimeoutOrNull(RAIL_FETCH_TIMEOUT_MS) {
+                    runCatching { fetch(source).items.map { CatalogEntry(source.id, it) } }
+                        .getOrElse { error ->
+                            if (error is CancellationException) throw error
+                            emptyList()
+                        }
+                } ?: emptyList()
             }
         }.awaitAll()
         // Dedupe by (source, url) before the cap: the rails key on that pair, and a source can

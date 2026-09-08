@@ -19,7 +19,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 
 data class AniListHomeUiState(
@@ -36,6 +38,10 @@ data class AniListHomeUiState(
     // When the next episode of each of those shows airs, grouped by day.
     val airingDays: List<AiringDay> = emptyList(),
     val isLoading: Boolean = false,
+    // Separate from isLoading, which is also true during the first load — see HomeUiState. Set only
+    // by refresh(), and held until *both* halves of a refresh have landed, not just the discovery
+    // rails.
+    val isRefreshing: Boolean = false,
     val hasLoadedOnce: Boolean = false,
     val error: String? = null,
 )
@@ -62,20 +68,63 @@ class AniListHomeViewModel @Inject constructor(
     // signed in as one account and looking at another's.
     private var listJob: Job? = null
 
+    // The same guard for the discovery rails. It did not need one while the only caller was init
+    // plus a Retry button behind an error state, but a pull gesture can start a second load over a
+    // first — and then two fan-outs race to write the same three rails, which is exactly the
+    // last-write-wins bug listJob exists to prevent.
+    private var discoveryJob: Job? = null
+
+    // The last token observeToken reported. Read by refresh(), which needs the current sign-in
+    // state without suspending for it — and observeToken is already the authority the rest of this
+    // class trusts. Written and read only on the main dispatcher, which is what viewModelScope is.
+    private var currentToken: String? = null
+
+    // Which refresh owns the indicator. A refresh superseded by a newer one still reaches its
+    // `finally`, and without this it would clear the flag the newer one had just set — leaving the
+    // screen looking idle while a load was still in flight.
+    private val refreshGeneration = AtomicInteger(0)
+
     init {
         loadDiscovery()
         // Re-load the personal rail whenever sign-in state flips (token appears/clears).
         viewModelScope.launch {
             trackingRepository.observeToken().distinctUntilChanged().collect { token ->
+                currentToken = token
                 loadContinueWatching(token)
             }
         }
     }
 
-    fun refresh() = loadDiscovery()
-
-    private fun loadDiscovery() {
+    // Both halves, together.
+    //
+    // A pull on this screen is asking "has anything I follow dropped?" — and that is the New
+    // episodes and Airing soon rails, which come from the personal list, not from discovery.
+    // Reloading only loadDiscovery() would refresh the three rails the question is *not* about and
+    // leave the one it is exactly as stale as before.
+    //
+    // The indicator is held until both are done rather than until the first finishes, so it stops
+    // when the screen has actually finished changing.
+    fun refresh() {
+        val generation = refreshGeneration.incrementAndGet()
+        _uiState.value = _uiState.value.copy(isRefreshing = true)
+        // No job field for this coordinator, and nothing cancels it: the work it waits on is
+        // already guarded by discoveryJob and listJob, so a superseded coordinator finds both of
+        // its jobs cancelled and returns immediately. The generation check is what stops it
+        // touching the indicator on its way out.
         viewModelScope.launch {
+            try {
+                listOfNotNull(loadDiscovery(), loadContinueWatching(currentToken)).joinAll()
+            } finally {
+                if (refreshGeneration.get() == generation) {
+                    _uiState.value = _uiState.value.copy(isRefreshing = false)
+                }
+            }
+        }
+    }
+
+    private fun loadDiscovery(): Job {
+        discoveryJob?.cancel()
+        val job = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isLoading = true, error = null)
             runCatching {
                 coroutineScope {
@@ -102,9 +151,14 @@ class AniListHomeViewModel @Inject constructor(
                 )
             }
         }
+        discoveryJob = job
+        return job
     }
 
-    private fun loadContinueWatching(token: String?) {
+    // Returns the job doing the work, or null when there is nothing to load, so refresh() can wait
+    // on it. Without that the indicator would stop the moment the discovery rails landed, while the
+    // personal ones were still on their way.
+    private fun loadContinueWatching(token: String?): Job? {
         // Cancelled on the way out too: a sign-out must not merely be overwritten later by a
         // request that was already running when it happened.
         listJob?.cancel()
@@ -114,9 +168,12 @@ class AniListHomeViewModel @Inject constructor(
                 readyToWatch = emptyList(),
                 airingDays = emptyList(),
             )
-            return
+            // Cleared, not left pointing at the job just cancelled: refresh() joins whatever this
+            // returns, and handing back a dead job would be indistinguishable from handing back a
+            // live one.
+            listJob = null
+            return null
         }
-        listJob?.cancel()
         listJob = viewModelScope.launch {
             runCatching {
                 val viewer = aniListClient.fetchViewer(token)
@@ -146,5 +203,6 @@ class AniListHomeViewModel @Inject constructor(
                 )
             }
         }
+        return listJob
     }
 }

@@ -21,6 +21,10 @@ data class StremioAccountUiState(
     val isLoggedIn: Boolean = false,
     val email: String? = null,
     val isBusy: Boolean = false,
+    // A pull-to-refresh in particular, as opposed to isBusy, which also covers signing in and
+    // pushing. Set only by refresh(), so the pull indicator answers for the pull gesture — and so
+    // the content area can tell that a spinner of its own would be saying the same thing twice.
+    val isRefreshing: Boolean = false,
     val error: String? = null,
     val message: String? = null,
     val library: List<StremioLibraryItem> = emptyList(),
@@ -92,14 +96,28 @@ class StremioAccountViewModel @Inject constructor(
         }
     }
 
+    // Pull-to-refresh. refreshLibrary() is the work; this is the flag that keeps the indicator up
+    // for exactly as long as it runs.
+    fun refresh() {
+        _uiState.value = _uiState.value.copy(isRefreshing = true)
+        refreshLibrary()
+    }
+
     fun refreshLibrary() {
-        val authKey = accountStore.authKey.value ?: return
+        // Not a bare `?: return`. Every way out of this function has to retire the indicator, and
+        // signing out between the pull and this line is a real ordering: the gesture would then
+        // leave a spinner on screen with nothing running behind it and no way to stop it.
+        val authKey = accountStore.authKey.value ?: run {
+            _uiState.value = _uiState.value.copy(isRefreshing = false)
+            return
+        }
         _uiState.value = _uiState.value.copy(isBusy = true, error = null)
         viewModelScope.launch {
             runCatching { accountClient.fetchLibrary(authKey) }
                 .onSuccess { items ->
                     _uiState.value = _uiState.value.copy(
                         isBusy = false,
+                        isRefreshing = false,
                         library = items.filterNot { it.removed }.sortedBy { it.name.lowercase() },
                     )
                 }
@@ -107,6 +125,7 @@ class StremioAccountViewModel @Inject constructor(
                     if (failure is CancellationException) throw failure
                     _uiState.value = _uiState.value.copy(
                         isBusy = false,
+                        isRefreshing = false,
                         error = failure.message ?: "Couldn't load your Stremio library.",
                     )
                 }
