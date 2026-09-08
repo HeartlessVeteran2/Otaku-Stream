@@ -1,5 +1,7 @@
 package com.otakustream.feature.sources.ui
 
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.runtime.getValue
 import com.otakustream.core.ui.BackTopBar
 import com.otakustream.core.ui.CoverImage
@@ -79,19 +81,31 @@ fun AniListWatchScreen(
             // hands them the height that is actually left.
             Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 when {
+                    // fillMaxSize on each of these, like every other branch of this `when` — see the
+                    // comment on the Box above. EmptyState only fills its width, so without it they
+                    // sit at the top of the weighted area rather than centred in it. (The
+                    // no-sources branch predates this change and had the same gap.)
                     uiState.hasNoSources -> EmptyState(
                         icon = Icons.Filled.Extension,
                         title = "No sources installed",
                         message = "Install an add-on or extension, then come back to watch this from AniList.",
                         actionLabel = "Browse add-ons",
                         onAction = onBrowseAddons,
+                        modifier = Modifier.fillMaxSize(),
                     )
                     uiState.isSearching -> LoadingState()
-                    uiState.query.isBlank() -> CenterText(
-                        "Type a title above to find it in your installed sources.",
+                    uiState.query.isBlank() -> EmptyState(
+                        icon = Icons.Filled.Search,
+                        title = "Find it in your sources",
+                        message = "Type a title above and every installed source is asked for it.",
+                        modifier = Modifier.fillMaxSize(),
                     )
-                    uiState.groups.isEmpty() -> CenterText(
-                        "No matches. Try a different spelling or the romaji title.",
+                    uiState.groups.isEmpty() -> EmptyState(
+                        icon = Icons.Filled.SearchOff,
+                        title = "No matches",
+                        message = "None of your sources returned anything for that. Try a different " +
+                            "spelling, or the romaji title.",
+                        modifier = Modifier.fillMaxSize(),
                     )
                     else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
                         uiState.groups.forEach { group ->
@@ -131,12 +145,5 @@ fun AniListWatchScreen(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun CenterText(text: String) {
-    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize().padding(32.dp)) {
-        Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

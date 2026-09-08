@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
@@ -51,6 +53,7 @@ import com.otakustream.core.sources.stremio.model.AddonListOrigin
 import com.otakustream.core.sources.stremio.model.OfficialAddonListing
 import com.otakustream.core.ui.BackTopBar
 import com.otakustream.core.ui.CoverImage
+import com.otakustream.core.ui.EmptyState
 
 @Composable
 fun BrowseStremioAddonsScreen(
@@ -106,11 +109,28 @@ fun BrowseStremioAddonsScreen(
                     }
 
                     if (!uiState.isLoading && uiState.error == null && uiState.listings.isEmpty()) {
-                        Text(
-                            text = "Couldn't find any add-ons right now.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 16.dp),
+                        EmptyState(
+                            icon = Icons.Filled.SearchOff,
+                            title = "No add-ons to show",
+                            // An outage cannot produce this state, so the copy must not describe
+                            // one. RecommendedAddons.listings is bundled with the app and merged
+                            // unconditionally, so a network failure empties the *fetched* lists and
+                            // sets builtInListError — which populates `error`, and this block only
+                            // renders when `error == null`. What is left is the filter: the
+                            // recommended add-ons are all STREAMS, so choosing Catalogs or Subtitles
+                            // while the fetched lists are unavailable really can match nothing.
+                            //
+                            // The unfiltered case should not be reachable at all, and says so rather
+                            // than inventing a cause for it.
+                            message = if (uiState.filter == AddonFilter.ALL) {
+                                // No "try again" here: the Retry button lives beside the error
+                                // banner, and this block renders only when there is no error — so
+                                // there is nothing on screen for that instruction to point at.
+                                "Nothing to show, which is unexpected — the recommended add-ons ship " +
+                                    "with the app and should always be listed."
+                            } else {
+                                "Nothing in the directory matches this filter. Try “All” above."
+                            },
                         )
                     }
                     Spacer(modifier = Modifier.height(16.dp))

@@ -1,5 +1,6 @@
 package com.otakustream.feature.sources.ui
 
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material3.AssistChip
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
@@ -39,6 +40,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.sources.mangayomi.repo.MangayomiExtensionListing
 import com.otakustream.core.ui.BackTopBar
 import com.otakustream.core.ui.ConfirmDialog
+import com.otakustream.core.ui.EmptyState
 
 @Composable
 fun MangayomiExtensionsScreen(
@@ -165,11 +167,34 @@ fun MangayomiExtensionsScreen(
                     }
 
                     if (!uiState.isLoading && uiState.error == null && uiState.listings.isEmpty()) {
-                        Text(
-                            text = "No extensions listed in this repository.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 16.dp),
+                        EmptyState(
+                            icon = Icons.Filled.Extension,
+                            title = "No extensions to show",
+                            // Keyed on the banner above, because otherwise this contradicts it. The
+                            // recommended repositories are not somewhere else to try — this screen
+                            // already loads them alongside any custom URL — so suggesting them while
+                            // the banner says they could not be reached names the one thing that
+                            // definitely will not help. The old copy said "this repository", which
+                            // stopped being true when the screen started merging several.
+                            message = if (uiState.unreachableRepos.isEmpty()) {
+                                "The repositories loaded, but none of them listed an anime extension " +
+                                    "this app can run."
+                            } else {
+                                // Neither half claims how many loaded, which is the only wording
+                                // that is true in every case this branch covers.
+                                //
+                                // unreachableRepos carries only the *curated* repos that failed — a
+                                // custom repo's failure goes to customRepoError and never appears
+                                // there — so "none could be reached" would send a user with a
+                                // working connection to go and check it. But "and the rest had
+                                // nothing" is equally wrong the other way: when every curated repo
+                                // is unreachable and no custom URL is set, there is no rest, and
+                                // that phrasing tells a genuinely offline user the repos loaded
+                                // fine. "None of the ones that did load" is true whether that is
+                                // several or zero.
+                                "Couldn't reach the repositories listed above, and none of the " +
+                                    "ones that did load listed an anime extension this app can run."
+                            },
                         )
                     }
                     Spacer(modifier = Modifier.height(16.dp))

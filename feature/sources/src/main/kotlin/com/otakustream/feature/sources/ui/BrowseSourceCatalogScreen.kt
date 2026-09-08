@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ListItem
@@ -25,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.ui.BackTopBar
+import com.otakustream.core.ui.EmptyState
 import com.otakustream.feature.sources.SourceCatalogEntry
 
 @Composable
@@ -80,11 +83,10 @@ fun BrowseSourceCatalogScreen(
                     }
 
                     if (!uiState.isLoading && uiState.error == null && uiState.entries.isEmpty()) {
-                        Text(
-                            text = "No sources listed in this directory.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 16.dp),
+                        EmptyState(
+                            icon = Icons.Filled.Code,
+                            title = "No sources here",
+                            message = "This directory's index came back empty.",
                         )
                     }
                     Spacer(modifier = Modifier.height(16.dp))
