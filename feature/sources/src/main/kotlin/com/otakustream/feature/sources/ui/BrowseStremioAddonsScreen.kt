@@ -111,9 +111,18 @@ fun BrowseStremioAddonsScreen(
                     if (!uiState.isLoading && uiState.error == null && uiState.listings.isEmpty()) {
                         EmptyState(
                             icon = Icons.Filled.SearchOff,
-                            title = "No add-ons found",
-                            message = "Nothing came back from the directories this time. They may " +
-                                "be down — the recommended list below still works.",
+                            title = "No add-ons to show",
+                            // Two causes, and the message has to name the right one. The recommended
+                            // add-ons are not a separate list to fall back to — they are the head of
+                            // this same list, so "the recommended list below" would point at nothing.
+                            // And with a filter set, the far likelier cause is that the filter matched
+                            // nothing rather than that every directory is down.
+                            message = if (uiState.filter == AddonFilter.ALL) {
+                                "Nothing came back from the directories this time. Check your " +
+                                    "connection and reload."
+                            } else {
+                                "Nothing in the directory matches this filter. Try “All” above."
+                            },
                         )
                     }
                     Spacer(modifier = Modifier.height(16.dp))

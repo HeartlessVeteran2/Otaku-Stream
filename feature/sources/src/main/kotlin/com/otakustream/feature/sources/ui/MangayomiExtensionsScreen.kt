@@ -169,9 +169,20 @@ fun MangayomiExtensionsScreen(
                     if (!uiState.isLoading && uiState.error == null && uiState.listings.isEmpty()) {
                         EmptyState(
                             icon = Icons.Filled.Extension,
-                            title = "No extensions here",
-                            message = "This repository's index came back empty. Try one of the " +
-                                "recommended repositories instead.",
+                            title = "No extensions to show",
+                            // Keyed on the banner above, because otherwise this contradicts it. The
+                            // recommended repositories are not somewhere else to try — this screen
+                            // already loads them alongside any custom URL — so suggesting them while
+                            // the banner says they could not be reached names the one thing that
+                            // definitely will not help. The old copy said "this repository", which
+                            // stopped being true when the screen started merging several.
+                            message = if (uiState.unreachableRepos.isEmpty()) {
+                                "The repositories loaded, but none of them listed an anime extension " +
+                                    "this app can run."
+                            } else {
+                                "None of the repositories could be reached — see above. Check your " +
+                                    "connection and load again."
+                            },
                         )
                     }
                     Spacer(modifier = Modifier.height(16.dp))
