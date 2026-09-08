@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.AssistChipDefaults
 import androidx.compose.material3.Button
@@ -51,6 +53,7 @@ import com.otakustream.core.sources.stremio.model.AddonListOrigin
 import com.otakustream.core.sources.stremio.model.OfficialAddonListing
 import com.otakustream.core.ui.BackTopBar
 import com.otakustream.core.ui.CoverImage
+import com.otakustream.core.ui.EmptyState
 
 @Composable
 fun BrowseStremioAddonsScreen(
@@ -106,11 +109,11 @@ fun BrowseStremioAddonsScreen(
                     }
 
                     if (!uiState.isLoading && uiState.error == null && uiState.listings.isEmpty()) {
-                        Text(
-                            text = "Couldn't find any add-ons right now.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 16.dp),
+                        EmptyState(
+                            icon = Icons.Filled.SearchOff,
+                            title = "No add-ons found",
+                            message = "Nothing came back from the directories this time. They may " +
+                                "be down — the recommended list below still works.",
                         )
                     }
                     Spacer(modifier = Modifier.height(16.dp))

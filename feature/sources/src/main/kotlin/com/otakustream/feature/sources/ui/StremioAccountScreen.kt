@@ -1,12 +1,13 @@
 package com.otakustream.feature.sources.ui
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import com.otakustream.core.ui.BackTopBar
 import com.otakustream.core.ui.ConfirmDialog
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -33,6 +34,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.otakustream.core.ui.EmptyState
+import com.otakustream.core.ui.LoadingState
 import com.otakustream.core.ui.PosterTile
 
 // Sign in to a Stremio account and sync the library. Logged out: email/password. Logged in: your
@@ -172,19 +175,15 @@ private fun LoggedInContent(uiState: StremioAccountUiState, viewModel: StremioAc
         )
 
         when {
-            uiState.isBusy && uiState.library.isEmpty() -> {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
-                }
-            }
-            uiState.library.isEmpty() -> {
-                Text(
-                    text = "Nothing in your Stremio library yet, or it couldn't be loaded.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                )
-            }
+            uiState.isBusy && uiState.library.isEmpty() -> LoadingState()
+            uiState.library.isEmpty() -> EmptyState(
+                icon = Icons.Filled.CloudOff,
+                title = "Nothing in your Stremio library",
+                // Two causes described together on purpose, as the airing schedule's empty state
+                // does: an empty library and a failed fetch are indistinguishable from here, and
+                // picking one would tell half the users something false.
+                message = "Either nothing is saved to it yet, or it couldn't be loaded.",
+            )
             else -> {
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 110.dp),

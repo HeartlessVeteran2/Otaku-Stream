@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
@@ -36,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.ui.BackTopBar
 import com.otakustream.core.ui.ConfirmDialog
+import com.otakustream.core.ui.EmptyState
 
 @Composable
 fun ManageStremioSourcesScreen(
@@ -143,11 +145,10 @@ fun ManageStremioSourcesScreen(
 
             if (uiState.addons.isEmpty()) {
                 item {
-                Text(
-                    text = "No add-ons installed yet. Browse the directory or paste an add-on link above.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(top = 8.dp),
+                EmptyState(
+                    icon = Icons.Filled.Extension,
+                    title = "No add-ons installed yet",
+                    message = "Browse the directory, or paste an add-on link into the field above.",
                 )
                 }
             }

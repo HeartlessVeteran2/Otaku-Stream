@@ -1,5 +1,6 @@
 package com.otakustream.feature.sources.ui
 
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material3.AssistChip
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
@@ -39,6 +40,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.sources.mangayomi.repo.MangayomiExtensionListing
 import com.otakustream.core.ui.BackTopBar
 import com.otakustream.core.ui.ConfirmDialog
+import com.otakustream.core.ui.EmptyState
 
 @Composable
 fun MangayomiExtensionsScreen(
@@ -165,11 +167,11 @@ fun MangayomiExtensionsScreen(
                     }
 
                     if (!uiState.isLoading && uiState.error == null && uiState.listings.isEmpty()) {
-                        Text(
-                            text = "No extensions listed in this repository.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(top = 16.dp),
+                        EmptyState(
+                            icon = Icons.Filled.Extension,
+                            title = "No extensions here",
+                            message = "This repository's index came back empty. Try one of the " +
+                                "recommended repositories instead.",
                         )
                     }
                     Spacer(modifier = Modifier.height(16.dp))

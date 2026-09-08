@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -25,6 +28,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.ui.BackTopBar
+import com.otakustream.core.ui.EmptyState
 import com.otakustream.core.ui.LoadingState
 import com.otakustream.core.ui.PosterTile
 
@@ -74,11 +78,17 @@ fun AniListSearchScreen(
                         Text(uiState.error!!, color = MaterialTheme.colorScheme.error)
                         OutlinedButton(onClick = viewModel::retry) { Text("Try again") }
                     }
-                    uiState.results.isEmpty() && uiState.query.isBlank() -> CenterMessage(
-                        "Search for an anime to get started.",
+                    uiState.results.isEmpty() && uiState.query.isBlank() -> EmptyState(
+                        icon = Icons.Filled.Search,
+                        title = "Search AniList",
+                        message = "Find a show by name to open its page, your list entry, and " +
+                            "anywhere your installed sources can play it.",
                     )
-                    uiState.results.isEmpty() -> CenterMessage(
-                        "No results for “${uiState.query}”. Try another spelling.",
+                    uiState.results.isEmpty() -> EmptyState(
+                        icon = Icons.Filled.SearchOff,
+                        title = "No results",
+                        message = "Nothing on AniList matches “${uiState.query}”. Try another spelling, " +
+                            "or the romaji title.",
                     )
                     // The shared tile directly, not the rail wrapper: a grid cell decides its own
                     // width, and a tile that forces a rail's 120dp inside a 110dp cell is fighting the
@@ -103,16 +113,5 @@ fun AniListSearchScreen(
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun CenterMessage(text: String) {
-    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize().padding(32.dp)) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }
