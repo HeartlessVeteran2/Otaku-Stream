@@ -18,13 +18,22 @@ import javax.inject.Singleton
 // Rehydrates persisted scripted + Stremio sources into the registry exactly once per process.
 // Previously HomeViewModel and CatalogViewModel each ran this on their own init, doing the DB
 // read/parse twice at startup; centralizing it here runs it a single time and shares the result.
+//
+// An interface for the same reason TrackingManager and EpisodeDownloads are: the implementation
+// reaches three bootstrappers that each read Room and build source engines, so a ViewModel that
+// depends on the concrete class cannot be stood up on a JVM runner at all. Callers see one method
+// and are unaffected; the shape is the one core/database already uses for LibraryRepository.
+interface SourceBootstrapper {
+    suspend fun ensureStarted()
+}
+
 @Singleton
-class SourceBootstrapper @Inject constructor(
+class SourceBootstrapperImpl @Inject constructor(
     private val scriptedBootstrapper: ScriptedSourceBootstrapper,
     private val stremioBootstrapper: StremioAddonBootstrapper,
     private val mangayomiBootstrapper: MangayomiBootstrapper,
     private val sourceRepository: SourceRepository,
-) {
+) : SourceBootstrapper {
     // App-scoped so the work survives the ViewModel that first triggered it.
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mutex = Mutex()
@@ -34,7 +43,7 @@ class SourceBootstrapper @Inject constructor(
     // Suspends until sources are registered — so a caller's first catalog/home load sees them,
     // preserving the old "bootstrap before first use" ordering. Idempotent: concurrent or later
     // callers await the same one-time run.
-    suspend fun ensureStarted() {
+    override suspend fun ensureStarted() {
         val deferred = job ?: mutex.withLock {
             job ?: scope.async { bootstrap() }.also { job = it }
         }

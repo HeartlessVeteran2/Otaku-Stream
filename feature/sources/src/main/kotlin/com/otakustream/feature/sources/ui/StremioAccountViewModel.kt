@@ -9,6 +9,7 @@ import com.otakustream.core.sources.stremio.account.StremioLibraryItem
 import com.otakustream.core.sources.stremio.account.stremioLibraryItemFor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,6 +42,9 @@ class StremioAccountViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(StremioAccountUiState())
     val uiState: StateFlow<StremioAccountUiState> = _uiState.asStateFlow()
+
+    // The in-flight library fetch, so a newer one — or a sign-out — can cancel it.
+    private var libraryJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -81,6 +85,9 @@ class StremioAccountViewModel @Inject constructor(
         // suspending, and the durable wipe runs on the store's own scope, so leaving the screen
         // straight after tapping this can't strand the authKey on disk.
         _uiState.value = _uiState.value.copy(library = emptyList(), message = null, error = null)
+        // A library fetch started before this tap has nothing left to say. The authKey check in
+        // refreshLibrary already stops its response being used; cancelling stops it being made.
+        libraryJob?.cancel()
         viewModelScope.launch {
             // The store reports whether the authKey actually left the disk. Saying "Signed out"
             // when it did not would be the exact lie this change is about: the credential comes
@@ -99,6 +106,14 @@ class StremioAccountViewModel @Inject constructor(
     // Pull-to-refresh. refreshLibrary() is the work; this is the flag that keeps the indicator up
     // for exactly as long as it runs.
     fun refresh() {
+        // Ignored outright while something else is already talking to the account, rather than
+        // queued. A push is a fetch, then a put, then a refresh; a pull landing in the middle of
+        // that starts a second fetch whose response can arrive after the put and overwrite the
+        // pushed library with the state from before it — and whose completion clears isBusy while
+        // the push is still running, re-enabling the button that started it.
+        //
+        // Before the indicator is raised, so a refused pull does not leave one spinning.
+        if (_uiState.value.isBusy) return
         _uiState.value = _uiState.value.copy(isRefreshing = true)
         refreshLibrary()
     }
@@ -112,13 +127,26 @@ class StremioAccountViewModel @Inject constructor(
             return
         }
         _uiState.value = _uiState.value.copy(isBusy = true, error = null)
-        viewModelScope.launch {
+        libraryJob?.cancel()
+        libraryJob = viewModelScope.launch {
             runCatching { accountClient.fetchLibrary(authKey) }
                 .onSuccess { items ->
                     _uiState.value = _uiState.value.copy(
                         isBusy = false,
                         isRefreshing = false,
-                        library = items.filterNot { it.removed }.sortedBy { it.name.lowercase() },
+                        // Only when this response still belongs to the account on screen.
+                        //
+                        // Signing out mid-load and back in as someone else would otherwise land the
+                        // first account's titles in `library` — and the damage does not stop at one
+                        // wrong screen. The sign-in collector below only fetches when `library` is
+                        // empty, so a stale non-empty one means the second account's library is
+                        // never requested at all: the screen sits there showing someone else's
+                        // saves, and "Push my saves" would push against them.
+                        library = if (staleFor(authKey)) {
+                            _uiState.value.library
+                        } else {
+                            items.filterNot { it.removed }.sortedBy { it.name.lowercase() }
+                        },
                     )
                 }
                 .onFailure { failure ->
@@ -126,11 +154,20 @@ class StremioAccountViewModel @Inject constructor(
                     _uiState.value = _uiState.value.copy(
                         isBusy = false,
                         isRefreshing = false,
-                        error = failure.message ?: "Couldn't load your Stremio library.",
+                        // Same test as the success path: an error from the previous account's
+                        // request is not something to show the current one.
+                        error = if (staleFor(authKey)) {
+                            _uiState.value.error
+                        } else {
+                            failure.message ?: "Couldn't load your Stremio library."
+                        },
                     )
                 }
         }
     }
+
+    // Whether a response that was fetched with `authKey` is still about the signed-in account.
+    private fun staleFor(authKey: String): Boolean = accountStore.authKey.value != authKey
 
     // Push every local save that carries a Stremio "type|id" key up to the account library.
     fun pushLocalLibrary() {

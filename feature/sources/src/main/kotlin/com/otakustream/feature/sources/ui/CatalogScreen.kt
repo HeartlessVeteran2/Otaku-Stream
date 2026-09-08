@@ -185,8 +185,14 @@ fun CatalogScreen(
                 modifier = Modifier.fillMaxSize(),
             ) {
                 when {
+                    // Pullable too, which it first-thoughtedly was not: "you cannot refresh what is
+                    // still loading" only holds if the first load is guaranteed to end. It isn't.
+                    // hasLoadedOnce stays false until a search completes, so a source bootstrap
+                    // that hangs, or a fan-out held open by a wedged extension, leaves this branch
+                    // on screen permanently — and it was the one branch with no way out of it. A
+                    // pull here starts a fresh search against whatever is registered now.
                     stillLoadingFirstPage -> {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        PullablePlaceholder {
                             CircularProgressIndicator(color = MaterialTheme.colorScheme.tertiary)
                         }
                     }
