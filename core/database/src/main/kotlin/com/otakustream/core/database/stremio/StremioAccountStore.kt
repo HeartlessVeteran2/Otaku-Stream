@@ -20,18 +20,40 @@ import javax.inject.Singleton
 // authorizes library reads/writes on the user's account), so it lives in EncryptedSharedPreferences
 // like the AniList token — never in Room, never in a plaintext pref. The password is never stored;
 // only the authKey returned by login is kept. Degrades to in-memory if the Keystore is unavailable.
+//
+// An interface for the reason TrackingManager, EpisodeDownloads and SourceBootstrapper are: the
+// implementation opens Keystore-backed EncryptedSharedPreferences from an Android Context, so
+// anything depending on the concrete class cannot be built on a JVM runner. That is not academic
+// here — StremioAccountViewModel has produced five review findings across two rounds, two of them
+// putting one account's data in front of another, and none of them could have been caught by a test.
+//
+// The name stays with the interface and the implementation takes Impl, matching LibraryRepository.
+interface StremioAccountStore {
+    val authKey: StateFlow<String?>
+
+    // val, not var: only this store writes it, and save/clear are how. It is read by the UI to
+    // label "Signed in as …".
+    val email: String?
+
+    fun save(authKey: String, email: String?)
+
+    // Whether the credential is actually gone from disk — see the implementation for why the
+    // answer is returned rather than discarded.
+    suspend fun clear(): Boolean
+}
+
 @Singleton
-class StremioAccountStore @Inject constructor(
+class StremioAccountStoreImpl @Inject constructor(
     @ApplicationContext private val context: Context,
-) {
+) : StremioAccountStore {
     private val prefs by lazy { openEncryptedPrefs(context, PREFS_FILE_NAME) }
 
     // Loaded off the main thread (Keystore derivation + file read) so it can't stall cold start.
     private val _authKey = MutableStateFlow<String?>(null)
-    val authKey: StateFlow<String?> = _authKey.asStateFlow()
+    override val authKey: StateFlow<String?> = _authKey.asStateFlow()
 
     @Volatile
-    var email: String? = null
+    override var email: String? = null
         private set
 
     // Single-threaded, so the initial load, a save and a clear run in call order instead of
@@ -58,7 +80,7 @@ class StremioAccountStore @Inject constructor(
     // the exact failure the counter is here to prevent, through a narrower window.
     private val sessionLock = Any()
 
-    fun save(authKey: String, email: String?) {
+    override fun save(authKey: String, email: String?) {
         synchronized(sessionLock) {
             saves.incrementAndGet()
             this.email = email
@@ -80,7 +102,7 @@ class StremioAccountStore @Inject constructor(
     // EncryptedTokenStore.clear() for the argument in full. Returns whether the authKey is actually
     // gone from disk, rather than discarding commit()'s answer for the one operation where it
     // matters most.
-    suspend fun clear(): Boolean {
+    override suspend fun clear(): Boolean {
         val savesAtClear = synchronized(sessionLock) {
             email = null
             _authKey.value = null

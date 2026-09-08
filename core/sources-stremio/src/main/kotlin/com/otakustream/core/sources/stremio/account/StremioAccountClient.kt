@@ -43,11 +43,22 @@ data class StremioLibraryItem(
 // Talks to Stremio's account API (api.strem.io): logs in for an authKey and reads/writes the user's
 // personal library ("libraryItem" datastore collection). Reuses the app-wide OkHttpClient. Only the
 // authKey is a credential the caller persists — the password is used once here and never stored.
+// An interface so the screen driving it can be tested without a network — see StremioAccountStore
+// for the argument in full. Three methods, which is the whole of what the ViewModel calls; the
+// request building and JSON parsing stay private to the implementation.
+interface StremioAccountClient {
+    suspend fun login(email: String, password: String): StremioAccount
+
+    suspend fun fetchLibrary(authKey: String): List<StremioLibraryItem>
+
+    suspend fun putLibraryItems(authKey: String, items: List<StremioLibraryItem>)
+}
+
 @Singleton
-class StremioAccountClient @Inject constructor(
+class StremioAccountClientImpl @Inject constructor(
     @com.otakustream.core.network.di.AccountHttpClient private val httpClient: OkHttpClient,
-) {
-    suspend fun login(email: String, password: String): StremioAccount = withContext(Dispatchers.IO) {
+) : StremioAccountClient {
+    override suspend fun login(email: String, password: String): StremioAccount = withContext(Dispatchers.IO) {
         val root = post("$API_BASE/login", JSONObject().put("email", email).put("password", password))
         val result = root.optJSONObject("result") ?: error(errorMessage(root) ?: "Stremio login failed")
         val authKey = result.optString("authKey").ifEmpty { error("Stremio login returned no auth key") }
@@ -55,7 +66,7 @@ class StremioAccountClient @Inject constructor(
         StremioAccount(authKey = authKey, email = userEmail)
     }
 
-    suspend fun fetchLibrary(authKey: String): List<StremioLibraryItem> = withContext(Dispatchers.IO) {
+    override suspend fun fetchLibrary(authKey: String): List<StremioLibraryItem> = withContext(Dispatchers.IO) {
         val body = JSONObject().put("authKey", authKey).put("collection", "libraryItem").put("all", true)
         val result = post("$API_BASE/datastoreGet", body).optJSONArray("result") ?: return@withContext emptyList()
         (0 until result.length()).mapNotNull { index ->
@@ -75,7 +86,7 @@ class StremioAccountClient @Inject constructor(
     // Push local saves up to the Stremio account. An item the account already has is re-sent as the
     // server's own document with only `removed` touched; a genuinely new one is built from scratch.
     // libraryItemDocument owns that distinction and explains why it matters.
-    suspend fun putLibraryItems(authKey: String, items: List<StremioLibraryItem>) = withContext(Dispatchers.IO) {
+    override suspend fun putLibraryItems(authKey: String, items: List<StremioLibraryItem>) = withContext(Dispatchers.IO) {
         if (items.isEmpty()) return@withContext
         val now = isoNow()
         // mapNotNull, not map: libraryItemDocument returns null for an existing item whose document
