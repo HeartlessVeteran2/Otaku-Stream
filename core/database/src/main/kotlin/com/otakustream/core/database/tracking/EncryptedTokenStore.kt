@@ -112,7 +112,8 @@ class EncryptedTokenStore @Inject constructor(
             saves.get()
         }
         return ioScope.async {
-            if (saves.get() == savesAtClear) _token.value = null
+            if (saves.get() != savesAtClear) return@async supersededBySignIn()
+            _token.value = null
             runCatching { prefs?.edit()?.remove(KEY_TOKEN)?.commit() }.getOrNull() ?: false
         }.await()
     }
@@ -125,6 +126,19 @@ class EncryptedTokenStore @Inject constructor(
     // revokes a token that was never rejected, and the user is signed out moments after signing in
     // with no explanation at all.
     //
+    // A clear that a sign-in overtook. Neither the in-memory drop nor the disk removal may run:
+    // the drop would discard the credential now in use, and the removal would delete it from disk.
+    //
+    // The removal is the half that is easy to miss, and it is the one that does lasting damage. Its
+    // ordering is not fixed — save() queues its write on this same scope, and depending on which
+    // side of clear()'s async creation the sign-in lands, that write runs either after this body
+    // (so a removal here is overwritten and harmless) or before it (so a removal here deletes the
+    // credential that had just been written). Skipping it covers both.
+    //
+    // Returns true because the credential this was asked to revoke really is gone from disk: the
+    // sign-in writes the same preference keys, so it is overwritten rather than removed.
+    private fun supersededBySignIn(): Boolean = true
+
     // The comparison and the removal are taken under sessionLock, not merely inside the write
     // scope. Being on that scope orders this against other *disk* work, which was the original
     // claim here and is not enough: save() writes memory outside the scope, so a sign-in could land
