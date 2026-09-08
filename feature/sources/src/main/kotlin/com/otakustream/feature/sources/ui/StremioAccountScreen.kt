@@ -37,6 +37,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.core.ui.EmptyState
 import com.otakustream.core.ui.LoadingState
 import com.otakustream.core.ui.PosterTile
+import com.otakustream.core.ui.PullablePlaceholder
+import com.otakustream.core.ui.RefreshableBox
 
 // Sign in to a Stremio account and sync the library. Logged out: email/password. Logged in: your
 // Stremio library (read-only here — it isn't tied to a specific installed add-on) plus a one-tap
@@ -174,37 +176,53 @@ private fun LoggedInContent(uiState: StremioAccountUiState, viewModel: StremioAc
             modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
         )
 
-        when {
-            uiState.isBusy && uiState.library.isEmpty() -> LoadingState()
-            uiState.library.isEmpty() -> EmptyState(
-                icon = Icons.Filled.CloudOff,
-                title = "Nothing in your Stremio library",
-                // Two causes described together on purpose, as the airing schedule's empty state
-                // does: an empty library and a failed fetch are indistinguishable from here, and
-                // picking one would tell half the users something false.
-                message = "Either nothing is saved to it yet, or it couldn't be loaded.",
-            )
-            else -> {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 110.dp),
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
-                ) {
-                    items(uiState.library, key = { it.mediaUrl }) { item ->
-                        // The shared tile, not a fourth hand-rolled one. This grid had drifted to a
-                        // different corner radius, no border and a caption below the poster rather
-                        // than over it, so the same saved library looked like a different app here.
-                        //
-                        PosterTile(
-                            title = item.name,
-                            coverUrl = item.poster,
-                            // Genuinely not tappable, and now says so. An empty lambda would still
-                            // attach clickable: the tile would ripple under a finger, do nothing,
-                            // and be announced to TalkBack as activatable. This screen shows what
-                            // your Stremio account holds, and nothing here knows which installed
-                            // source could play it — as the copy below the grid says.
-                            onClick = null,
-                            modifier = Modifier.padding(8.dp).fillMaxWidth(),
-                        )
+        // Only the library area, and only here — the logged-out half of this screen is a sign-in
+        // form with nothing to reload.
+        RefreshableBox(
+            isRefreshing = uiState.isRefreshing,
+            onRefresh = viewModel::refresh,
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            when {
+                // `!isRefreshing`, so a pull does not replace the library with a spinner while the
+                // pull indicator is already spinning above it. Without it, pulling on an empty
+                // library swaps one loading state for another and says the same thing twice.
+                uiState.isBusy && !uiState.isRefreshing && uiState.library.isEmpty() -> LoadingState()
+                uiState.library.isEmpty() -> PullablePlaceholder {
+                    // Wrapped so the gesture still reaches the box above: this is the state where
+                    // "load it again" is the only thing left to try, and an EmptyState does not
+                    // scroll on its own.
+                    EmptyState(
+                        icon = Icons.Filled.CloudOff,
+                        title = "Nothing in your Stremio library",
+                        // Two causes described together on purpose, as the airing schedule's empty
+                        // state does: an empty library and a failed fetch are indistinguishable
+                        // from here, and picking one would tell half the users something false.
+                        message = "Either nothing is saved to it yet, or it couldn't be loaded.",
+                    )
+                }
+                else -> {
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 110.dp),
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                    ) {
+                        items(uiState.library, key = { it.mediaUrl }) { item ->
+                            // The shared tile, not a fourth hand-rolled one. This grid had drifted
+                            // to a different corner radius, no border and a caption below the poster
+                            // rather than over it, so the same saved library looked like a different
+                            // app here.
+                            PosterTile(
+                                title = item.name,
+                                coverUrl = item.poster,
+                                // Genuinely not tappable, and now says so. An empty lambda would
+                                // still attach clickable: the tile would ripple under a finger, do
+                                // nothing, and be announced to TalkBack as activatable. This screen
+                                // shows what your Stremio account holds, and nothing here knows
+                                // which installed source could play it — as the copy below says.
+                                onClick = null,
+                                modifier = Modifier.padding(8.dp).fillMaxWidth(),
+                            )
+                        }
                     }
                 }
             }

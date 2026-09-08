@@ -37,6 +37,12 @@ data class CatalogUiState(
     val query: String = "",
     val entries: List<CatalogEntry> = emptyList(),
     val isLoading: Boolean = false,
+    // Separate from isLoading, which is also true during the first load and whenever a query or
+    // filter changes. Set only by refresh(), so the pull indicator answers for the pull gesture and
+    // nothing else — and, unlike isLoading, it deliberately does not blank the grid: a pull happens
+    // while you are looking at results, and replacing them with a spinner is a worse answer than
+    // leaving the stale ones up for the second it takes.
+    val isRefreshing: Boolean = false,
     val isLoadingMore: Boolean = false,
     val nextPageBySource: Map<Long, Int> = emptyMap(),
     val exhaustedSources: Set<Long> = emptySet(),
@@ -190,6 +196,21 @@ class CatalogViewModel @Inject constructor(
         startSearch(_uiState.value.query)
     }
 
+    // Pull-to-refresh. The same fan-out retry() runs, with two differences.
+    //
+    // It does not set isLoading, which would swap the grid (or the "No matches" state) for a
+    // full-screen spinner underneath a pull indicator that is already spinning — the same thing
+    // said twice, with the results you were reading taken away to say it.
+    //
+    // It does not clear `failures` either. runSearch overwrites that list with the new run's
+    // outcome, so clearing it up front only makes the banner vanish and reappear for sources that
+    // are still down. retry() clears it because its banner is the thing being tapped; a pull is not
+    // aimed at the banner.
+    fun refresh() {
+        _uiState.value = _uiState.value.copy(isRefreshing = true)
+        startSearch(_uiState.value.query)
+    }
+
     fun dismissSourceError() {
         _uiState.value = _uiState.value.copy(failures = emptyList())
     }
@@ -238,6 +259,11 @@ class CatalogViewModel @Inject constructor(
             // Dedupe by (source, url) — the grid keys on that pair, so duplicates would crash it.
             entries = results.flatMap { it.entries }.distinctBy { it.sourceId to it.media.url },
             isLoading = false,
+            // Cleared by whichever search completes, not only by one refresh() started. Every path
+            // into a fan-out goes through startSearch, which cancels the previous one and launches
+            // a replacement — so a pull superseded by a keystroke has its indicator retired by the
+            // search that replaced it rather than left spinning over a result it never produced.
+            isRefreshing = false,
             hasLoadedOnce = true,
             failures = results.toFailures(_uiState.value.sourceNames),
             nextPageBySource = results.associate { it.sourceId to FIRST_LOAD_MORE_PAGE },

@@ -4,6 +4,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import com.otakustream.core.ui.EmptyState
 import com.otakustream.core.ui.PosterTile
+import com.otakustream.core.ui.PullablePlaceholder
+import com.otakustream.core.ui.RefreshableBox
 import com.otakustream.feature.sources.SourceFailure
 import com.otakustream.feature.sources.allOffline
 import com.otakustream.feature.sources.describe
@@ -174,57 +176,78 @@ fun CatalogScreen(
             }
 
             val stillLoadingFirstPage = uiState.entries.isEmpty() && (uiState.isLoading || !uiState.hasLoadedOnce)
-            when {
-                stillLoadingFirstPage -> {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = MaterialTheme.colorScheme.tertiary)
+            // The pull gesture, over the results area only. Above it sit the search field and the
+            // filter chips, which do not scroll with the grid and must not slide under an
+            // indicator the user is dragging.
+            RefreshableBox(
+                isRefreshing = uiState.isRefreshing,
+                onRefresh = viewModel::refresh,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                when {
+                    stillLoadingFirstPage -> {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = MaterialTheme.colorScheme.tertiary)
+                        }
                     }
-                }
-                uiState.entries.isEmpty() && !uiState.hasAnySources -> {
-                    EmptyState(
-                        icon = Icons.Filled.Extension,
-                        title = "No sources yet",
-                        // Both ecosystems, because offering only one implies the other isn't there.
-                        message = "Install a Stremio add-on or a Mangayomi/AnymeX extension, and " +
-                            "this fills up with things to watch.",
-                        actionLabel = "Browse add-ons",
-                        onAction = onBrowseAddons,
-                        secondaryActionLabel = "Browse extensions",
-                        onSecondaryAction = onBrowseExtensions,
-                    )
-                }
-                uiState.entries.isEmpty() -> {
-                    EmptyState(
-                        icon = Icons.Filled.SearchOff,
-                        title = "No matches",
-                        message = "Nothing here for that search. Try a different title or clear your filters.",
-                    )
-                }
-                else -> {
-                    LazyVerticalGrid(columns = GridCells.Adaptive(minSize = 120.dp), state = gridState) {
-                        items(uiState.entries, key = { "${it.sourceId}:${it.media.url}" }) { entry ->
-                            MediaCard(
-                                title = entry.media.title,
-                                coverUrl = entry.media.coverUrl,
-                                // Only badge the source when browsing All — in a scoped view the
-                                // picker already shows which source you're in.
-                                sourceName = if (uiState.selectedSourceId == null) uiState.sourceNames[entry.sourceId] else null,
-                                saved = entry.media.url in uiState.savedMediaUrls,
-                                onToggleSave = { viewModel.toggleSave(entry) },
-                                onClick = {
-                                    onMediaClick(
-                                        entry.sourceId,
-                                        entry.media.url,
-                                        entry.media.title,
-                                        entry.media.coverUrl,
-                                    )
-                                },
+                    // Both empty states are wrapped, because an empty state is exactly where pulling
+                    // to reload is the only thing left to do — and an EmptyState on its own does not
+                    // scroll, so the gesture would not reach the box above it. PullablePlaceholder
+                    // gives it the scroll container the drag travels through.
+                    uiState.entries.isEmpty() && !uiState.hasAnySources -> {
+                        PullablePlaceholder {
+                            EmptyState(
+                                icon = Icons.Filled.Extension,
+                                title = "No sources yet",
+                                // Both ecosystems, because offering only one implies the other isn't there.
+                                message = "Install a Stremio add-on or a Mangayomi/AnymeX extension, and " +
+                                    "this fills up with things to watch.",
+                                actionLabel = "Browse add-ons",
+                                onAction = onBrowseAddons,
+                                secondaryActionLabel = "Browse extensions",
+                                onSecondaryAction = onBrowseExtensions,
                             )
                         }
-                        if (uiState.isLoadingMore) {
-                            item(span = { GridItemSpan(maxLineSpan) }) {
-                                Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                                    CircularProgressIndicator(color = MaterialTheme.colorScheme.tertiary)
+                    }
+                    uiState.entries.isEmpty() -> {
+                        PullablePlaceholder {
+                            EmptyState(
+                                icon = Icons.Filled.SearchOff,
+                                title = "No matches",
+                                message = "Nothing here for that search. Try a different title or clear your filters.",
+                            )
+                        }
+                    }
+                    else -> {
+                        LazyVerticalGrid(
+                            columns = GridCells.Adaptive(minSize = 120.dp),
+                            state = gridState,
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            items(uiState.entries, key = { "${it.sourceId}:${it.media.url}" }) { entry ->
+                                MediaCard(
+                                    title = entry.media.title,
+                                    coverUrl = entry.media.coverUrl,
+                                    // Only badge the source when browsing All — in a scoped view the
+                                    // picker already shows which source you're in.
+                                    sourceName = if (uiState.selectedSourceId == null) uiState.sourceNames[entry.sourceId] else null,
+                                    saved = entry.media.url in uiState.savedMediaUrls,
+                                    onToggleSave = { viewModel.toggleSave(entry) },
+                                    onClick = {
+                                        onMediaClick(
+                                            entry.sourceId,
+                                            entry.media.url,
+                                            entry.media.title,
+                                            entry.media.coverUrl,
+                                        )
+                                    },
+                                )
+                            }
+                            if (uiState.isLoadingMore) {
+                                item(span = { GridItemSpan(maxLineSpan) }) {
+                                    Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                                        CircularProgressIndicator(color = MaterialTheme.colorScheme.tertiary)
+                                    }
                                 }
                             }
                         }
