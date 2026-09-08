@@ -123,8 +123,11 @@ fun BrowseStremioAddonsScreen(
                             // The unfiltered case should not be reachable at all, and says so rather
                             // than inventing a cause for it.
                             message = if (uiState.filter == AddonFilter.ALL) {
+                                // No "try again" here: the Retry button lives beside the error
+                                // banner, and this block renders only when there is no error — so
+                                // there is nothing on screen for that instruction to point at.
                                 "Nothing to show, which is unexpected — the recommended add-ons ship " +
-                                    "with the app and should always be listed. Try loading again."
+                                    "with the app and should always be listed."
                             } else {
                                 "Nothing in the directory matches this filter. Try “All” above."
                             },

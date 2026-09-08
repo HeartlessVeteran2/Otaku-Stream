@@ -180,8 +180,14 @@ fun MangayomiExtensionsScreen(
                                 "The repositories loaded, but none of them listed an anime extension " +
                                     "this app can run."
                             } else {
-                                "None of the repositories could be reached — see above. Check your " +
-                                    "connection and load again."
+                                // "The ones listed above", not "none of them". unreachableRepos
+                                // carries only the *curated* repos that failed — a custom repo's
+                                // failure goes to customRepoError and never appears there — so the
+                                // others may well have loaded and simply had nothing. Claiming a
+                                // total outage would send the user to check a connection that is
+                                // working.
+                                "The repositories listed above couldn't be reached, and the rest " +
+                                    "had nothing this app can run."
                             },
                         )
                     }
