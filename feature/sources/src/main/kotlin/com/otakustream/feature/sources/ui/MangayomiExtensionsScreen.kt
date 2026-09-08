@@ -180,14 +180,20 @@ fun MangayomiExtensionsScreen(
                                 "The repositories loaded, but none of them listed an anime extension " +
                                     "this app can run."
                             } else {
-                                // "The ones listed above", not "none of them". unreachableRepos
-                                // carries only the *curated* repos that failed — a custom repo's
-                                // failure goes to customRepoError and never appears there — so the
-                                // others may well have loaded and simply had nothing. Claiming a
-                                // total outage would send the user to check a connection that is
-                                // working.
-                                "The repositories listed above couldn't be reached, and the rest " +
-                                    "had nothing this app can run."
+                                // Neither half claims how many loaded, which is the only wording
+                                // that is true in every case this branch covers.
+                                //
+                                // unreachableRepos carries only the *curated* repos that failed — a
+                                // custom repo's failure goes to customRepoError and never appears
+                                // there — so "none could be reached" would send a user with a
+                                // working connection to go and check it. But "and the rest had
+                                // nothing" is equally wrong the other way: when every curated repo
+                                // is unreachable and no custom URL is set, there is no rest, and
+                                // that phrasing tells a genuinely offline user the repos loaded
+                                // fine. "None of the ones that did load" is true whether that is
+                                // several or zero.
+                                "Couldn't reach the repositories listed above, and none of the " +
+                                    "ones that did load listed an anime extension this app can run."
                             },
                         )
                     }
