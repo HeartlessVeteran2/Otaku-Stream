@@ -36,7 +36,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 private const val RAIL_ITEM_CAP = 20
 private const val CONTINUE_WATCHING_CAP = 10
 // Soft cap per source per rail so one slow source can't hold up the whole home fan-out.
-private const val RAIL_FETCH_TIMEOUT_MS = 15_000L
+// internal so the test asserts against the real deadline rather than a copy of it that
+// would go on passing after this one changed.
+internal const val RAIL_FETCH_TIMEOUT_MS = 15_000L
 
 // How long registrations must stay quiet before the rails are rebuilt. Applies to changes after the
 // first snapshot only — long enough to swallow the burst of a multi-catalog add-on registering, short
@@ -212,7 +214,19 @@ class HomeViewModel @Inject constructor(
     private suspend fun awaitRail(perSource: List<Deferred<List<CatalogEntry>?>>): RailResult =
         coroutineScope {
             val results = perSource
-                .map { deferred -> async { withTimeoutOrNull(RAIL_FETCH_TIMEOUT_MS) { deferred.await() } } }
+                .map { deferred ->
+                    async {
+                        // The deadline stops us waiting; the cancel stops the request. Every source
+                        // that cooperates with cancellation — which is every HTTP one, via
+                        // Call.await() — ends there rather than running on to produce a result
+                        // nobody is holding. The ones that do not cooperate are unaffected, and
+                        // they are the reason this scope is detached rather than structured.
+                        withTimeoutOrNull(RAIL_FETCH_TIMEOUT_MS) { deferred.await() } ?: run {
+                            deferred.cancel()
+                            null
+                        }
+                    }
+                }
                 .awaitAll()
             RailResult(
                 // Dedupe by (source, url) before the cap: the rails key on that pair, and a source

@@ -140,7 +140,11 @@ class AniListHomeViewModel @Inject constructor(
     // one thing this coordinator exists to prevent. Each turn moves to a strictly newer job, so it
     // ends as soon as sign-in state settles.
     private suspend fun joinPersonal(started: Job?) {
-        var awaited = started
+        // Seeded from listJob when the pull started nothing of its own. A pull that begins while
+        // signed out has no personal load — but a sign-in completing while discovery is still going
+        // creates one through the observer, and the indicator should wait for that too rather than
+        // stopping on a screen that is still filling in.
+        var awaited = started ?: listJob?.takeIf { it.isActive }
         while (awaited != null) {
             awaited.join()
             val current = listJob
@@ -205,6 +209,15 @@ class AniListHomeViewModel @Inject constructor(
                 val viewer = aniListClient.fetchViewer(token)
                 aniListClient.fetchUserAnimeLists(token, viewer.id)
             }.onSuccess { entries ->
+                // Discarded if the account changed while this was in flight. refresh() reads the
+                // token and then suspends before reaching this load, so a sign-out landing in that
+                // window would otherwise have this request repopulate — with the previous account's
+                // list — the very rails the sign-out had just cleared.
+                //
+                // Read fresh rather than compared against an observed field: the observer is a
+                // frame behind by construction, and this is the check that decides whether someone
+                // else's watch list goes on screen.
+                if (readToken() != token) return@onSuccess
                 // Only the actively-watching buckets belong in a "continue" rail; most-progress first.
                 val inProgress = entries
                     .filter { it.status == "CURRENT" || it.status == "REPEATING" }

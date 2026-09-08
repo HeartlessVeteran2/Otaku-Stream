@@ -193,7 +193,14 @@ fun CatalogScreen(
                     // pull here starts a fresh search against whatever is registered now.
                     stillLoadingFirstPage -> {
                         PullablePlaceholder {
-                            CircularProgressIndicator(color = MaterialTheme.colorScheme.tertiary)
+                            // Not while a pull is running. refresh() deliberately leaves isLoading
+                            // alone, so this branch stays selected for the whole gesture — and the
+                            // pull indicator is already spinning directly above this spot. Two
+                            // spinners stacked on each other, saying the same thing, is exactly
+                            // what the rest of this change is at pains to avoid.
+                            if (!uiState.isRefreshing) {
+                                CircularProgressIndicator(color = MaterialTheme.colorScheme.tertiary)
+                            }
                         }
                     }
                     // Both empty states are wrapped, because an empty state is exactly where pulling

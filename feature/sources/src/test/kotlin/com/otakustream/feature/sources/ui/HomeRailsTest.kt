@@ -114,7 +114,7 @@ class HomeRailsTest {
         // Deliberately one tick short. advanceTimeBy stops *at* the target without running what is
         // scheduled there, but the runCurrent that follows does run it — so advancing the full
         // deadline here would fire the timeout and assert the opposite of what it says.
-        advanceTimeBy(RAIL_DEADLINE_MS - 1)
+        advanceTimeBy(RAIL_FETCH_TIMEOUT_MS - 1)
         runCurrent()
         assertTrue(
             "still waiting on the hung source right up to the deadline",
@@ -195,10 +195,5 @@ class HomeRailsTest {
         override suspend fun removeHistoryEntryAndReturn(id: Long): RemovedHistoryEntry? = null
         override suspend fun restoreHistoryEntry(removed: RemovedHistoryEntry): Boolean = false
         override suspend fun clearHistory() = Unit
-    }
-
-    private companion object {
-        // Mirrors RAIL_FETCH_TIMEOUT_MS, which is private to HomeViewModel.
-        const val RAIL_DEADLINE_MS = 15_000L
     }
 }
