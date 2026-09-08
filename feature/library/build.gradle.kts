@@ -29,6 +29,9 @@ android {
 }
 
 dependencies {
+    // IoDispatcher, so the ViewModel's flowOn is substitutable in tests.
+    implementation(project(":core:common"))
+
     implementation(project(":core:ui"))
     implementation(project(":core:database"))
     implementation(project(":core:download"))

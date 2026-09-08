@@ -13,7 +13,8 @@ import com.otakustream.core.database.library.WatchHistoryEntry
 import com.otakustream.core.sources.api.UiMessages
 import com.otakustream.feature.tracking.TrackingManager
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Dispatchers
+import com.otakustream.core.common.IoDispatcher
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -66,6 +67,8 @@ class LibraryViewModel @Inject constructor(
     private val trackingManager: TrackingManager,
     private val downloadRepository: DownloadRepository,
     private val episodeDownloads: EpisodeDownloads,
+    // Injected so a test can make the combine below deterministic. See IoDispatcher.
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : ViewModel() {
 
     // Keyed by the video url that failed, not a single string.
@@ -106,7 +109,7 @@ class LibraryViewModel @Inject constructor(
         // The combine body walks Media3's download index, which is a synchronous SQLite read, and it
         // runs on every progress callback — several a second during a download. On the collector's
         // default dispatcher that is a database read on the main thread, once per tick.
-        .flowOn(Dispatchers.IO)
+        .flowOn(ioDispatcher)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState())
 
     // No undo here, and that is the point: this deletes the file's bytes. Offering "Undo" for

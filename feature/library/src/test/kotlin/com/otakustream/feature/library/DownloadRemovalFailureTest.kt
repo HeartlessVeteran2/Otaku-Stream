@@ -10,9 +10,7 @@ import com.otakustream.core.download.DownloadProgress
 import com.otakustream.core.download.EpisodeDownloads
 import com.otakustream.feature.tracking.TrackingManager
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -75,10 +73,10 @@ class DownloadRemovalFailureTest {
         val downloads = FakeDownloadRepository(listOf(stubborn, cooperative))
         // Only the first url refuses to confirm.
         val episodes = FakeEpisodeDownloads(refuseRemovalOf = setOf(stubborn.videoUrl))
-        val viewModel = LibraryViewModel(FakeLibraryRepository(), NoopTracking, downloads, episodes)
+        val viewModel = LibraryViewModel(FakeLibraryRepository(), NoopTracking, downloads, episodes, dispatcher)
 
         viewModel.removeDownload(DownloadRow(stubborn, progress = null))
-        val afterFailure = errorAfter(viewModel) { it != null }
+        val afterFailure = errorAfter(viewModel)
         assertNotNull("the failure must be reported", afterFailure)
         assertTrue(
             "the message must name the row that failed, got: $afterFailure",
@@ -91,7 +89,7 @@ class DownloadRemovalFailureTest {
         assertEquals(
             "the second row's success erased the first row's failure",
             afterFailure,
-            errorAfter(viewModel) { it != null },
+            errorAfter(viewModel),
         )
     }
 
@@ -102,17 +100,17 @@ class DownloadRemovalFailureTest {
         val row = entry("https://host/a.mp4", "Frieren")
         val downloads = FakeDownloadRepository(listOf(row))
         val episodes = FakeEpisodeDownloads(refuseRemovalOf = setOf(row.videoUrl))
-        val viewModel = LibraryViewModel(FakeLibraryRepository(), NoopTracking, downloads, episodes)
+        val viewModel = LibraryViewModel(FakeLibraryRepository(), NoopTracking, downloads, episodes, dispatcher)
 
         viewModel.removeDownload(DownloadRow(row, progress = null))
-        assertNotNull(errorAfter(viewModel) { it != null })
+        assertNotNull(errorAfter(viewModel))
 
         episodes.refuseRemovalOf = emptySet()
         viewModel.removeDownload(DownloadRow(row, progress = null))
 
         assertNull(
             "the message outlived the download it was about",
-            errorAfter(viewModel) { it == null },
+            errorAfter(viewModel),
         )
     }
 
@@ -123,12 +121,12 @@ class DownloadRemovalFailureTest {
         val second = entry("https://host/b.mp4", "Dandadan")
         val downloads = FakeDownloadRepository(listOf(first, second))
         val episodes = FakeEpisodeDownloads(refuseRemovalOf = setOf(first.videoUrl, second.videoUrl))
-        val viewModel = LibraryViewModel(FakeLibraryRepository(), NoopTracking, downloads, episodes)
+        val viewModel = LibraryViewModel(FakeLibraryRepository(), NoopTracking, downloads, episodes, dispatcher)
 
         viewModel.removeDownload(DownloadRow(first, progress = null))
         viewModel.removeDownload(DownloadRow(second, progress = null))
 
-        val message = errorAfter(viewModel) { it?.contains("2") == true }
+        val message = errorAfter(viewModel)
         assertNotNull(message)
         assertTrue("expected a count, got: $message", message!!.contains("2"))
     }
@@ -141,7 +139,7 @@ class DownloadRemovalFailureTest {
         val row = entry("https://host/a.mp4", "Frieren")
         val downloads = FakeDownloadRepository(listOf(row))
         val episodes = FakeEpisodeDownloads(refuseRemovalOf = setOf(row.videoUrl))
-        val viewModel = LibraryViewModel(FakeLibraryRepository(), NoopTracking, downloads, episodes)
+        val viewModel = LibraryViewModel(FakeLibraryRepository(), NoopTracking, downloads, episodes, dispatcher)
 
         viewModel.removeDownload(DownloadRow(row, progress = null))
         advanceUntilIdle()
@@ -150,26 +148,17 @@ class DownloadRemovalFailureTest {
     }
 
     // uiState is stateIn(WhileSubscribed), so with nothing collecting it never leaves its initial
-    // value — and its combine body is flowOn(Dispatchers.IO), which virtual time does not control.
-    // So: hold a subscription open for the life of the test, then alternate draining the test
-    // dispatcher with a real pause until the expected value arrives.
-    private suspend fun TestScope.errorAfter(
-        viewModel: LibraryViewModel,
-        expected: (String?) -> Boolean,
-    ): String? {
+    // value. Holding a subscription open is what makes it produce at all.
+    //
+    // No waiting beyond that: the ViewModel's flowOn takes the dispatcher this test supplies, so
+    // advanceUntilIdle() drains the combine too. The first version of this helper polled the state
+    // for two real seconds because the flowOn was hardcoded to Dispatchers.IO — which passes on a
+    // quiet runner and fails on a busy one, and a test that fails for that reason is worse than no
+    // test, because the failure looks like a bug in the code it covers.
+    private fun TestScope.errorAfter(viewModel: LibraryViewModel): String? {
         backgroundScope.launch { viewModel.uiState.collect {} }
-        repeat(POLLS) {
-            advanceUntilIdle()
-            if (expected(viewModel.uiState.value.downloadError)) return viewModel.uiState.value.downloadError
-            withContext(Dispatchers.Default) { delay(POLL_MS) }
-        }
         advanceUntilIdle()
         return viewModel.uiState.value.downloadError
-    }
-
-    private companion object {
-        const val POLLS = 200
-        const val POLL_MS = 10L
     }
 }
 

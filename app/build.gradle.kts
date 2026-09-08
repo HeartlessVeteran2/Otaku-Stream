@@ -70,6 +70,8 @@ android {
 }
 
 dependencies {
+    // For the @IoDispatcher qualifier that DispatcherModule satisfies.
+    implementation(project(":core:common"))
     implementation(project(":core:player"))
     implementation(project(":core:network"))
     implementation(project(":core:download"))
