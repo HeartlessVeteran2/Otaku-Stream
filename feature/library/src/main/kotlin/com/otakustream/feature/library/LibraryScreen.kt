@@ -25,7 +25,6 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.VideoFile
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.History
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material.icons.filled.Check
@@ -416,21 +415,17 @@ private fun HistoryTab(
     // — the rows themselves came from playback, and nothing rebuilds them.
     var confirmingClear by remember { mutableStateOf(false) }
     if (confirmingClear) {
-        AlertDialog(
-            onDismissRequest = { confirmingClear = false },
-            title = { Text("Clear watch history?") },
-            text = { Text("This removes every entry, including your Continue Watching row. It can't be undone.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmingClear = false
-                        viewModel.clearHistory()
-                    },
-                ) { Text("Clear") }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmingClear = false }) { Text("Cancel") }
-            },
+        // ConfirmDialog, not a hand-rolled AlertDialog. The shared one tints its confirm button
+        // with colorScheme.error, which this dialog was missing — so the single irreversible action
+        // on this screen looked exactly like Cancel, in the one place the difference matters. It is
+        // also where the app's rule about destructive actions is written down, and every other
+        // "are you sure" in the app already goes through it.
+        ConfirmDialog(
+            title = "Clear watch history?",
+            body = "This removes every entry, including your Continue Watching row. It can't be undone.",
+            confirmLabel = "Clear",
+            onConfirm = viewModel::clearHistory,
+            onDismiss = { confirmingClear = false },
         )
     }
 
