@@ -702,6 +702,20 @@ class PlayerController @Inject constructor(
             currentMediaItem = mediaItem
             currentDataSourceFactory = dataSourceFactory
 
+            // Held back across the prepare, then released once the speed is set.
+            //
+            // playWhenReady is sticky: it survives setMediaSource, so on the second video of a
+            // session — auto-play next, or anything started while the previous episode was playing
+            // — it is *already* true when prepare() runs. A downloaded episode or a warm cache can
+            // reach the ready state immediately, and the video then plays its opening moments at
+            // whatever rate the last one was using, a held temporary speed boost included, before
+            // snapping to the right one. Clearing it first makes "prepared" and "playing" two
+            // separate steps with the speed applied in between.
+            //
+            // Only the first video of a session would have been caught by ordering the await alone:
+            // that is the one where playWhenReady starts false and the placeholder is still in the
+            // prefs. Both cases end up in the same place here.
+            player.playWhenReady = false
             player.setMediaSource(mediaSource, resumeMs)
             player.prepare()
 
@@ -710,12 +724,6 @@ class PlayerController @Inject constructor(
             // Awaited rather than read: the prefs load off the main thread, so on the first video of
             // a session `.value` is still the 1x placeholder and the user's saved speed is lost on
             // exactly the video they opened the app to watch.
-            //
-            // And awaited *before* playWhenReady, not after. A downloaded episode or a warm cache
-            // can reach the ready state inside the microseconds the await costs, so setting the
-            // speed afterwards let the first moment of the video play at the wrong rate and then
-            // visibly snap. The load happens once per process and is over long before the second
-            // video, so the cost of ordering it this way is a frame on the first one, at most.
             val defaultSpeed = playerSettingsPrefs.awaitDefaultSpeed()
             player.setPlaybackSpeed(defaultSpeed)
             _uiState.value = _uiState.value.copy(playbackSpeed = defaultSpeed)

@@ -373,8 +373,13 @@ class MediaDetailsViewModel @Inject constructor(
         viewModelScope.launch { clearDownloadsFor(episode.url) }
     }
 
-    // Episode urls whose download removal did not complete. Confined to viewModelScope's main
-    // dispatcher, which is where every caller of clearDownloadsFor runs.
+    // Episode urls whose download removal did not complete.
+    //
+    // Read and written only on viewModelScope's main dispatcher, which is where every caller of
+    // clearDownloadsFor runs — so each individual mutation is atomic against the others. That is
+    // *not* the same as the set being safe to iterate: clearDownloadsFor suspends, so two calls
+    // interleave, and anything that walks this set across a suspension point has to walk a
+    // snapshot. See the reconciliation below.
     private val unconfirmedRemovals = mutableSetOf<String>()
 
     // Returns whether every row for this episode is confirmed gone, because one caller has to
@@ -412,14 +417,24 @@ class MediaDetailsViewModel @Inject constructor(
         // naming it is not, and this screen renders it as plain text with no Retry and no dismiss —
         // so it would sit there pointing at a download that no longer exists until the user happened
         // to cancel that exact episode again. Anything with no rows left has nothing to report.
-        val stillStranded = unconfirmedRemovals.filter { url ->
-            runCatchingCancellable { downloadRepository.entriesForEpisode(url).isNotEmpty() }
-                // A lookup that failed says nothing about whether the file is there, so the message
-                // stays: dropping it on a database hiccup is the one direction that loses
-                // information the user needs.
-                .getOrDefault(true)
+        //
+        // Over a snapshot, and removing only what this call confirmed. The first version filtered
+        // the live set with a suspending predicate, which is two bugs: the iterator is fail-fast, so
+        // a second clearDownloadsFor mutating the set while this one was parked on a Room query
+        // threw ConcurrentModificationException; and `retainAll` of the surviving list would have
+        // dropped a url that other call had just added, erasing the message for an episode that was
+        // genuinely still stranded.
+        val toCheck = unconfirmedRemovals.toList()
+        val confirmedGone = mutableListOf<String>()
+        for (url in toCheck) {
+            // A lookup that failed says nothing about whether the file is there, so the message
+            // stays: dropping it on a database hiccup is the one direction that loses information
+            // the user needs. Hence isEmpty() with a `false` default rather than the inverse.
+            val gone = runCatchingCancellable { downloadRepository.entriesForEpisode(url).isEmpty() }
+                .getOrDefault(false)
+            if (gone) confirmedGone += url
         }
-        unconfirmedRemovals.retainAll(stillStranded.toSet())
+        unconfirmedRemovals -= confirmedGone.toSet()
         // Its own field, not `error`.
         //
         // `error` is the details *loader's* failure, and the screen renders a Retry beside it that

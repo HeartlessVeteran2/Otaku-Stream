@@ -139,17 +139,24 @@ class SubtitleStylePrefs @Inject constructor(@ApplicationContext context: Contex
         }
     }
 
-    // Writes any pending debounced change immediately, for a screen that is being destroyed and
-    // would otherwise leave the change to a timer that a process death could beat.
+    // Writes any pending debounced change immediately, for a screen being destroyed that would
+    // otherwise leave the change to a timer a process death could beat.
     //
-    // The write goes onto the same single-threaded scope as the debounce rather than running here,
-    // which is what makes it safe to call from anywhere. Cancelling a job that has already passed
-    // its delay does nothing — it is inside write() by then — so a flush that wrote inline would be
-    // a second writer on a second thread. Queued, it is simply the next write on the one thread
-    // that does them, and it writes _style.value, so whichever order they land in the file ends up
-    // holding the newest style.
+    // Inline, not queued — and that distinction is the whole point of the method. Queuing it onto
+    // the store's own scope returns before the write has run, which leaves exactly the window this
+    // exists to close: onCleared() finishes, the process is killed, and the last slider adjustment
+    // is gone. Running it here means the value is in SharedPreferences' in-memory map before this
+    // returns, and its disk flush is then Android's to finish on QueuedWork, which the framework
+    // drains on the way down.
     //
-    // Nothing is queued when no change is pending: saveJob is null before the first set and again
+    // The reason inline is safe is that both writers write the same thing. Cancelling a debounced
+    // job that has already passed its delay does nothing — it is inside write() by then — so this
+    // can genuinely run alongside it. But that job writes `_style.value` too, not a style captured
+    // when it was scheduled, so the two write identical content in either order. SharedPreferences
+    // is itself thread-safe, so concurrent apply() calls are fine; what would not be fine is two
+    // writers with *different* values, and there is no way to produce that here.
+    //
+    // Nothing is written when no change is pending: saveJob is null before the first set and again
     // after each debounce completes, so an onCleared() on a screen where nothing was adjusted does
     // not rewrite the file.
     fun flush() {
@@ -158,7 +165,7 @@ class SubtitleStylePrefs @Inject constructor(@ApplicationContext context: Contex
             job.cancel()
             saveJob = null
         }
-        scope.launch { runCatching { write(_style.value) } }
+        runCatching { write(_style.value) }
     }
 
     private fun read(): SubtitleStyle {

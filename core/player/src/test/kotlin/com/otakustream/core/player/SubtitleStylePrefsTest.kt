@@ -88,12 +88,16 @@ class SubtitleStylePrefsTest {
     fun `an edit made during the load is not overwritten by it`() {
         prefsFile().edit().putFloat("text_scale", 0.6f).commit()
         repeat(REPEATS) { attempt ->
+            // A different scale each iteration, which matters for settle() below: polling the file
+            // for a value the *previous* iteration already wrote would return immediately and prove
+            // nothing about this one.
+            val scale = 1.9f - attempt * 0.01f
             val prefs = SubtitleStylePrefs(context)
-            prefs.set(SubtitleStyle(textScale = 1.9f))
+            prefs.set(SubtitleStyle(textScale = scale))
             prefs.loadedStyle()
             assertEquals(
                 "attempt $attempt: the load put the file's value back over the user's",
-                1.9f,
+                scale,
                 prefs.style.value.textScale,
                 0f,
             )
@@ -102,7 +106,7 @@ class SubtitleStylePrefsTest {
             // Each `set` above arms a debounced write on that instance's *own* app-lifetime scope,
             // and every instance writes the same shared file. Left alone, fifty of them would fire
             // a few hundred milliseconds later — during whichever test ran next — and drop a stale
-            // 1.9 into the file that test was asserting on. The suite would fail somewhere else,
+            // value into the file that test was asserting on. The suite would fail somewhere else,
             // intermittently, with nothing pointing back here.
             prefs.settle()
         }
@@ -169,13 +173,19 @@ class SubtitleStylePrefsTest {
 
     // Runs a pending debounced write to completion, so no instance this test built is still holding
     // a timer over the shared preferences file when the test returns.
+    //
+    // flush() writes inline, so by the time it returns SharedPreferences already holds this
+    // instance's value and its own job is cancelled — there is nothing left to fire later. The
+    // assertion is the check: if the file does not hold what this instance last set, the write did
+    // not happen and every later test in this class is standing on sand.
     private fun SubtitleStylePrefs.settle() {
         flush()
-        var waited = 0L
-        while (prefsFile().getFloat("text_scale", -1f) != style.value.textScale && waited < TIMEOUT_MS) {
-            Thread.sleep(POLL_MS)
-            waited += POLL_MS
-        }
+        assertEquals(
+            "flush() did not write; a later test would see this instance's value appear under it",
+            style.value.textScale,
+            prefsFile().getFloat("text_scale", -1f),
+            0f,
+        )
     }
 
     private companion object {
