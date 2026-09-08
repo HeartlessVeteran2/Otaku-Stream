@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.FormatColorText
@@ -49,20 +51,26 @@ fun TrackSelectionSheet(
             // Always visible — even with no embedded/addon tracks, the user can load a file.
             Text(text = "Subtitles", style = MaterialTheme.typography.titleMedium)
             if (uiState.subtitleTracks.isNotEmpty()) {
-                TrackRow(
-                    label = "Off",
-                    isSelected = !uiState.subtitlesEnabled,
-                    onClick = { onSubtitlesEnabledChange(false) },
-                )
-                uiState.subtitleTracks.forEach { track ->
+                // "Off" is inside the group, not above it: it is one of the mutually exclusive
+                // choices — turning subtitles off is picking an option, not leaving the set — so a
+                // screen reader has to count it. Excluded, the group would announce one fewer
+                // option than it has and the state the user is actually in would not be in it.
+                Column(modifier = Modifier.selectableGroup()) {
                     TrackRow(
-                        label = track.label,
-                        isSelected = uiState.subtitlesEnabled && track.isSelected,
-                        onClick = {
-                            onSubtitlesEnabledChange(true)
-                            onSelectSubtitle(track)
-                        },
+                        label = "Off",
+                        isSelected = !uiState.subtitlesEnabled,
+                        onClick = { onSubtitlesEnabledChange(false) },
                     )
+                    uiState.subtitleTracks.forEach { track ->
+                        TrackRow(
+                            label = track.label,
+                            isSelected = uiState.subtitlesEnabled && track.isSelected,
+                            onClick = {
+                                onSubtitlesEnabledChange(true)
+                                onSelectSubtitle(track)
+                            },
+                        )
+                    }
                 }
             }
             Row(
@@ -124,21 +132,36 @@ fun TrackSelectionSheet(
 @Composable
 private fun TrackSection(title: String, tracks: List<TrackInfo>, onSelect: (TrackInfo) -> Unit) {
     Text(text = title, style = MaterialTheme.typography.titleMedium)
-    tracks.forEach { track ->
-        TrackRow(label = track.label, isSelected = track.isSelected, onClick = { onSelect(track) })
+    // selectableGroup, so the rows are a radio *group* and not three unrelated radio buttons that
+    // happen to sit together. It is what makes TalkBack say "2 of 5" as you move through them, and
+    // what tells it only one can be chosen. Marking the rows selectable without it says each row is
+    // a radio button and nothing about what it belongs to.
+    //
+    // Around the rows only, not the heading: the heading is not one of the choices.
+    Column(modifier = Modifier.selectableGroup()) {
+        tracks.forEach { track ->
+            TrackRow(label = track.label, isSelected = track.isSelected, onClick = { onSelect(track) })
+        }
     }
 }
 
 @Composable
 private fun TrackRow(label: String, isSelected: Boolean, onClick: () -> Unit) {
     Row(
+        // selectable, not clickable — this is one of a set and TalkBack should say so, announcing
+        // "selected" for the active track rather than leaving the user to infer it from a radio
+        // button they cannot see.
+        //
+        // The whole row is the target and the RadioButton's own onClick is null. Two tappable nodes
+        // for one choice is what the previous version had: TalkBack stopped on the row and again on
+        // the button, read the label once and nothing the second time, and both did the same thing.
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .selectable(selected = isSelected, role = Role.RadioButton, onClick = onClick)
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RadioButton(selected = isSelected, onClick = onClick)
+        RadioButton(selected = isSelected, onClick = null)
         Text(text = label)
     }
 }

@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
@@ -55,7 +56,7 @@ fun PosterTile(
             .aspectRatio(POSTER_ASPECT)
             .clip(shape)
             .border(1.dp, MaterialTheme.colorScheme.outline, shape)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
             // One accessible node for the whole tile. Without this a tile is three: the poster, the
             // title, and the subtitle — so TalkBack read every rail entry's title twice (the image
             // was labelled with it, and so was the caption underneath) and then read "Ep 5/12" as a

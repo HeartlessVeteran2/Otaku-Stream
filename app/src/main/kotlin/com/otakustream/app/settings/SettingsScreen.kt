@@ -27,6 +27,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.otakustream.app.ui.theme.AppearanceViewModel
@@ -52,7 +53,7 @@ fun SettingsScreen(
         ListItem(
             headlineContent = { Text("Sources") },
             supportingContent = { Text("Find and manage your sources") },
-            modifier = Modifier.clickable(onClick = onSourcesClick),
+            modifier = Modifier.clickable(role = Role.Button, onClick = onSourcesClick),
         )
 
         SectionHeader("Playback")
@@ -62,7 +63,7 @@ fun SettingsScreen(
             // findable: every one of these lived inside the player's own menus, reachable only
             // while something was already playing.
             supportingContent = { Text("Skip intros, seek step, default speed, subtitle style") },
-            modifier = Modifier.clickable(onClick = onPlaybackClick),
+            modifier = Modifier.clickable(role = Role.Button, onClick = onPlaybackClick),
         )
 
         SectionHeader("Appearance")
@@ -72,12 +73,12 @@ fun SettingsScreen(
         ListItem(
             headlineContent = { Text("AniList tracking") },
             supportingContent = { Text("Sync watch progress to your AniList account") },
-            modifier = Modifier.clickable(onClick = onTrackingClick),
+            modifier = Modifier.clickable(role = Role.Button, onClick = onTrackingClick),
         )
         ListItem(
             headlineContent = { Text("Stremio account") },
             supportingContent = { Text("Sign in to sync your Stremio library") },
-            modifier = Modifier.clickable(onClick = onStremioAccountClick),
+            modifier = Modifier.clickable(role = Role.Button, onClick = onStremioAccountClick),
         )
 
         SectionHeader("Advanced")
