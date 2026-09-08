@@ -112,14 +112,19 @@ fun BrowseStremioAddonsScreen(
                         EmptyState(
                             icon = Icons.Filled.SearchOff,
                             title = "No add-ons to show",
-                            // Two causes, and the message has to name the right one. The recommended
-                            // add-ons are not a separate list to fall back to — they are the head of
-                            // this same list, so "the recommended list below" would point at nothing.
-                            // And with a filter set, the far likelier cause is that the filter matched
-                            // nothing rather than that every directory is down.
+                            // An outage cannot produce this state, so the copy must not describe
+                            // one. RecommendedAddons.listings is bundled with the app and merged
+                            // unconditionally, so a network failure empties the *fetched* lists and
+                            // sets builtInListError — which populates `error`, and this block only
+                            // renders when `error == null`. What is left is the filter: the
+                            // recommended add-ons are all STREAMS, so choosing Catalogs or Subtitles
+                            // while the fetched lists are unavailable really can match nothing.
+                            //
+                            // The unfiltered case should not be reachable at all, and says so rather
+                            // than inventing a cause for it.
                             message = if (uiState.filter == AddonFilter.ALL) {
-                                "Nothing came back from the directories this time. Check your " +
-                                    "connection and reload."
+                                "Nothing to show, which is unexpected — the recommended add-ons ship " +
+                                    "with the app and should always be listed. Try loading again."
                             } else {
                                 "Nothing in the directory matches this filter. Try “All” above."
                             },
