@@ -444,7 +444,7 @@ fun MediaDetailsScreen(
                             }
                         }
                     },
-                    modifier = Modifier.clickable(enabled = rowEnabled) {
+                    modifier = Modifier.clickable(enabled = rowEnabled, role = Role.Button) {
                         viewModel.playEpisode(sourceId, episode)
                     },
                 )

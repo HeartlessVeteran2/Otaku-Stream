@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.FormatColorText
@@ -132,13 +133,20 @@ private fun TrackSection(title: String, tracks: List<TrackInfo>, onSelect: (Trac
 @Composable
 private fun TrackRow(label: String, isSelected: Boolean, onClick: () -> Unit) {
     Row(
+        // selectable, not clickable — this is one of a set and TalkBack should say so, announcing
+        // "selected" for the active track rather than leaving the user to infer it from a radio
+        // button they cannot see.
+        //
+        // The whole row is the target and the RadioButton's own onClick is null. Two tappable nodes
+        // for one choice is what the previous version had: TalkBack stopped on the row and again on
+        // the button, read the label once and nothing the second time, and both did the same thing.
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick)
+            .selectable(selected = isSelected, role = Role.RadioButton, onClick = onClick)
             .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RadioButton(selected = isSelected, onClick = onClick)
+        RadioButton(selected = isSelected, onClick = null)
         Text(text = label)
     }
 }

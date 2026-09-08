@@ -12,6 +12,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import com.otakustream.core.ui.BackTopBar
 import com.otakustream.core.ui.SectionHeader
 
@@ -44,19 +45,19 @@ fun SourcesScreen(
             ListItem(
                 headlineContent = { Text("Add-on directory") },
                 supportingContent = { Text("Browse Stremio add-ons that fill your catalog") },
-                modifier = Modifier.clickable(onClick = onBrowseAddons),
+                modifier = Modifier.clickable(role = Role.Button, onClick = onBrowseAddons),
             )
             ListItem(
                 headlineContent = { Text("Source directory") },
                 supportingContent = { Text("One-tap install from a curated directory") },
-                modifier = Modifier.clickable(onClick = onBrowseInstallableSources),
+                modifier = Modifier.clickable(role = Role.Button, onClick = onBrowseInstallableSources),
             )
 
             SectionHeader("Installed")
             ListItem(
                 headlineContent = { Text("Add-ons") },
                 supportingContent = { Text("Enable, reorder, or remove installed Stremio add-ons") },
-                modifier = Modifier.clickable(onClick = onManageAddons),
+                modifier = Modifier.clickable(role = Role.Button, onClick = onManageAddons),
             )
             ListItem(
                 headlineContent = { Text("Extensions") },
@@ -65,12 +66,12 @@ fun SourcesScreen(
                 // which is what most people mean by "anime extensions" — cannot be loaded here at
                 // all. Different ecosystem, many of the same sites.
                 supportingContent = { Text("JavaScript extensions from AnymeX/Mangayomi repos (not Aniyomi .apk files)") },
-                modifier = Modifier.clickable(onClick = onAnymexExtensions),
+                modifier = Modifier.clickable(role = Role.Button, onClick = onAnymexExtensions),
             )
             ListItem(
                 headlineContent = { Text("Custom sources") },
                 supportingContent = { Text("Advanced: add script-based sources by link") },
-                modifier = Modifier.clickable(onClick = onCustomSources),
+                modifier = Modifier.clickable(role = Role.Button, onClick = onCustomSources),
             )
         }
     }
