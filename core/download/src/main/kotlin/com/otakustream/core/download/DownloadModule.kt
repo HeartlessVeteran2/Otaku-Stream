@@ -9,6 +9,7 @@ import androidx.media3.exoplayer.offline.DefaultDownloadIndex
 import androidx.media3.exoplayer.offline.DownloadManager
 import androidx.media3.exoplayer.offline.DownloaderFactory
 import androidx.media3.exoplayer.offline.DefaultDownloaderFactory
+import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -62,6 +63,17 @@ object DownloadModule {
             maxParallelDownloads = 1
         }
     }
+}
+
+// Binds the interface the ViewModels depend on to the Media3-backed implementation. Separate from
+// the @Provides module above because @Binds and @Provides cannot share one object.
+@Module
+@InstallIn(SingletonComponent::class)
+abstract class EpisodeDownloadsModule {
+
+    @Binds
+    @Singleton
+    abstract fun bindEpisodeDownloads(impl: EpisodeDownloadsImpl): EpisodeDownloads
 }
 
 // Segment fetches within a single HLS download; unrelated to how many downloads run at once.

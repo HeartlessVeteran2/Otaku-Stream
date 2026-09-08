@@ -29,6 +29,12 @@ dependencies {
     // integration, and exposing -android would push it onto every consumer of this module.
     api(libs.kotlinx.coroutines.core)
 
+    // For @Qualifier on IoDispatcher, and nothing else — no Hilt gradle plugin, no kapt. This
+    // module declares no @Module: one here would need the Hilt processor to emit the aggregation
+    // metadata the app reads, and that processor is the cost this file's other choices are about
+    // avoiding. The binding that satisfies the qualifier lives in the app module instead.
+    implementation(libs.hilt.android)
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     // Real org.json for JVM unit tests — the stub android.jar throws "not mocked", which would make
