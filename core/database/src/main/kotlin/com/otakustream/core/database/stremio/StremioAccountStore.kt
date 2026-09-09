@@ -2,9 +2,10 @@ package com.otakustream.core.database.stremio
 
 import android.content.Context
 import com.otakustream.core.database.security.openEncryptedPrefs
+import com.otakustream.core.common.IoDispatcher
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.SupervisorJob
@@ -45,6 +46,10 @@ interface StremioAccountStore {
 @Singleton
 class StremioAccountStoreImpl @Inject constructor(
     @ApplicationContext private val context: Context,
+    // Injected so a test can supply a dispatcher whose clock and ordering it controls. The races
+    // clear() guards against are all about what runs before what, and with Dispatchers.IO written
+    // in here there was no way to write one of those orderings down.
+    @IoDispatcher ioDispatcher: CoroutineDispatcher,
 ) : StremioAccountStore {
     private val prefs by lazy { openEncryptedPrefs(context, PREFS_FILE_NAME) }
 
@@ -59,7 +64,7 @@ class StremioAccountStoreImpl @Inject constructor(
     // Single-threaded, so the initial load, a save and a clear run in call order instead of
     // racing over one file. See EncryptedTokenStore for the three races this closes.
     @OptIn(ExperimentalCoroutinesApi::class)
-    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
+    private val ioScope = CoroutineScope(SupervisorJob() + ioDispatcher.limitedParallelism(1))
 
     init {
         ioScope.launch {

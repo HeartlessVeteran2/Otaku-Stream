@@ -2,9 +2,10 @@ package com.otakustream.core.database.tracking
 
 import android.content.Context
 import com.otakustream.core.database.security.openEncryptedPrefs
+import com.otakustream.core.common.IoDispatcher
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.SupervisorJob
@@ -26,6 +27,9 @@ import javax.inject.Singleton
 @Singleton
 class EncryptedTokenStore @Inject constructor(
     @ApplicationContext private val context: Context,
+    // Injected for the same reason as in StremioAccountStore: the orderings this store's clear()
+    // has to survive cannot be written down as a test unless the test owns the dispatcher.
+    @IoDispatcher ioDispatcher: CoroutineDispatcher,
 ) {
     private val prefs by lazy { openEncryptedPrefs(context, PREFS_FILE_NAME) }
 
@@ -47,7 +51,7 @@ class EncryptedTokenStore @Inject constructor(
     //    signed in and disk signed out;
     //  - a clear queued behind a save whose write had not happened yet.
     @OptIn(ExperimentalCoroutinesApi::class)
-    private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
+    private val ioScope = CoroutineScope(SupervisorJob() + ioDispatcher.limitedParallelism(1))
 
     init {
         ioScope.launch {
