@@ -26,6 +26,15 @@ android {
     buildFeatures {
         compose = true
     }
+
+    testOptions {
+        unitTests {
+            // Robolectric needs the merged manifest and resources to build its simulated app —
+            // without this a Compose test fails looking for a theme rather than failing an
+            // assertion, which is the confusing kind of red.
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 dependencies {
@@ -62,4 +71,19 @@ dependencies {
     // concrete classes built on Media3 and the network — hence the interfaces they are now.
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+
+    // Compose on the JVM, via Robolectric — the same four lines core/ui uses, comment included,
+    // because the only way to exercise Compose used to be an emulator this project's CI does not
+    // have. LibraryScreen decides what a user sees when a list comes back empty, and getting that
+    // wrong shows someone "nothing saved yet" over a library that is full.
+    testImplementation(platform(libs.androidx.compose.bom))
+    testImplementation(libs.androidx.ui.test.junit4)
+    // testImplementation, not the documented debugImplementation: this artifact exists to
+    // contribute a manifest entry, and on debugImplementation a library module hands it to
+    // consumers rather than to its own unit tests. The unit-test APK merges test dependencies and
+    // Robolectric reads it from there — without it the tests fail on a missing activity rather
+    // than on an assertion.
+    testImplementation(libs.androidx.ui.test.manifest)
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
 }
