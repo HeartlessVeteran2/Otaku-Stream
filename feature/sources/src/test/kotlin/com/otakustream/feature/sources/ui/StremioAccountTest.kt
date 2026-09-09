@@ -119,6 +119,12 @@ class StremioAccountTest {
             "and must not raise an indicator it will never lower",
             viewModel.uiState.value.isRefreshing,
         )
+
+        // Let the push finish. Left suspended in the fake it is an abandoned viewModelScope job —
+        // not a child of the test scope, so nothing here would fail on it, which is exactly what
+        // makes it the kind of leak that surfaces later as another test timing out.
+        client.library.complete(emptyList())
+        advanceUntilIdle()
     }
 
     private fun viewModel(client: StremioAccountClient, store: StremioAccountStore) =
