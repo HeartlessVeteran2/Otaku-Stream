@@ -63,13 +63,23 @@ class DownloadHeaders @Inject constructor(
         directoryOf(url)?.let { dir -> synchronized(byDirectory) { byDirectory[dir] = headers } }
     }
 
-    // Drops the directory entry as well, or a removed download would keep answering for its
-    // neighbours. It is only a cache: another download from the same place repopulates it from the
-    // table on its next request.
+    // Drops the whole directory cache, not just this download's own directory.
+    //
+    // A download does not occupy only one: a playlist at /stream/master.m3u8 can list its segments
+    // under /stream/chunks/, and every directory a request touched holds its own entry. Removing
+    // the playlist's alone left the others answering for a download the user had deleted, and the
+    // next download from that host would be handed its headers with no database read to correct
+    // them.
+    //
+    // Clearing all of it is the complete answer rather than the clever one, and it is affordable:
+    // forget() runs when someone deletes a download, and these are only a cache — every other
+    // download repopulates its own on its next request, at one table scan each. Tracking which
+    // directories belong to which download would mean a second index to bound and keep in step,
+    // which is more machinery than the thing it saves.
     fun forget(url: String) {
         generation.incrementAndGet()
         synchronized(byUrl) { byUrl.remove(url) }
-        directoryOf(url)?.let { dir -> synchronized(byDirectory) { byDirectory.remove(dir) } }
+        synchronized(byDirectory) { byDirectory.clear() }
     }
 
     // Called on Media3's download executor, never the main thread — see the DAO query's comment.
@@ -109,30 +119,41 @@ class DownloadHeaders @Inject constructor(
         return resolved
     }
 
-    // Which download does this url belong to? The one whose own url it shares the most of.
+    // Which download does this url belong to? Only one it actually sits underneath.
     //
-    // Origin alone is not enough. Two downloads on one host with different headers — a source that
-    // signs each video, say — both wrote to a single per-origin entry, so whichever started second
-    // overwrote the first, and the first download's segments then went out with the second's
-    // credentials and 403'd. Ranking by shared prefix separates them, because a host that gives
-    // each video its own token gives each one its own path too: /video/abc/master.m3u8 and its
-    // segments share far more with each other than with /video/def/master.m3u8.
+    // Sharing an origin is not a relationship. Every same-origin request used to be handed some
+    // download's headers, because any non-empty candidate list produced a winner — so a thumbnail,
+    // an analytics ping, anything else on that CDN collected the Referer and cookies belonging to a
+    // video it has nothing to do with. Requiring containment means a request that belongs to no
+    // download gets nothing, which is what it should have had all along.
     //
-    // Residual, and it is not fixable from here: two downloads whose playlists sit in the *same*
-    // directory with *different* headers are indistinguishable, because a segment url carries
-    // nothing that says which of them requested it. Media3 gives the resolver a DataSpec and no
-    // parent link. Ties are broken by url so the choice is at least deterministic rather than
-    // dependent on row order.
+    // Containment is tested on the directory — the origin plus the path up to and including the
+    // last slash — so the comparison lands on a path-segment boundary for free and cannot match
+    // half a name. /video/abc123/ contains /video/abc123/chunks/ and does not contain
+    // /video/abc124/, which a character-wise prefix score rated nearly identical.
+    //
+    // Longest containing directory wins, so a download nested inside another's path keeps its own
+    // headers.
+    //
+    // Two residuals, neither fixable from here, because a segment url carries nothing that says
+    // which download requested it — Media3 gives the resolver a DataSpec and no parent link:
+    //  - two playlists in the *same* directory with *different* headers are indistinguishable.
+    //    Ties break by url, so the choice is deterministic rather than dependent on row order.
+    //  - a playlist whose segments are listed by absolute url in a *sibling* directory resolves to
+    //    nothing rather than to a guess. That is the safe direction: refusing to share headers
+    //    costs a 403 on a layout that is already unusual, where sharing them wrongly hands one
+    //    video's credentials to an unrelated request.
     private fun resolveFromTable(url: String, directory: String): Map<String, String> {
         val origin = originOf(url) ?: return emptyMap()
-        val candidates = runCatching { dao.headerRowsBlocking() }.getOrNull().orEmpty()
+        val best = runCatching { dao.headerRowsBlocking() }.getOrNull().orEmpty()
             .filter { row -> originOf(row.videoUrl) == origin }
-        val best = candidates.minWithOrNull(
-            compareByDescending<DownloadHeaderRow> { row ->
-                sharedPrefixLength(directoryOf(row.videoUrl).orEmpty(), directory)
-            }.thenBy { row -> row.videoUrl },
-        )
-        return decode(best?.headersJson)
+            .mapNotNull { row -> directoryOf(row.videoUrl)?.let { dir -> dir to row } }
+            .filter { (dir, _) -> directory.startsWith(dir) }
+            .minWithOrNull(
+                compareByDescending<Pair<String, DownloadHeaderRow>> { (dir, _) -> dir.length }
+                    .thenBy { (_, row) -> row.videoUrl },
+            )
+        return decode(best?.second?.headersJson)
     }
 
     companion object {
@@ -160,13 +181,6 @@ class DownloadHeaders @Inject constructor(
             val path = runCatching { URI(url) }.getOrNull()?.path.orEmpty()
             val lastSlash = path.lastIndexOf('/')
             return origin + if (lastSlash >= 0) path.substring(0, lastSlash + 1) else "/"
-        }
-
-        private fun sharedPrefixLength(a: String, b: String): Int {
-            val limit = minOf(a.length, b.length)
-            var shared = 0
-            while (shared < limit && a[shared] == b[shared]) shared++
-            return shared
         }
 
         // Stored as JSON rather than a Room type converter: this is the only place that reads it,

@@ -143,6 +143,79 @@ class DownloadHeadersTest {
         assertEquals(emptyMap<String, String>(), headers.headersFor(SEGMENT))
     }
 
+    // Sharing a host is not a relationship, and treating it as one leaked credentials sideways.
+    //
+    // Any non-empty candidate list produced a winner, so every same-origin request was handed some
+    // download's headers — a thumbnail, an analytics ping, anything else on that CDN collected the
+    // Referer and cookies belonging to a video it has nothing to do with.
+    @Test
+    fun `a same-host request that belongs to no download gets nothing`() {
+        val dao = FakeDownloadDao("https://cdn.example.test/video/abc123/master.m3u8" to REFERER)
+
+        val headers = DownloadHeaders(dao)
+
+        assertEquals(emptyMap<String, String>(), headers.headersFor("https://cdn.example.test/thumbs/x.jpg"))
+        assertEquals(emptyMap<String, String>(), headers.headersFor("https://cdn.example.test/ping"))
+    }
+
+    // Containment is tested on the directory, which ends at a slash — so it lands on a path-segment
+    // boundary and cannot match half a name. A character-wise prefix score rated these two nearly
+    // identical and would hand one video's credentials to the other.
+    @Test
+    fun `a sibling video with a near-identical path gets nothing`() {
+        val dao = FakeDownloadDao("https://cdn.example.test/video/abc123/master.m3u8" to REFERER)
+
+        assertEquals(
+            emptyMap<String, String>(),
+            DownloadHeaders(dao).headersFor("https://cdn.example.test/video/abc124/seg-1.ts"),
+        )
+    }
+
+    // The path-level twin of the hostname test above, and the reason containment is tested on the
+    // directory rather than on a trimmed prefix: a directory ends at a slash, so /video/abc/ cannot
+    // match /video/abcd/. Compared without that boundary, one video's credentials go to another
+    // whose name merely starts with the same letters — which a source numbering its videos
+    // sequentially produces on its own, without anyone attacking anything.
+    @Test
+    fun `a directory whose name merely starts with the same text gets nothing`() {
+        val dao = FakeDownloadDao("https://cdn.example.test/video/abc/master.m3u8" to REFERER)
+
+        assertEquals(
+            emptyMap<String, String>(),
+            DownloadHeaders(dao).headersFor("https://cdn.example.test/video/abcd/seg-1.ts"),
+        )
+    }
+
+    // The layout this has to keep working: a playlist that lists its segments in a subdirectory.
+    @Test
+    fun `segments in a subdirectory of the playlist still resolve`() {
+        val dao = FakeDownloadDao("https://cdn.example.test/video/abc123/master.m3u8" to REFERER)
+
+        assertEquals(
+            REFERER,
+            DownloadHeaders(dao).headersFor("https://cdn.example.test/video/abc123/chunks/seg-1.ts"),
+        )
+    }
+
+    // Deleting a download must not leave it answering anywhere, and it does not occupy only one
+    // directory: a playlist at /stream/ can list segments under /stream/chunks/, and each directory
+    // a request touched holds its own entry. Dropping the playlist's alone left the others serving
+    // a download the user deleted, with no database read to correct them.
+    @Test
+    fun `forget clears entries a download left in other directories`() {
+        val dao = FakeDownloadDao(PLAYLIST to REFERER)
+        val headers = DownloadHeaders(dao)
+
+        // Populate a second directory belonging to the same download.
+        val chunk = "https://cdn.example.test/stream/chunks/seg-1.ts"
+        assertEquals(REFERER, headers.headersFor(chunk))
+
+        headers.forget(PLAYLIST)
+        dao.dropAll()
+
+        assertEquals(emptyMap<String, String>(), headers.headersFor(chunk))
+    }
+
     @Test
     fun `a request to a different host gets nothing`() {
         val dao = FakeDownloadDao(PLAYLIST to REFERER)
