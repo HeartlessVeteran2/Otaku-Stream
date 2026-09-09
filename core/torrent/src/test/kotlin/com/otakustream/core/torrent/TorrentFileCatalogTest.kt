@@ -68,6 +68,20 @@ class TorrentFileCatalogTest {
         assertEquals(1, catalog.playableFiles(HASH_A).size)
     }
 
+    // The other direction of the same isolation. Kotlin's List is read-only, not immutable, so a
+    // caller can cast to the backing ArrayList — and handing every reader the same instance means one
+    // of them emptying it empties the cache for everyone, for the rest of the process.
+    @Test
+    fun `what one reader mutates is not what the next one sees`() {
+        val catalog = TorrentFileCatalog()
+        catalog.remember(HASH_A, listOf(file(0, "Show - 1.mkv", 1400), file(1, "Show - 2.mkv", 1400)))
+
+        @Suppress("UNCHECKED_CAST")
+        (catalog.playableFiles(HASH_A) as MutableList<TorrentFileEntry>).clear()
+
+        assertEquals(2, catalog.playableFiles(HASH_A).size)
+    }
+
     // Bounded, so a long session of browsing torrents cannot grow this for the life of the process.
     // Access-ordered, so what is being watched is the last thing dropped — which is the entry a
     // picker is about to ask for.

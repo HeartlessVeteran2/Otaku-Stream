@@ -772,7 +772,6 @@ class PlayerController @Inject constructor(
             val mediaSource = DefaultMediaSourceFactory(dataSourceFactory).createMediaSource(mediaItem)
 
             currentMediaItem = mediaItem
-            loadedMediaUrl = url
             currentDataSourceFactory = dataSourceFactory
 
             // Held back across the prepare, then released once the speed is set.
@@ -791,6 +790,12 @@ class PlayerController @Inject constructor(
             player.playWhenReady = false
             player.setMediaSource(mediaSource, resumeMs)
             player.prepare()
+            // After the source is installed, not before it. Nothing between the assignment and this
+            // call suspends today — the whole run is one main-thread turn, so no queued callback can
+            // land inside it — but that is a fact about the current statements rather than a rule,
+            // and one inserted await would silently reopen the window this closes. Here it is true
+            // by construction.
+            loadedMediaUrl = url
 
             // Apply the remembered default speed to every new video (boost is separate and resets).
             //

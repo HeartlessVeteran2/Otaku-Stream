@@ -42,8 +42,8 @@ class TorrentFileCatalog @Inject constructor() {
         // to thousands of entries — held for 32 torrents, that is a lot of strings kept for a list
         // that will never show any of them.
         //
-        // It is also the same snapshot the old defensive copy gave: listPlayableFiles builds a new
-        // list, so a caller still mutating the one it handed over cannot reach this.
+        // listPlayableFiles builds a new list, so a caller still mutating the one it handed over
+        // cannot reach what is stored here. The read below copies again, for the other direction.
         val playable = TorrentVideoFiles.listPlayableFiles(files)
         synchronized(byInfoHash) { byInfoHash[key] = playable }
     }
@@ -53,7 +53,12 @@ class TorrentFileCatalog @Inject constructor() {
     // until something plays it.
     fun playableFiles(infoHash: String): List<TorrentFileEntry> {
         val key = TorrentUri.normalizeInfoHash(infoHash) ?: return emptyList()
-        return synchronized(byInfoHash) { byInfoHash[key] } ?: emptyList()
+        // Copied out, so what callers hold is theirs. Kotlin's List is read-only rather than
+        // immutable — a cast reaches the backing ArrayList — and handing every reader the same
+        // instance means one of them mutating it changes what the next one sees, for the rest of the
+        // process. A dozen entries is nothing to copy; a cache that quietly disagrees with itself is
+        // expensive to find.
+        return synchronized(byInfoHash) { byInfoHash[key]?.toList() } ?: emptyList()
     }
 
     private companion object {
