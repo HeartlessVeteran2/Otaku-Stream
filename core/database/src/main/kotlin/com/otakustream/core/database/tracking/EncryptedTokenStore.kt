@@ -1,9 +1,7 @@
 package com.otakustream.core.database.tracking
 
-import android.content.Context
-import com.otakustream.core.database.security.openEncryptedPrefs
+import com.otakustream.core.database.security.SecurePrefsFactory
 import com.otakustream.core.common.IoDispatcher
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -26,12 +24,12 @@ import javax.inject.Singleton
 // wrapped so token ops degrade to in-memory rather than crashing the app.
 @Singleton
 class EncryptedTokenStore @Inject constructor(
-    @ApplicationContext private val context: Context,
+    private val securePrefs: SecurePrefsFactory,
     // Injected for the same reason as in StremioAccountStore: the orderings this store's clear()
     // has to survive cannot be written down as a test unless the test owns the dispatcher.
     @IoDispatcher ioDispatcher: CoroutineDispatcher,
 ) {
-    private val prefs by lazy { openEncryptedPrefs(context, PREFS_FILE_NAME) }
+    private val prefs by lazy { securePrefs.open(PREFS_FILE_NAME) }
 
     // Starts null and loads asynchronously: `prefs` (lazy) forces EncryptedSharedPreferences.create,
     // which derives the Keystore master key and reads a file — that must not run on the main thread

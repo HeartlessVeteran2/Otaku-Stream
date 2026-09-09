@@ -30,12 +30,15 @@ import org.robolectric.annotation.Config
 // which is unreachable with a real one. Both stores take their dispatcher injected now, so the test
 // owns that queue and can put a sign-in exactly where the bug lives.
 //
-// SCOPE, stated because it is easy to misread these as covering more than they do: only the
-// in-memory half is asserted. openEncryptedPrefs returns null under Robolectric — the Android
-// Keystore is not available — so both stores degrade to in-memory here and every disk operation is
-// a no-op. The disk half of these races (a superseded clear removing the preference a sign-in had
-// just written) cannot be exercised in this environment at all. The in-memory half is the half the
-// UI observes: `authKey` and `token` are the StateFlows every screen binds "am I signed in" to.
+// Both halves are asserted — memory and disk — and getting the disk half required a change. The
+// stores used to call openEncryptedPrefs themselves, which returns null under Robolectric because
+// the Android Keystore is unavailable, so they degraded to in-memory and every disk assertion would
+// have passed vacuously. They take a SecurePrefsFactory now; these tests hand them ordinary
+// SharedPreferences, which Robolectric does provide. Encryption is the only difference, and it is
+// not what these orderings are about.
+//
+// The disk half matters on its own: memory decides what the screen shows now, disk decides whether
+// you are still signed in after a restart, and the bug this guards produced exactly that mismatch.
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33])
@@ -43,11 +46,21 @@ class CredentialClearRaceTest {
 
     private val dispatcher = StandardTestDispatcher()
 
-    private fun stremioStore() =
-        StremioAccountStoreImpl(ApplicationProvider.getApplicationContext(), dispatcher)
+    // Plain SharedPreferences, one file per store, cleared between tests by Robolectric.
+    private val prefs = SecurePrefsFactory { fileName ->
+        ApplicationProvider.getApplicationContext<android.content.Context>()
+            .getSharedPreferences(fileName, android.content.Context.MODE_PRIVATE)
+    }
 
-    private fun tokenStore() =
-        EncryptedTokenStore(ApplicationProvider.getApplicationContext(), dispatcher)
+    private fun stremioStore() = StremioAccountStoreImpl(prefs, dispatcher)
+
+    private fun tokenStore() = EncryptedTokenStore(prefs, dispatcher)
+
+    private fun storedStremioKey(): String? =
+        prefs.open(StremioAccountStoreImpl.PREFS_FILE_NAME)?.getString("stremio_auth_key", null)
+
+    private fun storedToken(): String? =
+        prefs.open(EncryptedTokenStore.PREFS_FILE_NAME)?.getString("anilist_access_token", null)
 
     @Test
     fun `a Stremio sign-in that lands during a sign-out survives it`() = runTest(dispatcher) {
@@ -70,6 +83,11 @@ class CredentialClearRaceTest {
 
         assertEquals("the sign-in must outlive the sign-out it raced", "key-b", store.authKey.value)
         assertEquals("b@example.com", store.email)
+        assertEquals(
+            "and it must still be on disk: memory decides this session, disk decides the next one",
+            "key-b",
+            storedStremioKey(),
+        )
     }
 
     // The counterpart: an ordinary sign-out still signs out, so the guard above cannot be satisfied
@@ -92,6 +110,7 @@ class CredentialClearRaceTest {
 
         assertNull(store.authKey.value)
         assertNull(store.email)
+        assertNull("an ordinary sign-out must reach disk too", storedStremioKey())
     }
 
     @Test
@@ -106,6 +125,7 @@ class CredentialClearRaceTest {
         signingOut.await()
 
         assertEquals("token-b", store.token.value)
+        assertEquals("token-b", storedToken())
     }
 
     @Test
@@ -118,6 +138,7 @@ class CredentialClearRaceTest {
         advanceUntilIdle()
 
         assertNull(store.token.value)
+        assertNull(storedToken())
     }
 
     // clearIfCurrent is the path a rejected request takes: a 401 revokes the token it was sent
