@@ -30,15 +30,17 @@ import org.robolectric.annotation.Config
 // which is unreachable with a real one. Both stores take their dispatcher injected now, so the test
 // owns that queue and can put a sign-in exactly where the bug lives.
 //
-// Both halves are asserted — memory and disk — and getting the disk half required a change. The
-// stores used to call openEncryptedPrefs themselves, which returns null under Robolectric because
-// the Android Keystore is unavailable, so they degraded to in-memory and every disk assertion would
-// have passed vacuously. They take a SecurePrefsFactory now; these tests hand them ordinary
-// SharedPreferences, which Robolectric does provide. Encryption is the only difference, and it is
-// not what these orderings are about.
+// Disk is asserted too, by the sign-out tests, and getting there required a change. The stores used
+// to call openEncryptedPrefs themselves, which returns null under Robolectric because the Android
+// Keystore is unavailable, so they degraded to in-memory and every disk assertion would have passed
+// vacuously. They take a SecurePrefsFactory now; these tests hand them ordinary SharedPreferences,
+// which Robolectric does provide. Encryption is the only difference, and it is not what these
+// orderings are about.
 //
-// The disk half matters on its own: memory decides what the screen shows now, disk decides whether
-// you are still signed in after a restart, and the bug this guards produced exactly that mismatch.
+// It is the sign-out tests and not the race tests because of how the queue is ordered — the race
+// tests say so where they would otherwise have asserted it. Disk matters on its own: memory decides
+// what the screen shows now, disk decides whether you are still signed in after a restart, and the
+// bug this guards produced exactly that mismatch.
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [33])
