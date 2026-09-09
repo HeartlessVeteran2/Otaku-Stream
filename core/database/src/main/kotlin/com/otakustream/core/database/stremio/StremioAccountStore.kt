@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -46,9 +47,23 @@ class StremioAccountStore @Inject constructor(
         }
     }
 
+    // Counts sign-ins. See clear() below — it is how the deferred drop tells the initial load
+    // restoring the old key, which it must undo, from the user signing in again, which it must not.
+    private val saves = AtomicInteger(0)
+
+    // Held across "bump the counter and set the state" and across "drop the state and read the
+    // counter", so those two pairs cannot interleave. Without it the counter is no guard at all: a
+    // sign-in landing between clear()'s drop and its read is already counted by the time the read
+    // happens, so the deferred half concludes nothing has changed and wipes the new key anyway —
+    // the exact failure the counter is here to prevent, through a narrower window.
+    private val sessionLock = Any()
+
     fun save(authKey: String, email: String?) {
-        this.email = email
-        _authKey.value = authKey
+        synchronized(sessionLock) {
+            saves.incrementAndGet()
+            this.email = email
+            _authKey.value = authKey
+        }
         // Queued on the same scope as clear(), so signing in during a sign-out's write cannot end
         // with memory and disk disagreeing about which one won.
         ioScope.launch {
@@ -66,15 +81,38 @@ class StremioAccountStore @Inject constructor(
     // gone from disk, rather than discarding commit()'s answer for the one operation where it
     // matters most.
     suspend fun clear(): Boolean {
-        email = null
-        _authKey.value = null
+        val savesAtClear = synchronized(sessionLock) {
+            email = null
+            _authKey.value = null
+            saves.get()
+        }
         return ioScope.async {
+            // Conditional, and it has to be. The repeat is here to undo the initial disk load,
+            // which is queued on this same scope and would otherwise put the old key straight back
+            // after the drop above. But unconditional it also undid a *sign-in*: save() sets memory
+            // immediately and queues its write behind this body, so this ran first and nulled the
+            // brand-new key — memory signed out, disk signed in, and the successful sign-in thrown
+            // away until the next launch.
+            if (saves.get() != savesAtClear) return@async supersededBySignIn()
             email = null
             _authKey.value = null
             runCatching { prefs?.edit()?.remove(KEY_AUTH)?.remove(KEY_EMAIL)?.commit() }
                 .getOrNull() ?: false
         }.await()
     }
+
+    // A clear that a sign-in overtook. Neither the in-memory drop nor the disk removal may run:
+    // the drop would discard the credential now in use, and the removal would delete it from disk.
+    //
+    // The removal is the half that is easy to miss, and it is the one that does lasting damage. Its
+    // ordering is not fixed — save() queues its write on this same scope, and depending on which
+    // side of clear()'s async creation the sign-in lands, that write runs either after this body
+    // (so a removal here is overwritten and harmless) or before it (so a removal here deletes the
+    // credential that had just been written). Skipping it covers both.
+    //
+    // Returns true because the credential this was asked to revoke really is gone from disk: the
+    // sign-in writes the same preference keys, so it is overwritten rather than removed.
+    private fun supersededBySignIn(): Boolean = true
 
     companion object {
         // Referenced by the backup-rules XML so this file is excluded from backup.

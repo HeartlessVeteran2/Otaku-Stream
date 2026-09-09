@@ -185,9 +185,22 @@ fun CatalogScreen(
                 modifier = Modifier.fillMaxSize(),
             ) {
                 when {
+                    // Pullable too, which it first-thoughtedly was not: "you cannot refresh what is
+                    // still loading" only holds if the first load is guaranteed to end. It isn't.
+                    // hasLoadedOnce stays false until a search completes, so a source bootstrap
+                    // that hangs, or a fan-out held open by a wedged extension, leaves this branch
+                    // on screen permanently — and it was the one branch with no way out of it. A
+                    // pull here starts a fresh search against whatever is registered now.
                     stillLoadingFirstPage -> {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(color = MaterialTheme.colorScheme.tertiary)
+                        PullablePlaceholder {
+                            // Not while a pull is running. refresh() deliberately leaves isLoading
+                            // alone, so this branch stays selected for the whole gesture — and the
+                            // pull indicator is already spinning directly above this spot. Two
+                            // spinners stacked on each other, saying the same thing, is exactly
+                            // what the rest of this change is at pains to avoid.
+                            if (!uiState.isRefreshing) {
+                                CircularProgressIndicator(color = MaterialTheme.colorScheme.tertiary)
+                            }
                         }
                     }
                     // Both empty states are wrapped, because an empty state is exactly where pulling

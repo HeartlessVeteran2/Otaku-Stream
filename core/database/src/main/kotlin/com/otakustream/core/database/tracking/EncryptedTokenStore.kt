@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -57,10 +58,24 @@ class EncryptedTokenStore @Inject constructor(
         }
     }
 
+    // Counts sign-ins, and nothing else. clear()'s deferred drop below uses it to tell apart the
+    // two reasons the token can be non-null when that drop runs: the initial load having put the
+    // old one back, which must be undone, and the user having signed in again, which must not.
+    private val saves = AtomicInteger(0)
+
+    // Held across "bump the counter and set the token" and across "drop the token and read the
+    // counter", so those pairs cannot interleave. Without it the counter guards nothing: a sign-in
+    // landing between clear()'s drop and its read is already counted by the time the read happens,
+    // so the deferred half sees no change and wipes the new token anyway.
+    private val sessionLock = Any()
+
     fun current(): String? = _token.value
 
     fun save(token: String) {
-        _token.value = token
+        synchronized(sessionLock) {
+            saves.incrementAndGet()
+            _token.value = token
+        }
         // Queued on the same single-threaded scope as clear(), so the two can never invert. apply()
         // rather than commit(): losing a token that was just written costs a sign-in, not a leaked
         // credential.
@@ -78,16 +93,26 @@ class EncryptedTokenStore @Inject constructor(
     //
     // In-memory state is dropped twice on purpose: once here, so the flow turns over on this frame
     // and nothing can use the credential while the write is in flight, and once inside the scope,
-    // where it is ordered against the initial load and any queued save. Only the second is enough
-    // for correctness; only the first is fast enough for the UI.
+    // where it is ordered against the initial load. Only the second is enough for correctness; only
+    // the first is fast enough for the UI.
+    //
+    // The second drop is conditional, and has to be. Unconditional, it undid a sign-in that landed
+    // after the clear was asked for: save() sets memory immediately and queues its write *behind*
+    // this body, so this body ran first and nulled the brand-new token — leaving memory signed out
+    // and disk signed in. That is the mirror image of the race the drop exists to close, and this
+    // comment used to claim that race was handled while producing the opposite inconsistency.
     //
     // Returns whether the credential is actually gone from disk. commit() reports failure by
     // returning false and the earlier version discarded it, so a clear that did not happen was
     // indistinguishable from one that did — for the one operation where that distinction is the
     // whole point.
     suspend fun clear(): Boolean {
-        _token.value = null
+        val savesAtClear = synchronized(sessionLock) {
+            _token.value = null
+            saves.get()
+        }
         return ioScope.async {
+            if (saves.get() != savesAtClear) return@async supersededBySignIn()
             _token.value = null
             runCatching { prefs?.edit()?.remove(KEY_TOKEN)?.commit() }.getOrNull() ?: false
         }.await()
@@ -101,11 +126,34 @@ class EncryptedTokenStore @Inject constructor(
     // revokes a token that was never rejected, and the user is signed out moments after signing in
     // with no explanation at all.
     //
-    // Compared inside the write scope so the comparison and the removal cannot be separated by a
-    // save landing between them.
+    // A clear that a sign-in overtook. Neither the in-memory drop nor the disk removal may run:
+    // the drop would discard the credential now in use, and the removal would delete it from disk.
+    //
+    // The removal is the half that is easy to miss, and it is the one that does lasting damage. Its
+    // ordering is not fixed — save() queues its write on this same scope, and depending on which
+    // side of clear()'s async creation the sign-in lands, that write runs either after this body
+    // (so a removal here is overwritten and harmless) or before it (so a removal here deletes the
+    // credential that had just been written). Skipping it covers both.
+    //
+    // Returns true because the credential this was asked to revoke really is gone from disk: the
+    // sign-in writes the same preference keys, so it is overwritten rather than removed.
+    private fun supersededBySignIn(): Boolean = true
+
+    // The comparison and the removal are taken under sessionLock, not merely inside the write
+    // scope. Being on that scope orders this against other *disk* work, which was the original
+    // claim here and is not enough: save() writes memory outside the scope, so a sign-in could land
+    // between the comparison passing and the drop, and the drop would then revoke the token that
+    // had just replaced the rejected one — the one thing this method exists to avoid.
     suspend fun clearIfCurrent(expected: String): Boolean = ioScope.async {
-        if (_token.value != expected) return@async false
-        _token.value = null
+        val cleared = synchronized(sessionLock) {
+            if (_token.value != expected) {
+                false
+            } else {
+                _token.value = null
+                true
+            }
+        }
+        if (!cleared) return@async false
         runCatching { prefs?.edit()?.remove(KEY_TOKEN)?.commit() }
         true
     }.await()

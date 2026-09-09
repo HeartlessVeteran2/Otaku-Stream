@@ -2,6 +2,7 @@ package com.otakustream.feature.sources.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.otakustream.core.common.runCatchingCancellable
 import com.otakustream.core.database.tracking.TrackingRepository
 import com.otakustream.feature.tracking.AniListClient
 import com.otakustream.feature.tracking.AniListListEntry
@@ -19,7 +20,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
@@ -74,11 +74,6 @@ class AniListHomeViewModel @Inject constructor(
     // last-write-wins bug listJob exists to prevent.
     private var discoveryJob: Job? = null
 
-    // The last token observeToken reported. Read by refresh(), which needs the current sign-in
-    // state without suspending for it — and observeToken is already the authority the rest of this
-    // class trusts. Written and read only on the main dispatcher, which is what viewModelScope is.
-    private var currentToken: String? = null
-
     // Which refresh owns the indicator. A refresh superseded by a newer one still reaches its
     // `finally`, and without this it would clear the flag the newer one had just set — leaving the
     // screen looking idle while a load was still in flight.
@@ -89,7 +84,6 @@ class AniListHomeViewModel @Inject constructor(
         // Re-load the personal rail whenever sign-in state flips (token appears/clears).
         viewModelScope.launch {
             trackingRepository.observeToken().distinctUntilChanged().collect { token ->
-                currentToken = token
                 loadContinueWatching(token)
             }
         }
@@ -113,12 +107,48 @@ class AniListHomeViewModel @Inject constructor(
         // touching the indicator on its way out.
         viewModelScope.launch {
             try {
-                listOfNotNull(loadDiscovery(), loadContinueWatching(currentToken)).joinAll()
+                // Started first, so the three discovery requests are already in flight during the
+                // token read below.
+                val discovery = loadDiscovery()
+                // getToken(), not the last value observeToken happened to have emitted. A field
+                // holding that starts null and is filled asynchronously, so a pull in the first
+                // moments after the screen opens read null for a signed-in user — and null here is
+                // not "skip the personal rails", it is loadContinueWatching's instruction to
+                // *clear* them. The gesture would have emptied the rails it was asked to refresh.
+                //
+                // Only reloaded when there is a token to reload it with. Signed out, the rails are
+                // already empty from the observer and there is nothing to do; if the read itself
+                // fails, leaving them alone is a better answer than clearing them on the strength
+                // of a failed keystore call.
+                val personal = readToken()?.let { loadContinueWatching(it) }
+                discovery.join()
+                joinPersonal(personal)
             } finally {
                 if (refreshGeneration.get() == generation) {
                     _uiState.value = _uiState.value.copy(isRefreshing = false)
                 }
             }
+        }
+    }
+
+    private suspend fun readToken(): String? =
+        runCatchingCancellable { trackingRepository.getToken() }.getOrNull()
+
+    // Follows the handoff if the token observer replaces the personal-list job while we are waiting
+    // on it — a sign-in landing mid-pull cancels ours and starts another. Joining only the job we
+    // started would let the indicator stop while its replacement was still loading, which is the
+    // one thing this coordinator exists to prevent. Each turn moves to a strictly newer job, so it
+    // ends as soon as sign-in state settles.
+    private suspend fun joinPersonal(started: Job?) {
+        // Seeded from listJob when the pull started nothing of its own. A pull that begins while
+        // signed out has no personal load — but a sign-in completing while discovery is still going
+        // creates one through the observer, and the indicator should wait for that too rather than
+        // stopping on a screen that is still filling in.
+        var awaited = started ?: listJob?.takeIf { it.isActive }
+        while (awaited != null) {
+            awaited.join()
+            val current = listJob
+            awaited = current.takeIf { it !== awaited && it?.isActive == true }
         }
     }
 
@@ -179,6 +209,15 @@ class AniListHomeViewModel @Inject constructor(
                 val viewer = aniListClient.fetchViewer(token)
                 aniListClient.fetchUserAnimeLists(token, viewer.id)
             }.onSuccess { entries ->
+                // Discarded if the account changed while this was in flight. refresh() reads the
+                // token and then suspends before reaching this load, so a sign-out landing in that
+                // window would otherwise have this request repopulate — with the previous account's
+                // list — the very rails the sign-out had just cleared.
+                //
+                // Read fresh rather than compared against an observed field: the observer is a
+                // frame behind by construction, and this is the check that decides whether someone
+                // else's watch list goes on screen.
+                if (readToken() != token) return@onSuccess
                 // Only the actively-watching buckets belong in a "continue" rail; most-progress first.
                 val inProgress = entries
                     .filter { it.status == "CURRENT" || it.status == "REPEATING" }

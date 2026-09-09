@@ -57,4 +57,8 @@ dependencies {
     kapt(libs.hilt.compiler)
 
     testImplementation(libs.junit)
+    // Virtual time. HomeViewModel's rail fan-out is defined by a deadline, and a test that waited
+    // out the real fifteen seconds would be both slow and flaky; the test dispatcher advances the
+    // clock instead of the wall.
+    testImplementation(libs.kotlinx.coroutines.test)
 }
