@@ -53,6 +53,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   sole way to remove one thing was to clear all of it. The per-row delete has an undo, and the undo
   expires when the history it came from is wiped — the Clear dialog says it cannot be undone, and
   that has to stay true even while an older snackbar is still on screen.
+- **Pull down to reload** (#142, #144) on the three screens that fetch over the network — Play,
+  Browse, and the Stremio account library. There was no way to ask for fresh data short of leaving
+  the tab and coming back. Each screen tracks refreshing separately from its first load, so the
+  indicator does not appear on every cold start on top of the spinner already there. A rail that no
+  source answered keeps what it had rather than blanking, and the fan-out runs on a scope the
+  awaiting coroutine does not parent, so a wedged source cannot hold the indicator forever.
 - **Colour taken from the cover art.** A show's page tints itself from its poster, clamped for
   contrast against the surface it sits on and recomputed per colour scheme.
 - **A light scheme**, and a theme choice that holds from the first frame and inside the player.
@@ -71,6 +77,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   have one (deleting a download's bytes, clearing watch history).
 - Executable Room migration tests: the harness now runs every migration against a real database
   rather than only diffing the exported schemas (#99).
+- **Screen readers are told which rows can be tapped** (#138). Sixteen clickable rows carried no
+  semantic role, so TalkBack read each as a plain container — the label, then nothing. Nothing
+  looked different on screen, which is why it survived every review. Track-selection rows are
+  `Role.RadioButton` inside a `selectableGroup`, so TalkBack can say "2 of 5" and that picking one
+  unpicks the rest.
+- **Nine hand-rolled empty and loading states** across eight screens now use the shared components
+  (#139), including a byte-for-byte duplicate pair in sibling AniList files. Clearing watch history
+  finally gets the error-tinted confirm every other destructive action already had (#140) — on the
+  one screen where the irreversible button looked exactly like Cancel.
+- **The accent extractor stopped reimplementing `InFlightCache`** (#137). The version it replaced
+  was not broken; it was correct by lock ordering, and that argument lived nowhere.
+- **`core/common` depends on JSR-330 rather than the whole Hilt Android runtime** (#143) for the one
+  annotation it actually uses.
+- **Regression tests where bugs kept shipping.** The screens that had produced repeat defects had no
+  tests, because their collaborators were concrete classes built on the network, Media3 or the
+  Android Keystore and could not be constructed on a JVM runner. Seven are interfaces now — the
+  interface keeps the name, the implementation takes `Impl` — with no call site changed:
+  `TrackingManager`, `EpisodeDownloads`, `SourceBootstrapper`, `StremioAccountStore`,
+  `StremioAccountClient`, `AniListClient`, `AniSkipClient` (#141, #147, #149). Robolectric now
+  reaches `core/player` (#136), `core/ui` (#142), `feature/library` (#152) and `app` (#151), so Compose
+  screens and SharedPreferences-backed settings are exercised on the JVM. What each test pins is a
+  rule that is invisible in a type signature: that an undo which cannot restore says so (#150), that
+  a search matching nothing does not claim the library is empty (#152), that the theme is known
+  before the first frame is drawn (#151). Every one was checked by breaking the behaviour it guards
+  and confirming it fails.
 
 ### Fixed
 
@@ -92,6 +123,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   no longer dies silently on an expired token while Settings keeps saying "signed in".
 - **Removing a download no longer strands its bytes** (#130). The metadata row was deleted before
   the service confirmed the removal, leaving the file in the cache with nothing able to reach it.
+- **Eight regressions introduced by #133 and #134** (#136), sharing one shape: each earlier fix
+  landed the mechanism and missed the state around it. Retry stayed disabled for the rest of the
+  session after one refused torrent; the first video of every session played at 1x; the subtitle
+  style had three bugs at once from two ViewModels each rebuilding what a bare load/save pair did
+  not provide; one failed download removal was erased by the next successful one; a disabled Stremio
+  add-on assumed there was nothing to unregister; and the scripted-source call timeout was quietly a
+  size limit, aborting a large page that arrived slowly.
+- **A sign-in that landed during a sign-out was thrown away** (#148). Both credential stores drop
+  their in-memory state twice on a clear — once immediately, once on a deferred half ordered after
+  the disk load that would otherwise restore the old credential — and the second drop was
+  unconditional. Signing in during that window left the screen signed out with no explanation until
+  the next launch.
+- **AniSkip's failure contract is now kept by AniSkip** (#149). Its interface promised an empty list
+  on any failure; in fact `org.json` threw on anything it did not recognise and an `IOException`
+  came straight out of the request. Playback survived only because both callers happened to defend
+  themselves.
+- **Three bugs from the Stremio account screen** (#147), two of which put one account's data in
+  front of another.
 - **Extension ids no longer depend on which repositories happened to load** (#134), which had made
   the same extension a different source depending on fetch order and reachability — and could crash
   the merged directory on a duplicate key.
