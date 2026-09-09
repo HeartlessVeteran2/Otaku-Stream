@@ -188,6 +188,89 @@ class ScriptTimeoutTest {
         assertTrue(threwSomethingElse)
     }
 
+    // The loop the instruction observer cannot see.
+    //
+    // The observer runs between interpreter instructions, and a native call is one instruction
+    // however long it takes — so `while (true) { httpGet(url) }` advances the counter only by the
+    // handful the loop back-edge costs and issues hundreds of fetches, each up to the call timeout,
+    // before the deadline is consulted once. The mutex is held for all of it. That is the residual
+    // HomeViewModel describes as "a separate change, in the engines"; this is that change, and this
+    // is the test for it.
+    //
+    // The fetch has to be slow for this test to mean anything. Against a url that fails fast the
+    // loop spins quickly enough that the observer does catch it, and the test would pass with the
+    // check deleted — so the bridge here sleeps instead, which is the whole reason HttpBridge is
+    // open.
+    @Test(timeout = 20_000)
+    fun `a loop of slow fetches is stopped by the deadline, not by the instruction count`() {
+        val slowBridge = object : HttpBridge(OkHttpClient()) {
+            override fun httpGet(url: String, headersJson: String?): String {
+                Thread.sleep(300)
+                return "{}"
+            }
+        }
+        val engine = ScriptEngine(slowBridge).apply { deadlineMs = 250L }
+        val scope = engine.load("function hammer() { while (true) { httpGet('http://x/'); } }", "hammer.js")
+
+        val startedAtMs = System.currentTimeMillis()
+        try {
+            engine.call(scope, "hammer")
+            fail("expected the fetch loop to be stopped")
+        } catch (expected: ScriptTimeoutException) {
+            // Control came back, and as the caller-facing type.
+        }
+        val elapsedMs = System.currentTimeMillis() - startedAtMs
+
+        // Two fetches' worth of margin over the 250ms deadline. Without the check in the bridge the
+        // observer needs its full 10,000 instructions, which at ~tens per iteration is hundreds of
+        // 300ms sleeps — minutes, so this bound is not close to arbitrary.
+        assertTrue("took ${elapsedMs}ms; the deadline should have stopped the loop", elapsedMs < 5_000)
+    }
+
+    // The counterpart, and the reason the check is placed before the request rather than around it:
+    // a script that is inside its budget must still be able to fetch. Checking the deadline is not
+    // allowed to become a way for one slow call to refuse the next one.
+    @Test(timeout = 20_000)
+    fun `a fetch inside the deadline still happens`() {
+        val bridge = object : HttpBridge(OkHttpClient()) {
+            override fun httpGet(url: String, headersJson: String?): String = "fetched"
+        }
+        val engine = ScriptEngine(bridge)
+        val scope = engine.load("function once() { return httpGet('http://x/'); }", "once.js")
+
+        assertEquals("fetched", engine.call(scope, "once"))
+    }
+
+    // A script cannot catch its way out of this one either — the same property the observer's
+    // deadline has, and it has to hold here too or the fix only works for scripts that do not try.
+    @Test(timeout = 20_000)
+    fun `a fetch loop cannot swallow its own deadline`() {
+        val slowBridge = object : HttpBridge(OkHttpClient()) {
+            override fun httpGet(url: String, headersJson: String?): String {
+                Thread.sleep(300)
+                return "{}"
+            }
+        }
+        val engine = ScriptEngine(slowBridge).apply { deadlineMs = 250L }
+        val scope = engine.load(
+            """
+            function stubborn() {
+              while (true) {
+                try { httpGet('http://x/'); } catch (e) { }
+              }
+            }
+            """.trimIndent(),
+            "stubborn-fetch.js",
+        )
+
+        try {
+            engine.call(scope, "stubborn")
+            fail("expected the loop to be stopped despite catching")
+        } catch (expected: ScriptTimeoutException) {
+            // Expected: an Error is not delivered to a script's catch.
+        }
+    }
+
     // A guard on two constants, not on the behaviour they configure — and worth being clear about
     // which, because the name it first had ("a fetch gives up before the script deadline does")
     // claimed the second and delivered the first.

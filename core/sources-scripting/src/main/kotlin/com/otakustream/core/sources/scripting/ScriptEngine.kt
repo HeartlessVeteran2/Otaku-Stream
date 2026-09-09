@@ -186,6 +186,31 @@ class ScriptEngine @Inject constructor(
                 null
             }
 
+            // The deadline, checked here because this is where a runaway script actually spends its
+            // time and the instruction observer cannot see it.
+            //
+            // The observer runs between *interpreter* instructions, and a native call is one
+            // instruction however long it takes. So `while (true) { httpGet(url) }` advances the
+            // counter only by the handful the loop back-edge costs — tens per iteration against a
+            // 10,000 threshold — and performs several hundred fetches, each up to the call timeout,
+            // before the observer is consulted even once. With ScriptedVideoSource's mutex held
+            // throughout, that is hours, not the twenty seconds the deadline claims. HomeViewModel
+            // records the same gap from the other end: "a script with no instruction budget still
+            // holds its source's mutex forever… that is a separate change, in the engines."
+            //
+            // Checked before the request rather than after, so a loop stops issuing traffic the
+            // moment it is over budget instead of one fetch later. What is left is bounded: a fetch
+            // begun just inside the deadline still runs to its own call timeout, so a call can
+            // overrun by that much and no more — seconds, against no bound at all.
+            //
+            // ScriptDeadlineError for the same reason the observer throws it: an Error is not
+            // delivered to a script's own catch, so `try { while (true) { httpGet(u) } } catch (e)
+            // {}` cannot swallow this and resume. ScriptEngine converts it at the boundary.
+            val deadline = cx?.getThreadLocal(DEADLINE_KEY) as? Long
+            if (deadline != null && System.nanoTime() > deadline) {
+                throw ScriptDeadlineError()
+            }
+
             // Rhino's interpreter unwinds with `throw (Error) throwable` for anything that is not a
             // RuntimeException, so a *checked* exception thrown by a host function escapes as a
             // ClassCastException rather than reaching the script. httpGet's most ordinary failure —

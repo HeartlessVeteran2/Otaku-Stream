@@ -1,6 +1,8 @@
 package com.otakustream.feature.sources
 
 import com.otakustream.core.sources.api.SourceHttpException
+import com.otakustream.core.sources.mangayomi.runtime.ExtensionWedgedException
+import com.otakustream.core.sources.scripting.ScriptTimeoutException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -125,6 +127,41 @@ class SourceFailureTest {
         assertEquals(
             "Zoro — has no episode 12.5",
             SourceFailure(1L, "Zoro", FailureReason.NoSuchEpisode(12.5f)).describe(),
+        )
+    }
+
+    // A stuck script engine is not "unknown", and the difference is the advice attached to it.
+    //
+    // Both engines confine an extension to a single thread they cannot interrupt, so once a script
+    // has taken that thread every retry fails identically until the extension is rebuilt. Reported
+    // as Unknown — which is where both of these landed before — the user is shown a raw internal
+    // sentence and left to conclude "try again", the one response that cannot work.
+    @Test
+    fun `a stuck script engine is its own reason, from either engine`() {
+        assertEquals(
+            FailureReason.Stuck,
+            ScriptTimeoutException().toFailureReason(),
+        )
+        assertEquals(
+            FailureReason.Stuck,
+            ExtensionWedgedException("getPopular").toFailureReason(),
+        )
+        assertEquals(
+            "AnimeKai — stopped responding — reload or remove it",
+            SourceFailure(1L, "AnimeKai", FailureReason.Stuck).describe(),
+        )
+    }
+
+    // The counterpart: an extension that throws is broken, not stuck, and telling the user to
+    // reload it would send them after the wrong fix. Only the two engine types map to Stuck.
+    @Test
+    fun `an ordinary script error is still unknown, not stuck`() {
+        val reason = IllegalStateException("Mangayomi extension error in 'search': TypeError")
+            .toFailureReason()
+
+        assertEquals(
+            FailureReason.Unknown("Mangayomi extension error in 'search': TypeError"),
+            reason,
         )
     }
 

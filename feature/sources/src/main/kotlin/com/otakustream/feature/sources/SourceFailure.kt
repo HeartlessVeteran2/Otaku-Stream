@@ -1,6 +1,8 @@
 package com.otakustream.feature.sources
 
 import com.otakustream.core.sources.api.SourceHttpException
+import com.otakustream.core.sources.mangayomi.runtime.ExtensionWedgedException
+import com.otakustream.core.sources.scripting.ScriptTimeoutException
 import java.io.InterruptedIOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
@@ -44,6 +46,15 @@ sealed interface FailureReason {
     // episode and their numbering does not always agree.
     data class NoSuchEpisode(val episodeNumber: Float) : FailureReason
 
+    // The source's script engine stopped answering: a runaway loop, or a call that never returned.
+    //
+    // Its own reason rather than Unknown, because it is the one failure on this list that retrying
+    // cannot help with. Both engines run an extension on a single thread they cannot interrupt, so
+    // once a script has taken that thread it is gone until the extension is rebuilt — every retry
+    // fails identically, and "try again" is the wrong thing to tell the user. Reload or remove is
+    // the only thing that works.
+    data object Stuck : FailureReason
+
     // Anything else: a parse failure, a JS extension throwing, a malformed response. The message
     // is the only thing that distinguishes these, so it is carried verbatim.
     data class Unknown(val message: String?) : FailureReason
@@ -56,6 +67,12 @@ sealed interface FailureReason {
 // it would turn every keystroke into a reported "source error".
 fun Throwable.toFailureReason(): FailureReason = when (this) {
     is SourceHttpException -> FailureReason.Http(code)
+    // One reason for both engines, because they are one situation to the user. Rhino throws
+    // ScriptTimeoutException when its deadline stops a script; QuickJS has no interrupt hook at all,
+    // so MangayomiRuntime reports the thread as lost instead. Neither had a reason of its own before
+    // — both landed in Unknown, which reads as "try again" and is the one advice that cannot work.
+    is ScriptTimeoutException -> FailureReason.Stuck
+    is ExtensionWedgedException -> FailureReason.Stuck
     is UnknownHostException -> FailureReason.Offline
     is SSLException -> FailureReason.Tls
     // SocketTimeoutException is an InterruptedIOException, so it must be matched first.
@@ -82,6 +99,8 @@ fun FailureReason.describe(): String = when (this) {
         if (afterMs > 0) "timed out after ${afterMs / 1000}s" else "timed out"
     FailureReason.Offline -> "could not be reached — check your connection"
     FailureReason.Tls -> "failed a secure connection check"
+    // No "try again": this is the failure where trying again is guaranteed to fail the same way.
+    FailureReason.Stuck -> "stopped responding — reload or remove it"
     is FailureReason.NoSuchEpisode -> "has no episode ${formatEpisodeNumber(episodeNumber)}"
     is FailureReason.Unknown -> message ?: "failed for an unknown reason"
 }

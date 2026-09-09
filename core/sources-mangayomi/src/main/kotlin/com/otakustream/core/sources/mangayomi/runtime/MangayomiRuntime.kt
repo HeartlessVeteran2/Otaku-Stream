@@ -7,7 +7,6 @@ import com.whl.quickjs.wrapper.JSCallFunction
 import com.whl.quickjs.wrapper.QuickJSContext
 import kotlinx.coroutines.ExecutorCoroutineDispatcher
 import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -43,9 +42,28 @@ class MangayomiRuntime(
     // call to the same extension queues behind it. At the app-wide 60-second call timeout, one dead
     // host made an extension look broken for a minute at a time; there is no interrupt hook in this
     // QuickJS wrapper, so bounding the call is the only lever there is.
+    //
+    // Two kinds of timeout, not one, because a single total cannot tell two failures apart. The
+    // stage timeouts catch the case that actually happens — a host that accepts the connection and
+    // then goes quiet: `readTimeout` measures the gap *between bytes*, so a dead socket gives up in
+    // eight seconds however large the page was going to be, while a page arriving steadily but
+    // slowly on a weak signal still gets the full total. Without them this client inherited
+    // NetworkModule's 15/20/20 and a silent host cost twenty seconds instead of eight.
+    //
+    // This is the pair the Rhino bridge has had since #136, which touched HttpBridge and not this
+    // file — the same fix landing on one of two engines, which is how the missing deadline below
+    // went unnoticed too.
     private val scriptClient: OkHttpClient = httpClient.newBuilder()
+        .connectTimeout(EXTENSION_STAGE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .readTimeout(EXTENSION_STAGE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .writeTimeout(EXTENSION_STAGE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .callTimeout(EXTENSION_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
+
+    // Bounds the wait on the engine thread and refuses further calls once it has stopped answering.
+    // Overridable for tests in the way ScriptEngine.deadlineMs is: nothing in the app should choose
+    // a different budget, and a constructor parameter would put it in Hilt's graph for no reason.
+    internal var watchdog = EngineWatchdog(engineDispatcher, EXTENSION_BUDGET_MS)
 
     private val dom = JsoupBridge()
     private val prefs: JSONObject? = prefsJson?.let { runCatching { JSONObject(it) }.getOrNull() }
@@ -71,14 +89,14 @@ class MangayomiRuntime(
 
     // Forces engine bringup (parse + instantiate the extension) now, so a malformed extension
     // fails at install/bootstrap time rather than on first catalog load. Idempotent.
-    suspend fun ensureLoaded() = withContext(engineDispatcher) {
+    suspend fun ensureLoaded() = onEngine("load") {
         checkOpen()
         ensureStarted()
     }
 
     // Reads a global set by the extension source, e.g. the `mangayomiSources` metadata array.
     // Returns the JSON string, or null if absent/unset.
-    suspend fun readGlobalJson(expression: String): String? = withContext(engineDispatcher) {
+    suspend fun readGlobalJson(expression: String): String? = onEngine("readGlobal") {
         checkOpen()
         ensureStarted()
         val script = "(function(){try{return JSON.stringify($expression);}catch(e){return null;}})()"
@@ -88,7 +106,7 @@ class MangayomiRuntime(
     // Invokes an extension method (getPopular/search/getDetail/getVideoList/getFilterList/...).
     // Returns the JSON string the method resolved to (may be the literal "null"); throws on a
     // thrown/rejected extension error.
-    suspend fun invoke(method: String, args: List<Any?>): String? = withContext(engineDispatcher) {
+    suspend fun invoke(method: String, args: List<Any?>): String? = onEngine(method) {
         checkOpen()
         ensureStarted()
         val ctx = context!!
@@ -116,6 +134,18 @@ class MangayomiRuntime(
         if (!deliverSet) error("Mangayomi extension method '$method' did not resolve")
         if (!deliverOk) error("Mangayomi extension error in '$method': ${deliverValue.orEmpty()}")
         deliverValue
+    }
+
+    // Every entry point goes through here, so no call can reach the engine thread without a budget
+    // on it — the omission that let one runaway extension queue every later call behind it forever.
+    //
+    // checkOpen() is repeated inside the block on purpose. This copy is the fast one: it runs on the
+    // caller's thread, so uninstalling a wedged extension is refused immediately rather than
+    // queueing behind the call that wedged it. The copy inside the block is the correct one, since
+    // close() can happen after this check and before the dispatch.
+    private suspend fun <T> onEngine(label: String, block: () -> T): T {
+        checkOpen()
+        return watchdog.run(label, block)
     }
 
     private fun ensureStarted() {
@@ -232,6 +262,11 @@ class MangayomiRuntime(
         // Before anything is torn down, so a call that has not been dispatched yet fails cleanly
         // instead of racing the destroy.
         closed = true
+        // Drops engine calls that have not started yet. One already running cannot be stopped —
+        // that is the wedge this cannot repair — and in that case the destroy queued below never
+        // runs either, so the native context is held until the process ends. The thread is a
+        // daemon, so it does not keep the app alive.
+        watchdog.close()
         runCatching {
             executor.execute { runCatching { context?.destroy() } }
             executor.shutdown()
@@ -250,4 +285,19 @@ class MangayomiRuntime(
 }
 
 // Bounds how long a single in-extension fetch can occupy its runtime's one thread.
-private const val EXTENSION_CALL_TIMEOUT_SECONDS = 20L
+internal const val EXTENSION_CALL_TIMEOUT_SECONDS = 20L
+
+// How long any one stage of that fetch may stall: connect, or a gap between response bytes. Well
+// under the total, so a host that has stopped responding is recognised as such rather than running
+// out the clock.
+internal const val EXTENSION_STAGE_TIMEOUT_SECONDS = 8L
+
+// How long a whole extension method may run before the engine is treated as wedged.
+//
+// Generous, and it has to be: one method can make several fetches in sequence — getVideoList
+// commonly resolves a page and then two or three extractors — so anything near a single fetch's
+// budget would call ordinary work a wedge. This is not the number that bounds what the user waits;
+// the screens already give up at their own 15s and move on. Its only job is to tell a thread that
+// is coming back from one that is not, and a false positive there costs nothing permanent, because
+// a call that does finish clears the mark itself.
+internal const val EXTENSION_BUDGET_MS = 60_000L
