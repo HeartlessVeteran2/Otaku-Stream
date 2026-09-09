@@ -18,4 +18,15 @@ abstract class TrackingModule {
     @Binds
     @Singleton
     abstract fun bindTrackingManager(impl: TrackingManagerImpl): TrackingManager
+
+    // @Singleton is load-bearing here too, and for a reason specific to this class: the client
+    // memoizes the discovery rails for a TTL and caches MAL id lookups. A second instance would
+    // have empty caches, so every screen would re-request what another had just fetched.
+    @Binds
+    @Singleton
+    abstract fun bindAniListClient(impl: AniListClientImpl): AniListClient
+
+    @Binds
+    @Singleton
+    abstract fun bindAniSkipClient(impl: AniSkipClientImpl): AniSkipClient
 }

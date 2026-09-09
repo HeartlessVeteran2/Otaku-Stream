@@ -21,22 +21,59 @@ private const val ANILIST_GRAPHQL_URL = "https://graphql.anilist.co"
 // viewer's own lists and writes (progress/score/status) require the OAuth token. Every network call
 // reuses the app-wide OkHttpClient. Response parsing lives in AniListModels.kt as pure functions so
 // it can be unit-tested without the network.
+// An interface for the reason TrackingManager, EpisodeDownloads, SourceBootstrapper and the two
+// Stremio account collaborators are: every method here is a network call, so a ViewModel holding the
+// concrete class cannot be constructed on a JVM runner. MediaDetailsViewModel is the one that
+// matters — 1100 lines driving the app's most complex screen, and until now untestable.
+//
+// The whole public surface, because between them the callers use all of it. The GraphQL documents,
+// the response parsing and the two caches stay private to the implementation.
+interface AniListClient {
+    suspend fun fetchTrending(page: Int = 1): AniListPage
+
+    suspend fun fetchAllTimePopular(page: Int = 1): AniListPage
+
+    suspend fun fetchPopularThisSeason(page: Int = 1): AniListPage
+
+    suspend fun search(query: String, page: Int = 1): AniListPage
+
+    suspend fun fetchMediaDetail(id: Long): AniListMedia
+
+    suspend fun fetchViewerListEntry(token: String, mediaId: Long): AniListViewerEntry?
+
+    suspend fun fetchViewer(token: String): AniListViewer
+
+    suspend fun fetchUserAnimeLists(token: String, userId: Long): List<AniListListEntry>
+
+    suspend fun saveMediaListEntry(
+        token: String,
+        mediaId: Long,
+        status: String? = null,
+        score: Double? = null,
+        progress: Int? = null,
+    )
+
+    suspend fun searchAnime(query: String): List<AniListMedia>
+
+    suspend fun getMalId(aniListId: Long): Long?
+}
+
 @Singleton
-class AniListClient @Inject constructor(
+class AniListClientImpl @Inject constructor(
     @com.otakustream.core.network.di.AccountHttpClient private val httpClient: OkHttpClient,
-) {
+) : AniListClient {
     // ---- Discovery (unauthenticated) ----
 
     // Discovery rails are slow-moving and re-requested every time the Home ViewModel is created
     // (navigating away from Play and back, or a process-alive relaunch), so they're memoized on this
     // singleton for DISCOVERY_TTL_MS. Same idea as malIdCache below, just time-bounded.
-    suspend fun fetchTrending(page: Int = 1): AniListPage =
+    override suspend fun fetchTrending(page: Int): AniListPage =
         cachedPage("trending", page) { fetchPageSortedBy("TRENDING_DESC", page) }
 
-    suspend fun fetchAllTimePopular(page: Int = 1): AniListPage =
+    override suspend fun fetchAllTimePopular(page: Int): AniListPage =
         cachedPage("all-time", page) { fetchPageSortedBy("POPULARITY_DESC", page) }
 
-    suspend fun fetchPopularThisSeason(page: Int = 1): AniListPage =
+    override suspend fun fetchPopularThisSeason(page: Int): AniListPage =
         cachedPage("season", page) { fetchPopularThisSeasonUncached(page) }
 
     private suspend fun fetchPopularThisSeasonUncached(page: Int): AniListPage = withContext(Dispatchers.IO) {
@@ -58,7 +95,7 @@ class AniListClient @Inject constructor(
         parsePage(execute(query, variables, token = null).requireField("Page"))
     }
 
-    suspend fun search(query: String, page: Int = 1): AniListPage = withContext(Dispatchers.IO) {
+    override suspend fun search(query: String, page: Int): AniListPage = withContext(Dispatchers.IO) {
         val gql = """
             query (${'$'}search: String, ${'$'}page: Int) {
               Page(page: ${'$'}page, perPage: $PAGE_SIZE) {
@@ -75,7 +112,7 @@ class AniListClient @Inject constructor(
 
     // Full detail incl. relations + recommendations for the AniList detail screen. Memoized so
     // re-opening a title (a very common back-and-forth) doesn't refetch a large payload.
-    suspend fun fetchMediaDetail(id: Long): AniListMedia {
+    override suspend fun fetchMediaDetail(id: Long): AniListMedia {
         detailCache[id]?.let { return it }
         return fetchMediaDetailUncached(id).also { detail -> detailCache[id] = detail }
     }
@@ -121,7 +158,7 @@ class AniListClient @Inject constructor(
 
     // The signed-in viewer's own entry for one anime (to pre-fill the detail list controls).
     // Returns null when the anime isn't on any of their lists.
-    suspend fun fetchViewerListEntry(token: String, mediaId: Long): AniListViewerEntry? =
+    override suspend fun fetchViewerListEntry(token: String, mediaId: Long): AniListViewerEntry? =
         withContext(Dispatchers.IO) {
             val gql = """
                 query (${'$'}id: Int) {
@@ -136,7 +173,7 @@ class AniListClient @Inject constructor(
     // Cached per token: continue-watching resolves the viewer before listing their anime, and the
     // viewer identity can't change without the token changing. See viewerCache for why the key is a
     // digest of the token rather than the token.
-    suspend fun fetchViewer(token: String): AniListViewer {
+    override suspend fun fetchViewer(token: String): AniListViewer {
         val key = tokenFingerprint(token)
         viewerCache.get()?.takeIf { it.first == key }?.let { return it.second }
         return fetchViewerUncached(token).also { viewer ->
@@ -160,7 +197,7 @@ class AniListClient @Inject constructor(
 
     // The signed-in user's anime lists (Watching/Planning/Completed/…) with their per-entry
     // status, score, and progress. Flattened across the AniList list buckets.
-    suspend fun fetchUserAnimeLists(token: String, userId: Long): List<AniListListEntry> =
+    override suspend fun fetchUserAnimeLists(token: String, userId: Long): List<AniListListEntry> =
         withContext(Dispatchers.IO) {
             val gql = """
                 query (${'$'}userId: Int) {
@@ -185,12 +222,12 @@ class AniListClient @Inject constructor(
 
     // Create/update the viewer's list entry. Only non-null fields are sent so callers can nudge
     // progress without clobbering status/score (and vice versa).
-    suspend fun saveMediaListEntry(
+    override suspend fun saveMediaListEntry(
         token: String,
         mediaId: Long,
-        status: String? = null,
-        score: Double? = null,
-        progress: Int? = null,
+        status: String?,
+        score: Double?,
+        progress: Int?,
     ) {
         withContext(Dispatchers.IO) {
             val args = buildList {
@@ -221,7 +258,7 @@ class AniListClient @Inject constructor(
 
     // ---- Backward-compatible helpers used by the existing link/AniSkip/auto-sync flows ----
 
-    suspend fun searchAnime(query: String): List<AniListMedia> = search(query).media
+    override suspend fun searchAnime(query: String): List<AniListMedia> = search(query).media
 
     // AniList id → MyAnimeList id, needed to query AniSkip. Public field, no auth. Cached on this
     // singleton so the mapping is resolved once per anime across every screen/playback.
@@ -259,7 +296,7 @@ class AniListClient @Inject constructor(
         return fetch().also { discoveryCache[cacheKey] = CachedPage(it, System.currentTimeMillis()) }
     }
 
-    suspend fun getMalId(aniListId: Long): Long? = withContext(Dispatchers.IO) {
+    override suspend fun getMalId(aniListId: Long): Long? = withContext(Dispatchers.IO) {
         // 0L is the "known to have no MAL id" sentinel: cache negatives too so a show without a MAL
         // id doesn't re-hit the network on every AniSkip attempt (only transient errors — which
         // throw before we reach the cache write — are retried).

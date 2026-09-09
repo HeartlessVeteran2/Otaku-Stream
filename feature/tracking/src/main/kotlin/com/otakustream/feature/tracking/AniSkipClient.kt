@@ -21,11 +21,17 @@ data class AniSkipInterval(val startMs: Long, val endMs: Long, val kind: String)
 // Community intro/outro timings from https://aniskip.com — keyed by MyAnimeList id + episode
 // number. Entirely best-effort: any failure (no data, network error, malformed body) yields an
 // empty list so playback is never affected.
+// An interface for the same reason as AniListClient: one network call, and MediaDetailsViewModel
+// holds it to build the player's skip lookup.
+interface AniSkipClient {
+    suspend fun fetch(malId: Long, episodeNumber: Int, episodeLengthSec: Long): List<AniSkipInterval>
+}
+
 @Singleton
-class AniSkipClient @Inject constructor(
+class AniSkipClientImpl @Inject constructor(
     private val httpClient: OkHttpClient,
-) {
-    suspend fun fetch(malId: Long, episodeNumber: Int, episodeLengthSec: Long): List<AniSkipInterval> =
+) : AniSkipClient {
+    override suspend fun fetch(malId: Long, episodeNumber: Int, episodeLengthSec: Long): List<AniSkipInterval> =
         withContext(Dispatchers.IO) {
             if (malId <= 0 || episodeNumber <= 0 || episodeLengthSec <= 0) return@withContext emptyList()
             val url = "https://api.aniskip.com/v2/skip-times/$malId/$episodeNumber" +
