@@ -1,8 +1,10 @@
 package com.otakustream.core.download
 
 import com.otakustream.core.database.download.DownloadDao
+import com.otakustream.core.database.download.DownloadHeaderRow
 import org.json.JSONObject
 import java.net.URI
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -21,9 +23,9 @@ import javax.inject.Singleton
 // Referer served its playlist and then 403'd the whole way down. That is the exact failure the
 // per-request design exists to prevent; it was fixed for the top-level url and missed for the rest.
 //
-// So the lookup is two-stage: the requested url first, then the origin it belongs to. Segments are
-// served from the same origin as their playlist, which is what makes the second stage correct rather
-// than a guess.
+// So a request that is not itself a download is matched to the download it belongs to, by the url
+// they share the most of. Segments are served from the same origin as their playlist and almost
+// always from the same directory, which is what makes that correct rather than a guess.
 //
 // Read through to the database, not cached-only: a download interrupted by the process dying resumes
 // later with an empty map, and dropping the headers on resume would turn a working download into a
@@ -33,62 +35,111 @@ class DownloadHeaders @Inject constructor(
     private val dao: DownloadDao,
 ) {
     // Two caches rather than one, because they answer different questions and one of them is what
-    // bounds the other. `byUrl` holds urls that really are downloads — a handful. `byOrigin` is what
-    // every segment of a download shares, so a thousand-segment episode contributes one entry here
-    // instead of a thousand there.
+    // bounds the other. `byUrl` holds urls that really are downloads — a handful. `byDirectory` is
+    // what every segment of a download shares, so a thousand-segment episode contributes one entry
+    // here instead of a thousand there.
     //
     // Both bounded and access-ordered, the idiom core/torrent's TorrentFileCatalog already uses: an
     // unbounded map here grew for the life of the process, and nothing ever removed a segment's
     // entry because forget() only knows the download's own url.
     private val byUrl = boundedLru<String, Map<String, String>>(MAX_CACHED_URLS)
-    private val byOrigin = boundedLru<String, Map<String, String>>(MAX_CACHED_ORIGINS)
+    private val byDirectory = boundedLru<String, Map<String, String>>(MAX_CACHED_DIRECTORIES)
+
+    // Bumped by every change to what is stored, and checked before a lookup commits what it read.
+    //
+    // The lookup below reads the table and then writes a cache entry, and removeAndAwait calls
+    // forget() *before* Media3's removal completes — so a segment request already in flight could
+    // read a row, have forget() clear the caches underneath it, and then write the deleted
+    // download's headers back. The entry outlived the download and was served to the next one on
+    // that host. Committing only when nothing changed in between closes that without a lock across
+    // the database read, which happens on Media3's download executor and must not block forget().
+    private val generation = AtomicLong()
 
     // Registered before the request is queued, so the download's own fetches never need the
-    // database — including its segments, which reach it through the origin entry.
+    // database — including its segments, which reach it through the directory entry.
     fun remember(url: String, headers: Map<String, String>) {
+        generation.incrementAndGet()
         synchronized(byUrl) { byUrl[url] = headers }
-        originOf(url)?.let { origin -> synchronized(byOrigin) { byOrigin[origin] = headers } }
+        directoryOf(url)?.let { dir -> synchronized(byDirectory) { byDirectory[dir] = headers } }
     }
 
-    // Drops the origin entry as well, or a removed download would keep answering for its host. It is
-    // only a cache: another download from the same host repopulates it from the table on its next
-    // request.
+    // Drops the directory entry as well, or a removed download would keep answering for its
+    // neighbours. It is only a cache: another download from the same place repopulates it from the
+    // table on its next request.
     fun forget(url: String) {
+        generation.incrementAndGet()
         synchronized(byUrl) { byUrl.remove(url) }
-        originOf(url)?.let { origin -> synchronized(byOrigin) { byOrigin.remove(origin) } }
+        directoryOf(url)?.let { dir -> synchronized(byDirectory) { byDirectory.remove(dir) } }
     }
 
     // Called on Media3's download executor, never the main thread — see the DAO query's comment.
     fun headersFor(url: String): Map<String, String> {
         synchronized(byUrl) { byUrl[url] }?.let { return it }
 
-        // The url is itself a download. Exact beats origin, so two downloads from one host keep
-        // their own headers.
-        val exact = decode(runCatching { dao.headersJsonForBlocking(url) }.getOrNull())
-        if (exact.isNotEmpty()) {
-            synchronized(byUrl) { byUrl[url] = exact }
-            return exact
+        // Is this url a download in its own right? Asked before the directory cache and not after,
+        // because a download that has not been remembered — one resuming after the process died —
+        // would otherwise be handed the headers of whichever neighbour was cached first. It costs
+        // an indexed point lookup per new segment url, which is not the cost worth avoiding here;
+        // the full-table scan below is, and the directory cache is what avoids it.
+        val exactRow = runCatching { dao.headerRowForBlocking(url) }.getOrNull()
+        if (exactRow != null) {
+            // The row existing is the answer, even when it holds no readable headers. A download
+            // that stored none must go out bare rather than inherit a neighbour's credentials.
+            val own = decode(exactRow.headersJson)
+            synchronized(byUrl) { byUrl[url] = own }
+            return own
         }
 
         // Not a download, so it is a part of one — a segment, a key, an init section. Find the
-        // download it was fetched on behalf of by the origin they share.
-        val origin = originOf(url) ?: return emptyMap()
-        synchronized(byOrigin) { byOrigin[origin] }?.let { return it }
-        val fromOrigin = runCatching { dao.headerRowsBlocking() }.getOrNull().orEmpty()
-            .firstOrNull { row -> originOf(row.videoUrl) == origin }
-            ?.let { row -> decode(row.headersJson) }
-            .orEmpty()
-        // Cached even when empty, and that is the point: a host with no stored headers is asked
+        // download it was fetched on behalf of.
+        val directory = directoryOf(url) ?: return emptyMap()
+        synchronized(byDirectory) { byDirectory[directory] }?.let { return it }
+
+        val readAt = generation.get()
+        val resolved = resolveFromTable(url, directory)
+        // Cached even when empty, and that is the point: a place with no stored headers is asked
         // about once rather than once per segment.
-        synchronized(byOrigin) { byOrigin[origin] = fromOrigin }
-        return fromOrigin
+        //
+        // Unless something was forgotten or registered while the table was being read, in which
+        // case what was read may already describe a download that no longer exists. Dropping the
+        // write costs one repeated scan and nothing else.
+        if (generation.get() == readAt) {
+            synchronized(byDirectory) { byDirectory[directory] = resolved }
+        }
+        return resolved
+    }
+
+    // Which download does this url belong to? The one whose own url it shares the most of.
+    //
+    // Origin alone is not enough. Two downloads on one host with different headers — a source that
+    // signs each video, say — both wrote to a single per-origin entry, so whichever started second
+    // overwrote the first, and the first download's segments then went out with the second's
+    // credentials and 403'd. Ranking by shared prefix separates them, because a host that gives
+    // each video its own token gives each one its own path too: /video/abc/master.m3u8 and its
+    // segments share far more with each other than with /video/def/master.m3u8.
+    //
+    // Residual, and it is not fixable from here: two downloads whose playlists sit in the *same*
+    // directory with *different* headers are indistinguishable, because a segment url carries
+    // nothing that says which of them requested it. Media3 gives the resolver a DataSpec and no
+    // parent link. Ties are broken by url so the choice is at least deterministic rather than
+    // dependent on row order.
+    private fun resolveFromTable(url: String, directory: String): Map<String, String> {
+        val origin = originOf(url) ?: return emptyMap()
+        val candidates = runCatching { dao.headerRowsBlocking() }.getOrNull().orEmpty()
+            .filter { row -> originOf(row.videoUrl) == origin }
+        val best = candidates.minWithOrNull(
+            compareByDescending<DownloadHeaderRow> { row ->
+                sharedPrefixLength(directoryOf(row.videoUrl).orEmpty(), directory)
+            }.thenBy { row -> row.videoUrl },
+        )
+        return decode(best?.headersJson)
     }
 
     companion object {
         // A user's saved episodes, not their segments. Both are far above any real library and small
         // enough that the bound is a safety net rather than a mechanism the app relies on.
         private const val MAX_CACHED_URLS = 64
-        private const val MAX_CACHED_ORIGINS = 32
+        private const val MAX_CACHED_DIRECTORIES = 32
 
         // scheme://authority, lowercased. Authority rather than host so a port — and, if a source
         // ever supplies one, userinfo — has to match too: a stricter key can only refuse to share
@@ -98,6 +149,24 @@ class DownloadHeaders @Inject constructor(
             val scheme = uri.scheme?.lowercase() ?: return null
             val authority = uri.authority?.lowercase() ?: return null
             return "$scheme://$authority"
+        }
+
+        // The origin plus the path up to and including the last slash — the "folder" a url sits in.
+        // Segments of one HLS download nearly always share this with their playlist, which is what
+        // makes it the right granularity for the cache: one entry per download rather than one per
+        // origin (too coarse to tell two downloads apart) or one per url (which is the leak).
+        internal fun directoryOf(url: String): String? {
+            val origin = originOf(url) ?: return null
+            val path = runCatching { URI(url) }.getOrNull()?.path.orEmpty()
+            val lastSlash = path.lastIndexOf('/')
+            return origin + if (lastSlash >= 0) path.substring(0, lastSlash + 1) else "/"
+        }
+
+        private fun sharedPrefixLength(a: String, b: String): Int {
+            val limit = minOf(a.length, b.length)
+            var shared = 0
+            while (shared < limit && a[shared] == b[shared]) shared++
+            return shared
         }
 
         // Stored as JSON rather than a Room type converter: this is the only place that reads it,

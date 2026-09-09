@@ -1,12 +1,11 @@
 package com.otakustream.core.download
 
 import com.otakustream.core.database.download.DownloadEntry
-import com.otakustream.core.database.download.DownloadHeaderRow
 import com.otakustream.core.database.download.DownloadDao
+import com.otakustream.core.database.download.DownloadHeaderRow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 private const val PLAYLIST = "https://cdn.example.test/stream/master.m3u8"
@@ -34,7 +33,7 @@ class DownloadHeadersTest {
     }
 
     @Test
-    fun `a download's own url still wins over its origin`() {
+    fun `a download's own url still wins over its neighbours`() {
         // Two downloads on one host with different headers. The exact match has to rank first, or
         // the second download would inherit the first's.
         val other = mapOf("Referer" to "https://elsewhere.example.test/")
@@ -47,6 +46,101 @@ class DownloadHeadersTest {
 
         assertEquals(REFERER, headers.headersFor(PLAYLIST))
         assertEquals(other, headers.headersFor("https://cdn.example.test/other/master.m3u8"))
+    }
+
+    // The finding two reviewers raised on the first version, and they were right.
+    //
+    // Keying the fallback on origin alone meant one entry per *host*, so two downloads from one host
+    // overwrote each other and the first download's segments went out with the second's Referer —
+    // exactly the 403 this whole change exists to stop, reintroduced one level down. Ranking by
+    // shared url prefix separates them, because a host that gives each video its own credentials
+    // gives it its own path too.
+    @Test
+    fun `two downloads on one host do not steal each other's headers`() {
+        val first = mapOf("Referer" to "https://watch.example.test/one")
+        val second = mapOf("Referer" to "https://watch.example.test/two")
+        val dao = FakeDownloadDao(
+            "https://cdn.example.test/video/abc123/master.m3u8" to first,
+            "https://cdn.example.test/video/def456/master.m3u8" to second,
+        )
+
+        val headers = DownloadHeaders(dao)
+
+        assertEquals(first, headers.headersFor("https://cdn.example.test/video/abc123/seg-1.ts"))
+        assertEquals(second, headers.headersFor("https://cdn.example.test/video/def456/seg-1.ts"))
+    }
+
+    // Registering the second download must not retune the first one's segments either. remember()
+    // writes the same cache the lookup reads, so this is the same defect on the write path.
+    @Test
+    fun `registering a second download leaves the first one's segments alone`() {
+        val first = mapOf("Referer" to "https://watch.example.test/one")
+        val second = mapOf("Referer" to "https://watch.example.test/two")
+        val headers = DownloadHeaders(FakeDownloadDao())
+
+        headers.remember("https://cdn.example.test/video/abc123/master.m3u8", first)
+        headers.remember("https://cdn.example.test/video/def456/master.m3u8", second)
+
+        assertEquals(first, headers.headersFor("https://cdn.example.test/video/abc123/seg-1.ts"))
+        assertEquals(second, headers.headersFor("https://cdn.example.test/video/def456/seg-1.ts"))
+    }
+
+    // A download that stored no headers must go out bare, not borrow a neighbour's.
+    //
+    // Reading the headers *column* made "this url is not a download" and "this download stored
+    // nothing" the same answer — null — so a download with no headers of its own fell through to
+    // the fallback and was handed another download's Referer and cookies. Reading the row tells
+    // them apart.
+    @Test
+    fun `a download with no stored headers does not inherit a neighbour's`() {
+        val dao = FakeDownloadDao(
+            "https://cdn.example.test/stream/other.m3u8" to REFERER,
+            "https://cdn.example.test/stream/bare.m3u8" to emptyMap(),
+        )
+
+        assertEquals(
+            emptyMap<String, String>(),
+            DownloadHeaders(dao).headersFor("https://cdn.example.test/stream/bare.m3u8"),
+        )
+    }
+
+    // The same thing when the stored JSON is present but unreadable. It is still a download, so it
+    // still answers for itself — with nothing.
+    //
+    // The neighbour is named so it would *win* the fallback's tie-break. An earlier version of this
+    // test had it losing, so removing the row-presence check left the test green — it passed
+    // because the malformed row happened to pick itself, not because anything refused the fallback.
+    @Test
+    fun `a download whose stored json is malformed does not inherit either`() {
+        val dao = FakeDownloadDao("https://cdn.example.test/stream/aaa.m3u8" to REFERER)
+            .withRawRow("https://cdn.example.test/stream/zzz.m3u8", "{not json")
+
+        assertEquals(
+            emptyMap<String, String>(),
+            DownloadHeaders(dao).headersFor("https://cdn.example.test/stream/zzz.m3u8"),
+        )
+    }
+
+    // Removing a download while one of its requests is still in flight must not put it back.
+    //
+    // The lookup reads the table and then writes what it read into the cache, and
+    // EpisodeDownloads.removeAndAwait calls forget() *before* Media3 finishes removing — so a
+    // segment request that started earlier could resurrect the deleted download's headers and serve
+    // them to whatever downloaded from that host next. The fake calls forget() from inside the
+    // table read, which is that interleaving made deterministic.
+    @Test
+    fun `a forget during a lookup does not resurrect the deleted download`() {
+        val dao = FakeDownloadDao(PLAYLIST to REFERER)
+        val headers = DownloadHeaders(dao)
+        dao.onTableRead = { headers.forget(PLAYLIST) }
+
+        // This request read the row before the removal landed, so it may still answer with it.
+        headers.headersFor(SEGMENT)
+        dao.onTableRead = null
+        dao.dropAll()
+
+        // What must not happen is the entry outliving the download.
+        assertEquals(emptyMap<String, String>(), headers.headersFor(SEGMENT))
     }
 
     @Test
@@ -81,30 +175,48 @@ class DownloadHeadersTest {
     // The leak half of the same bug. Every segment used to cache its own miss, so one episode left
     // thousands of entries behind that forget() could never reach — it only knows the video url.
     @Test
-    fun `a host with no stored headers is asked about once, not once per segment`() {
+    fun `a place with no stored headers is scanned for once, not once per segment`() {
         val dao = FakeDownloadDao()
 
         val headers = DownloadHeaders(dao)
-        repeat(500) { n -> headers.headersFor("https://unknown.test/seg-$n.ts") }
+        repeat(500) { n -> headers.headersFor("https://unknown.test/x/seg-$n.ts") }
 
-        assertEquals("500 segments should cost one lookup, not 500", 1, dao.originScans)
+        assertEquals("500 segments should cost one table scan, not 500", 1, dao.tableScans)
     }
 
+    // What a registered download's segments actually cost, which is not what the first version of
+    // this test claimed.
+    //
+    // It asserted "without touching the database" and enforced that with a check() inside the fake —
+    // which throws IllegalStateException, which the production runCatching swallows. The guard could
+    // never fire and the test proved nothing. What is true: each new segment url costs one indexed
+    // point lookup, and no table scan. The scan is the cost worth avoiding; the point lookup is what
+    // keeps a resuming download from inheriting a neighbour's headers.
     @Test
-    fun `a registered download answers its segments without touching the database`() {
-        val dao = FakeDownloadDao().apply { failIfQueried = true }
+    fun `a registered download's segments cost a point lookup each and no table scan`() {
+        val dao = FakeDownloadDao()
 
         val headers = DownloadHeaders(dao)
         headers.remember(PLAYLIST, REFERER)
+        repeat(3) { n -> assertEquals(REFERER, headers.headersFor("https://cdn.example.test/stream/seg-$n.ts")) }
 
-        assertEquals(REFERER, headers.headersFor(SEGMENT))
+        assertEquals("one point lookup per segment url", 3, dao.pointLookups)
+        assertEquals("the table should never be scanned", 0, dao.tableScans)
+
+        // And asking again costs another one, which is deliberate rather than a miss. Caching a
+        // segment's answer under its own url is what made the first version leak: one entry per
+        // segment, thousands per episode, and forget() could reach none of them because it only
+        // knows the download's url. Media3 fetches each segment once, so the repeat is the rare
+        // case and the leak was the common one.
+        headers.headersFor("https://cdn.example.test/stream/seg-0.ts")
+        assertEquals("a repeat is not cached under its own url, by design", 4, dao.pointLookups)
     }
 
-    // Removing a download must not leave it answering for its whole host — the next download from
-    // the same origin would inherit headers meant for something the user deleted.
+    // Removing a download must not leave it answering for its neighbours — the next download from
+    // the same place would inherit headers meant for something the user deleted.
     @Test
-    fun `forget drops the origin as well as the url`() {
-        val dao = FakeDownloadDao().apply { failIfQueried = true }
+    fun `forget drops the directory as well as the url`() {
+        val dao = FakeDownloadDao()
 
         val headers = DownloadHeaders(dao)
         headers.remember(PLAYLIST, REFERER)
@@ -135,43 +247,53 @@ class DownloadHeadersTest {
     }
 
     // Bounded, so a session that browses a lot of hosts cannot grow this for the life of the
-    // process. 33 origins into a map that holds 32.
+    // process. 33 directories into a map that holds 32.
     @Test
-    fun `the least recently used origin is the one forgotten`() {
+    fun `the least recently used directory is the one forgotten`() {
         val dao = FakeDownloadDao()
         val headers = DownloadHeaders(dao)
-        (0 until 33).forEach { n -> headers.headersFor("https://host-$n.test/seg.ts") }
-        val scansAfterFirstPass = dao.originScans
+        (0 until 33).forEach { n -> headers.headersFor("https://host-$n.test/x/seg.ts") }
+        val scansAfterFirstPass = dao.tableScans
 
-        // The first host was evicted, so asking again costs another scan; the last was not.
-        headers.headersFor("https://host-0.test/seg.ts")
-        val afterEvicted = dao.originScans
-        headers.headersFor("https://host-32.test/seg.ts")
+        // The first was evicted, so asking again costs another scan; the last was not.
+        headers.headersFor("https://host-0.test/x/seg.ts")
+        val afterEvicted = dao.tableScans
+        headers.headersFor("https://host-32.test/x/seg.ts")
 
-        assertEquals("the evicted origin should be looked up again", scansAfterFirstPass + 1, afterEvicted)
-        assertEquals("the newest origin should still be cached", afterEvicted, dao.originScans)
+        assertEquals("the evicted directory should be looked up again", scansAfterFirstPass + 1, afterEvicted)
+        assertEquals("the newest directory should still be cached", afterEvicted, dao.tableScans)
     }
 
     private class FakeDownloadDao(vararg rows: Pair<String, Map<String, String>>) : DownloadDao {
-        private val stored = rows.toMap()
+        private val stored = rows.associate { (url, headers) -> url to DownloadHeaders.encode(headers) }
+            .toMutableMap()
 
-        // Counts the origin scan specifically — the query a segment falls through to. The whole
-        // point of caching the miss is that this stays at one per host.
-        var originScans = 0
+        // Counted rather than forbidden. The first version of this fake threw from inside the DAO
+        // to assert "never queried", and production wraps every DAO call in runCatching — so the
+        // throw was swallowed and the assertion was dead. A counter cannot be swallowed.
+        var pointLookups = 0
+            private set
+        var tableScans = 0
             private set
 
-        // Set by the tests that assert a path never reaches the database at all.
-        var failIfQueried = false
+        // Runs inside the table read, to make the forget-during-lookup interleaving deterministic.
+        var onTableRead: (() -> Unit)? = null
 
-        override fun headersJsonForBlocking(videoUrl: String): String? {
-            check(!failIfQueried) { "headersFor should not have queried the database" }
-            return stored[videoUrl]?.let { DownloadHeaders.encode(it) }
+        fun withRawRow(url: String, headersJson: String?) = apply { stored[url] = headersJson }
+
+        fun dropAll() = stored.clear()
+
+        override fun headerRowForBlocking(videoUrl: String): DownloadHeaderRow? {
+            pointLookups++
+            if (videoUrl !in stored) return null
+            return DownloadHeaderRow(videoUrl, stored[videoUrl])
         }
 
         override fun headerRowsBlocking(): List<DownloadHeaderRow> {
-            check(!failIfQueried) { "headersFor should not have queried the database" }
-            originScans++
-            return stored.map { (url, headers) -> DownloadHeaderRow(url, DownloadHeaders.encode(headers)) }
+            tableScans++
+            onTableRead?.invoke()
+            // Mirrors the query's `WHERE headersJson IS NOT NULL`.
+            return stored.filterValues { it != null }.map { (url, json) -> DownloadHeaderRow(url, json) }
         }
 
         override fun observeAll(): Flow<List<DownloadEntry>> = flowOf(emptyList())
