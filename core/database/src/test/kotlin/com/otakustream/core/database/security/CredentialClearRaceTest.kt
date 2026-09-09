@@ -83,11 +83,15 @@ class CredentialClearRaceTest {
 
         assertEquals("the sign-in must outlive the sign-out it raced", "key-b", store.authKey.value)
         assertEquals("b@example.com", store.email)
-        assertEquals(
-            "and it must still be on disk: memory decides this session, disk decides the next one",
-            "key-b",
-            storedStremioKey(),
-        )
+        // No disk assertion here, deliberately, and the reason is worth writing down because the
+        // assertion looks so obviously right. save()'s write queues on the same serialized scope
+        // *behind* clear()'s queued half — clear() was created first, by the UNDISPATCHED async —
+        // so the removal always runs before the write. The broken code therefore also ends with
+        // key-b on disk, and the assertion passes either way. I checked, by deleting the guard in
+        // clear() and running this test with the two memory assertions above removed: green.
+        //
+        // Memory is what distinguishes fixed from broken here. Disk is pinned by the ordinary
+        // sign-out below, where nothing races the write and a clear that never reaches disk shows.
     }
 
     // The counterpart: an ordinary sign-out still signs out, so the guard above cannot be satisfied
@@ -124,8 +128,9 @@ class CredentialClearRaceTest {
         advanceUntilIdle()
         signingOut.await()
 
+        // Same ordering as the Stremio race above, so the same rule: memory is the assertion that
+        // can fail, and disk is pinned by the ordinary sign-out below.
         assertEquals("token-b", store.token.value)
-        assertEquals("token-b", storedToken())
     }
 
     @Test
@@ -138,7 +143,7 @@ class CredentialClearRaceTest {
         advanceUntilIdle()
 
         assertNull(store.token.value)
-        assertNull(storedToken())
+        assertNull("a revoked token left on disk is read back next launch", storedToken())
     }
 
     // clearIfCurrent is the path a rejected request takes: a 401 revokes the token it was sent
