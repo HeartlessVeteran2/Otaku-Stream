@@ -47,6 +47,11 @@ kapt {
 }
 
 dependencies {
+    // For the @IoDispatcher qualifier. The secure stores serialise their disk work on a
+    // single-threaded view of that dispatcher, and a test cannot control the orderings those
+    // stores' clear/save races depend on unless it can supply the dispatcher.
+    implementation(project(":core:common"))
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.security.crypto)
 

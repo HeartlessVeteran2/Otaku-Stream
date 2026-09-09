@@ -35,6 +35,8 @@ import com.otakustream.core.database.stremio.StremioRepositoryImpl
 import com.otakustream.core.database.tracking.TrackingDao
 import com.otakustream.core.database.tracking.TrackingRepository
 import com.otakustream.core.database.tracking.TrackingRepositoryImpl
+import com.otakustream.core.database.security.SecurePrefsFactory
+import com.otakustream.core.database.security.openEncryptedPrefs
 import com.otakustream.core.database.stremio.StremioAccountStore
 import com.otakustream.core.database.stremio.StremioAccountStoreImpl
 import dagger.Binds
@@ -48,6 +50,13 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 object DatabaseProvidesModule {
+
+    // Wraps openEncryptedPrefs exactly as the credential stores used to call it. Unscoped: each
+    // store opens its own file, and the SharedPreferences instance itself is cached by the
+    // framework per file anyway.
+    @Provides
+    fun provideSecurePrefsFactory(@ApplicationContext context: Context): SecurePrefsFactory =
+        SecurePrefsFactory { fileName -> openEncryptedPrefs(context, fileName) }
 
     @Provides
     @Singleton
