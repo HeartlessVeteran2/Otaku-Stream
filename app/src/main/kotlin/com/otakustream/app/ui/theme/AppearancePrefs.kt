@@ -4,9 +4,10 @@ import android.app.UiModeManager
 import android.content.Context
 import android.content.res.Configuration
 import android.os.Build
+import com.otakustream.core.common.IoDispatcher
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,8 +17,10 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private const val PREFS_NAME = "appearance"
-private const val KEY_THEME_MODE = "theme_mode"
+// internal rather than private so a test can seed the file with a value only a downgrade or a
+// hand-edit would produce, and check that an unreadable choice falls back rather than throws.
+internal const val PREFS_NAME = "appearance"
+internal const val KEY_THEME_MODE = "theme_mode"
 
 // Reads the stored mode without needing the singleton, so the activity can know which scheme it is
 // about to draw *before* Hilt has injected anything.
@@ -80,6 +83,10 @@ fun applyAppNightMode(context: Context, mode: ThemeMode) {
 @Singleton
 class AppearancePrefs @Inject constructor(
     @ApplicationContext private val context: Context,
+    // Injected so a test can supply a dispatcher whose clock it controls, and then assert on the
+    // file once the write has actually run. With Dispatchers.IO written in here the only way to
+    // observe the write was to sleep and hope.
+    @IoDispatcher ioDispatcher: CoroutineDispatcher,
 ) {
     private val _themeMode = MutableStateFlow(storedThemeMode(context))
 
@@ -94,7 +101,7 @@ class AppearancePrefs @Inject constructor(
     // itself on the next launch. That is the same failure the switch to commit() was meant to
     // remove, so leaving the ordering open would have half-fixed it.
     @OptIn(ExperimentalCoroutinesApi::class)
-    private val writeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(1))
+    private val writeScope = CoroutineScope(SupervisorJob() + ioDispatcher.limitedParallelism(1))
 
     fun setThemeMode(mode: ThemeMode) {
         // In-memory first, so the UI turns over on the same frame as the tap. The flow is the only
