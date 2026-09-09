@@ -16,17 +16,26 @@ private val CHALLENGE_MARKERS = listOf(
 // True when [code]/headers/[bodySnippet] look like a Cloudflare challenge (not a normal page and not
 // a genuine origin error served through Cloudflare).
 //
-// Rules: the response must be served by Cloudflare (Server: cloudflare) AND either carry a
-// `cf-mitigated: challenge` header OR (on a 403/503) contain a challenge marker in the body. A bare
-// 503 with no marker is treated as an origin error, NOT a challenge — that was the old false positive.
+// Rules: `cf-mitigated: challenge` is sufficient on its own. Otherwise the response must be served
+// by Cloudflare (Server: cloudflare) AND, on a 403/503, contain a challenge marker in the body. A
+// bare 503 with no marker is treated as an origin error, NOT a challenge — that was the old false
+// positive.
+//
+// The order matters, and it used to be the other way round. `Server: cloudflare` was a hard gate in
+// front of everything, which made one header a single point of failure for every signal: if it ever
+// stopped being emitted — an enterprise customer overriding it, a future default, a proxy in front
+// — detection failed closed for the whole function, including `cf-mitigated: challenge`, which
+// Cloudflare only ever sends about its own challenges and which needs no corroboration. A gate is
+// the right shape for the body markers, whose strings are generic enough to appear on some other
+// host's page; it is the wrong shape for a header that is already proof.
 fun isCloudflareChallengeResponse(
     code: Int,
     serverHeader: String?,
     cfMitigated: String?,
     bodySnippet: String,
 ): Boolean {
-    if (serverHeader?.contains("cloudflare", ignoreCase = true) != true) return false
     if (cfMitigated?.contains("challenge", ignoreCase = true) == true) return true
+    if (serverHeader?.contains("cloudflare", ignoreCase = true) != true) return false
     if (code != 403 && code != 503) return false
     return CHALLENGE_MARKERS.any { bodySnippet.contains(it, ignoreCase = true) }
 }

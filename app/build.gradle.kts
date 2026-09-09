@@ -42,9 +42,20 @@ android {
 
     buildTypes {
         release {
-            // No minification. The app runs untrusted JS source extensions that call app code by
-            // name via reflection, which R8 would rename or strip; and it isn't distributed through
-            // the Play Store, so the smaller-APK payoff isn't worth that risk.
+            // No minification, and the reason is not the one this used to give.
+            //
+            // It said extensions call app code by name via reflection. They do not — there is no
+            // reflection anywhere in this codebase. Both engines resolve names inside their own
+            // interpreter's scope, against JS objects the script itself defined; R8 renames Kotlin
+            // symbols, which are not involved. Anyone re-evaluating this setting on the strength of
+            // that sentence would have been reasoning from a premise that does not hold.
+            //
+            // The setting still stands, on the exposure that is real: Rhino's interpreter, Hilt and
+            // Room all reach for types by name at runtime, and there is not a single keep rule in
+            // the repository to protect them. Turning minification on means writing and testing
+            // those first. The payoff is a smaller APK, which matters least here — the app is not
+            // distributed through the Play Store — and obfuscation is not a security boundary, so
+            // nothing in the threat model depends on it either way.
             isMinifyEnabled = false
             val releaseSigning = signingConfigs.getByName("release")
             signingConfig = if (releaseSigning.storeFile != null) {

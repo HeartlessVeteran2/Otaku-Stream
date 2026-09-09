@@ -113,6 +113,15 @@ capability they exist to have, and it is the reason installing one is a trust de
 
 ### No code minification
 
-Release builds set `isMinifyEnabled = false`. Extensions call app code by name via reflection, which
-R8 would rename or strip, and the app isn't distributed through the Play Store. Obfuscation is not a
-security boundary, so nothing here depends on it.
+Release builds set `isMinifyEnabled = false`.
+
+This previously said extensions call app code by name via reflection. That was wrong: there is no
+reflection anywhere in this codebase. Both script engines resolve names inside their own
+interpreter's scope, against JS objects the script defined — R8 renames Kotlin symbols, which are
+not involved.
+
+The real exposure is Rhino's interpreter, Hilt and Room, all of which reach for types by name at
+runtime, and none of which have a keep rule here — there is not a single `.pro` file in the
+repository. Enabling minification means writing and testing those first. The payoff is a smaller
+APK, which matters least for an app not distributed through the Play Store. Obfuscation is not a
+security boundary, so nothing here depends on it either way.
