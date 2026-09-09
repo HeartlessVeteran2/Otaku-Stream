@@ -36,7 +36,16 @@ class TorrentFileCatalog @Inject constructor() {
     // keys, and this is the same hash arriving from the same places.
     fun remember(infoHash: String, files: List<TorrentFileEntry>) {
         val key = TorrentUri.normalizeInfoHash(infoHash) ?: return
-        synchronized(byInfoHash) { byInfoHash[key] = files.toList() }
+        // Filtered and ordered on the way in, not on every read, and that is about memory more than
+        // work: a torrent's file list is not bounded by its episode count. A pack ships an .nfo per
+        // episode, cover art, sample clips and sidecar subtitles beside them, and a large one can run
+        // to thousands of entries — held for 32 torrents, that is a lot of strings kept for a list
+        // that will never show any of them.
+        //
+        // It is also the same snapshot the old defensive copy gave: listPlayableFiles builds a new
+        // list, so a caller still mutating the one it handed over cannot reach this.
+        val playable = TorrentVideoFiles.listPlayableFiles(files)
+        synchronized(byInfoHash) { byInfoHash[key] = playable }
     }
 
     // The files a picker may offer, already ordered. Empty when this torrent has never been opened
@@ -44,8 +53,7 @@ class TorrentFileCatalog @Inject constructor() {
     // until something plays it.
     fun playableFiles(infoHash: String): List<TorrentFileEntry> {
         val key = TorrentUri.normalizeInfoHash(infoHash) ?: return emptyList()
-        val files = synchronized(byInfoHash) { byInfoHash[key] } ?: return emptyList()
-        return TorrentVideoFiles.listPlayableFiles(files)
+        return synchronized(byInfoHash) { byInfoHash[key] } ?: emptyList()
     }
 
     private companion object {

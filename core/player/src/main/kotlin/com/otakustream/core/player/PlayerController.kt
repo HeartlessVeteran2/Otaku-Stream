@@ -243,6 +243,12 @@ class PlayerController @Inject constructor(
     // Kept so addExternalSubtitle can rebuild the current item (same headers/factory) with an
     // extra subtitle track mid-playback.
     private var currentMediaItem: MediaItem? = null
+
+    // The url the player is actually on, as opposed to the one play() last asked for. They differ
+    // for the whole of every load: play() sets currentMediaUrl on the calling frame and the media
+    // source is installed a coroutine later, so anything reacting to a player callback in that
+    // window is reacting to the *previous* video while currentMediaUrl already names the next one.
+    private var loadedMediaUrl: String? = null
     private var currentDataSourceFactory: DataSource.Factory? = null
     private var lastPersistAtMs = 0L
     // Whether PlaybackService has been started for the current playback session (see
@@ -635,6 +641,9 @@ class PlayerController @Inject constructor(
         }
 
         currentMediaUrl = url
+        // Not yet: the media source is installed further down, on the load coroutine. Until then the
+        // player is still on the previous video.
+        loadedMediaUrl = null
         pendingSegmentStartMs = null
         // Retires whatever the player screen that started the previous video is holding, so its
         // eventual disposal cannot stop this one.
@@ -763,6 +772,7 @@ class PlayerController @Inject constructor(
             val mediaSource = DefaultMediaSourceFactory(dataSourceFactory).createMediaSource(mediaItem)
 
             currentMediaItem = mediaItem
+            loadedMediaUrl = url
             currentDataSourceFactory = dataSourceFactory
 
             // Held back across the prepare, then released once the speed is set.
@@ -986,6 +996,7 @@ class PlayerController @Inject constructor(
 
         currentMediaUrl = null
         currentMediaItem = null
+        loadedMediaUrl = null
         currentDataSourceFactory = null
         currentSkipLookup = null
         manualSegments = emptyList()
@@ -1008,6 +1019,10 @@ class PlayerController @Inject constructor(
             activeSkipSegment = null,
             error = null,
             canRetry = true,
+            // The other half of clearing it in play(). Left behind, the next screen to open the
+            // player renders the previous torrent's episodes before its own play() runs — and a row
+            // tapped in that moment starts a video the user had walked away from.
+            packFiles = emptyList(),
             notice = null,
         )
         _progress.value = PlaybackProgress()
@@ -1139,7 +1154,12 @@ class PlayerController @Inject constructor(
     // on a Media3 thread, at a moment nothing here observes. Reading it at READY is the first point
     // this can be sure the answer exists.
     private fun refreshPackFiles() {
-        val ref = currentMediaUrl?.let { TorrentUri.parse(it) }
+        // Only when the player is on the url play() last asked for. A READY queued for the previous
+        // item can land after the next url is installed and before its media source is, and neither
+        // answer is right in that window: the old item's list belongs to a video the user has left,
+        // and the new url has not started. Empty until they agree, which is a state this already
+        // has a meaning for.
+        val ref = currentMediaUrl?.takeIf { it == loadedMediaUrl }?.let { TorrentUri.parse(it) }
         val listed = if (ref == null) emptyList() else torrentFileCatalog.playableFiles(ref.infoHash)
         val pack = TorrentPackFiles.forPlayback(ref, listed)
         if (pack != _uiState.value.packFiles) {
