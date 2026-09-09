@@ -116,7 +116,9 @@ private object NaturalPathOrder : Comparator<String> {
             }
         }
         // Whatever is left over: the shorter string is the prefix, and prefixes sort first.
-        return (a.length - i) - (b.length - j)
+        val remainingA = a.length - i
+        val remainingB = b.length - j
+        return remainingA - remainingB
     }
 
     private fun Char.isAsciiDigit(): Boolean = this in '0'..'9'
