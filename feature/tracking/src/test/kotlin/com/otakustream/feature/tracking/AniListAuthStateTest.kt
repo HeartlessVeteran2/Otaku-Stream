@@ -52,6 +52,20 @@ class AniListAuthStateTest {
         assertTrue(authState.consume(nonce))
     }
 
+    // A clock that moved backwards must not resurrect a stale nonce. Subtracting gives a negative
+    // age, which sails under any upper bound — so a nonce minted before the user changed the date,
+    // or before an NTP correction, would read as freshly issued for as long as the clock stayed
+    // behind. There is no reading of "the clock went backwards" under which it is still
+    // trustworthy.
+    @Test
+    fun `a nonce from the future is refused rather than treated as fresh`() {
+        val nonce = authState.begin()
+
+        nowMs -= 60 * 60 * 1000L
+
+        assertFalse(authState.consume(nonce))
+    }
+
     // Expiring clears the nonce, and that does not reopen the denial-of-service the class refuses
     // to allow elsewhere: a *failed match* must not burn a nonce the real redirect still needs, but
     // an expired one could not have been accepted by anything arriving later anyway.

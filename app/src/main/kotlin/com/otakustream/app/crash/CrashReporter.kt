@@ -40,7 +40,10 @@ object CrashReporter {
             // not in the foreground, the screen is not going to appear, and handing the crash
             // straight to the platform's handler is strictly better than killing the process in
             // silence.
-            val canShowScreen = shouldLaunchCrashScreen(processImportance(application))
+            val canShowScreen = shouldLaunchCrashScreen(
+                sdkInt = Build.VERSION.SDK_INT,
+                importance = processImportance(application),
+            )
             val launched = canShowScreen && runCatching {
                 val intent = Intent(application, CrashActivity::class.java).apply {
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
@@ -83,22 +86,34 @@ object CrashReporter {
     // Split out and internal so the rule can be tested: the handler around it needs a real
     // Application, a real Looper and a process to kill, none of which a JVM test has.
     //
-    // The comparison runs backwards from how it reads: ActivityManager numbers importance so that
-    // *lower is more important* — FOREGROUND is 100, FOREGROUND_SERVICE 125, VISIBLE 200,
-    // PERCEPTIBLE 230, SERVICE 300, CACHED 400. So `<= IMPORTANCE_VISIBLE` is the states with a
-    // window on screen or a foreground service, which are the ones the platform exempts from
-    // background-activity-launch restrictions. Written first as `<= FOREGROUND_SERVICE`, which
-    // silently excluded a visible app — the common case — and the test caught it.
+    // Only where the restriction exists, and only for the states it actually exempts.
     //
-    // FOREGROUND_SERVICE is in deliberately: a download running with the user's screen off is a
-    // foreground service, and a crash there is exactly the kind that otherwise disappears.
-    // PERCEPTIBLE and below are out; they are not exempt, so the launch would be declined.
+    // The restriction arrived in Q. minSdk here is 24, and on API 24-28 a background process may
+    // start an activity freely — so gating those devices would suppress the crash screen for a rule
+    // that does not apply to them. Below Q, always try.
     //
-    // Anything less certain falls back to the platform handler, which costs a logcat trace instead
-    // of a nice screen — the safe direction, since the alternative is a crash with no trace at all.
-    internal fun shouldLaunchCrashScreen(importance: Int): Boolean =
-        importance != IMPORTANCE_UNKNOWN &&
-            importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE
+    // From Q up, the exemption list is narrower than it is tempting to assume. A process with a
+    // *visible window* qualifies: IMPORTANCE_FOREGROUND (an activity the user is interacting with)
+    // and IMPORTANCE_VISIBLE (a window on screen but not focused). A bare foreground service does
+    // not — which is the whole reason full-screen-intent notifications exist — so
+    // IMPORTANCE_FOREGROUND_SERVICE is excluded even though it is numerically "more important" than
+    // VISIBLE. An earlier version let it through on the strength of a `<=` and a wrong belief about
+    // the exemption list.
+    //
+    // Being wrong in this direction is the only affordable one. The prediction protects nothing it
+    // predicts optimistically: a declined launch is a log line, not an exception, so
+    // `startActivity` still "succeeds", `launched` is still true, and the process is still killed
+    // in silence — the exact failure this exists to fix. A conservative miss costs a logcat trace
+    // instead of a nice screen; an optimistic one costs the whole crash.
+    //
+    // (ActivityManager numbers importance so that *lower is more important* — FOREGROUND 100,
+    // FOREGROUND_SERVICE 125, VISIBLE 200, PERCEPTIBLE 230, SERVICE 300, CACHED 400 — which is why
+    // this is a membership test rather than a comparison.)
+    internal fun shouldLaunchCrashScreen(sdkInt: Int, importance: Int): Boolean {
+        if (sdkInt < Build.VERSION_CODES.Q) return true
+        return importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND ||
+            importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE
+    }
 
     // IMPORTANCE_UNKNOWN rather than a default that guesses: runningAppProcesses can return null on
     // some OEM builds, and treating "we could not tell" as foreground would put us back to killing

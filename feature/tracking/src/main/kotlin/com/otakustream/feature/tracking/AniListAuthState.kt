@@ -84,8 +84,14 @@ class AniListAuthState internal constructor(
         //
         // A missing stamp is treated as expired rather than as valid forever — that is a nonce
         // written by a build before this existed, and its whole sign-in is long over.
+        // A clock that has moved backwards counts as expired too. Subtracting gives a negative
+        // age, which sails under any upper bound — so a nonce minted before the user changed the
+        // date, or before an NTP correction, would have been treated as freshly issued for as long
+        // as the clock stayed behind. There is no reading of "the clock went backwards" under which
+        // this nonce is still trustworthy, and re-tapping Connect costs nothing.
         val mintedAt = prefs.getLong(KEY_MINTED_AT, 0L)
-        if (mintedAt <= 0L || nowMs() - mintedAt > VALIDITY_MS) {
+        val age = nowMs() - mintedAt
+        if (mintedAt <= 0L || age < 0L || age > VALIDITY_MS) {
             clear()
             return false
         }
