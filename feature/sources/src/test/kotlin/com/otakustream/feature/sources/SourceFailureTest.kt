@@ -1,6 +1,7 @@
 package com.otakustream.feature.sources
 
 import com.otakustream.core.sources.api.SourceHttpException
+import com.otakustream.core.sources.mangayomi.runtime.ExtensionTimeoutException
 import com.otakustream.core.sources.mangayomi.runtime.ExtensionWedgedException
 import com.otakustream.core.sources.scripting.ScriptTimeoutException
 import org.junit.Assert.assertEquals
@@ -149,6 +150,28 @@ class SourceFailureTest {
         assertEquals(
             "AnimeKai — stopped responding — reload or remove it",
             SourceFailure(1L, "AnimeKai", FailureReason.Stuck).describe(),
+        )
+    }
+
+    // Slow is not stuck, and conflating them tells the user to reload an extension that recovered.
+    //
+    // QuickJS has no interrupt hook, so its watchdog cannot know whether a call that overran its
+    // budget is gone or merely slow — a big catalog page on a weak signal overruns and then
+    // arrives. So an overrun is an ordinary timeout, and only a call *refused* because the thread
+    // is still missing reports Stuck.
+    @Test
+    fun `an overrun reads as slow, and only a refusal reads as stuck`() {
+        assertEquals(
+            FailureReason.Timeout(60_000),
+            ExtensionTimeoutException("getPopular", 60_000).toFailureReason(),
+        )
+        assertEquals(
+            FailureReason.Stuck,
+            ExtensionWedgedException("getPopular").toFailureReason(),
+        )
+        assertEquals(
+            "AnimeKai — timed out after 60s",
+            SourceFailure(1L, "AnimeKai", FailureReason.Timeout(60_000)).describe(),
         )
     }
 
