@@ -74,8 +74,9 @@ class MediaDetailsBookmarkTest {
 
         val viewModel = viewModel(library)
         viewModel.load(sourceId = 7L, mediaUrl = "media-1", mediaTitle = "Show")
-        // Deliberately NOT advancing to let `inLibrary` catch up: pressing while it still reads
-        // false is the whole scenario.
+        // `inLibrary` is a stateIn(WhileSubscribed) and nothing in this test collects it, so it
+        // never leaves its initial false — which is the state a real press races. Pressing while
+        // the flag still reads false is the whole scenario.
         viewModel.toggleWatchlist()
         advanceUntilIdle()
 
@@ -90,6 +91,28 @@ class MediaDetailsBookmarkTest {
             library.rows["media-1"]?.addedAtEpochMs,
         )
         assertTrue("and it must go through addIfAbsent, not a whole-row upsert", library.addIfAbsentCalls > 0)
+    }
+
+    // The other half of the same race, and the one the tempting fix breaks.
+    //
+    // Nothing is saved yet, so the first press genuinely adds. The second press is still reading the
+    // same stale false — `inLibrary` is a Room round-trip plus a stateIn behind the tap — so it
+    // takes the save branch again, and that has to stay a no-op. The obvious way to "handle" a
+    // double press is to track the intent locally and let the second one mean undo; that would
+    // delete the title the user had just asked to keep, from two taps that both said save.
+    @Test
+    fun `pressing the bookmark twice before the flag catches up leaves it saved`() = runTest(dispatcher) {
+        val library = FakeLibraryRepository()
+
+        val viewModel = viewModel(library)
+        viewModel.load(sourceId = 7L, mediaUrl = "media-1", mediaTitle = "Show")
+        viewModel.toggleWatchlist()
+        viewModel.toggleWatchlist()
+        advanceUntilIdle()
+
+        assertTrue("two presses that both said save must not undo each other", library.rows.containsKey("media-1"))
+        assertEquals("neither press may remove", 0, library.removeCalls)
+        assertEquals("both presses take the save branch", 2, library.addIfAbsentCalls)
     }
 
     // The message that used to be erased by an unrelated success.
@@ -187,6 +210,8 @@ class MediaDetailsBookmarkTest {
         val statuses = mutableMapOf<String, String>()
         var addIfAbsentCalls = 0
             private set
+        var removeCalls = 0
+            private set
 
         override fun observeLibrary(): Flow<List<LibraryEntry>> = flowOf(rows.values.toList())
         override fun observeInLibrary(mediaUrl: String): Flow<Boolean> = flowOf(rows.containsKey(mediaUrl))
@@ -200,6 +225,7 @@ class MediaDetailsBookmarkTest {
         }
 
         override suspend fun remove(mediaUrl: String) {
+            removeCalls++
             rows.remove(mediaUrl)
             statuses.remove(mediaUrl)
         }
