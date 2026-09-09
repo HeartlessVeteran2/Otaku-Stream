@@ -8,6 +8,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.Closeable
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 // One extension call took longer than the engine's whole budget.
@@ -102,7 +103,19 @@ internal class EngineWatchdog(
         wedgedBy.get()?.let { throw ExtensionWedgedException(it.method) }
 
         val mine = Wedge(method)
+        // Whether this call ever reached the engine thread, which decides whether it is allowed to
+        // say the engine is gone.
+        //
+        // Only a call that actually ran can be the one holding the thread. A call still queued when
+        // its budget expires is a *symptom* of someone else holding it, and marking on its behalf
+        // is not merely imprecise — it is unrecoverable. Its own block never runs, so the finally
+        // below never runs either, so the mark it left is never cleared; and the call genuinely
+        // holding the thread cannot clear it, because compareAndSet only matches its own token. A
+        // slow-but-recoverable call would then leave the extension refusing every later call for
+        // the life of the process, which is the exact failure this class exists to prevent.
+        val started = AtomicBoolean(false)
         val work = engineScope.async {
+            started.set(true)
             try {
                 block()
             } finally {
@@ -150,9 +163,11 @@ internal class EngineWatchdog(
         }
 
         if (completed == null) {
-            // Mark only if nothing is marked: the first call to overrun is the one holding the
-            // thread, and a later one timing out behind it is a symptom, not the cause.
-            wedgedBy.compareAndSet(null, mine)
+            // Two conditions, and both are about the same thing: only the call that is actually
+            // holding the engine thread may say the engine is gone. `started` rules out one that
+            // never got it; compareAndSet rules out overwriting a mark already left by the call
+            // that did.
+            if (started.get()) wedgedBy.compareAndSet(null, mine)
             // Same reasoning as caller cancellation — if this call never got the thread, it is
             // stale now and must not run later.
             work.cancel()

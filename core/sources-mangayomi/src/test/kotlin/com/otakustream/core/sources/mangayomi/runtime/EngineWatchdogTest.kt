@@ -203,12 +203,18 @@ class EngineWatchdogTest {
         }
     }
 
-    // Not covered here, and worth saying rather than implying: that a call clears only *its own*
-    // wedge mark. The mark is a per-call token set and cleared with compareAndSet, so a call
-    // finishing late cannot erase a mark another call left — but abandoning queued work above means
-    // only a call that actually held the thread can leave a mark in the first place, and there is
-    // no scheduling this test can force where two of those overlap. The compareAndSet is kept
-    // because it is free and provably right, not because anything here would catch its removal.
+    // Not covered here, and worth saying rather than implying. Two guards in EngineWatchdog have no
+    // test that forces the race they exist for, and removing either leaves this file green:
+    //
+    //  - a call clears only *its own* mark (compareAndSet on the token), and
+    //  - only a call that reached the engine thread may leave one (the `started` flag).
+    //
+    // Both are about two calls whose budgets expire in the same instant, one of them still queued.
+    // The consequence is real and permanent — a queued call's mark is never cleared, because its
+    // block never runs, so the extension would refuse every later call for the life of the process
+    // even after the thread came back. But the engine serialises the work while the callers race,
+    // and nothing here can pin which compareAndSet lands first. Kept because they are free and
+    // provably right, not because a test would catch their removal.
 
     // A script that throws is broken, not stuck, and the two need different words — a thrown error
     // must not cost the extension every later call.
@@ -268,10 +274,16 @@ class EngineWatchdogTest {
             }
 
             assertTrue("the queued call should not wait forever", queuedDone.await(10, TimeUnit.SECONDS))
+            // Exactly a timeout, not "either exception".
+            //
+            // Accepting ExtensionWedgedException too let this pass via the refused-before-dispatch
+            // path, which is the *previous* test's scenario — so it could go green without ever
+            // exercising a queued call. This call is submitted while the engine is still unmarked,
+            // so it queues; and having never reached the thread it must not report itself as the
+            // wedge either.
             assertTrue(
-                "expected the queued call to end, got ${queuedResult.get()}",
-                queuedResult.get() is ExtensionTimeoutException ||
-                    queuedResult.get() is ExtensionWedgedException,
+                "expected a timeout, got ${queuedResult.get()}",
+                queuedResult.get() is ExtensionTimeoutException,
             )
         } finally {
             callers.cancel()
