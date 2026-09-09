@@ -41,7 +41,10 @@ import com.otakustream.core.sources.api.PlaybackQueue
 import com.otakustream.core.sources.api.SkipMark
 import kotlinx.coroutines.CancellationException
 import com.otakustream.core.player.torrent.TorrentDataSource
+import com.otakustream.core.torrent.TorrentFileEntry
+import com.otakustream.core.torrent.TorrentRef
 import com.otakustream.core.torrent.TorrentUri
+import com.otakustream.core.torrent.TorrentVideoFiles
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -126,6 +129,54 @@ data class PlayerUiState(
     // A brief message for the user about something that just happened but isn't a playback failure —
     // shown as an on-screen label, not the error overlay. Cleared once shown.
     val notice: String? = null,
+    // The other episodes in the torrent being played, when there are any.
+    //
+    // Empty for everything that is not a multi-file torrent, which is most playback: an http stream,
+    // a local file, and a single-file torrent all have nothing to pick between, and a picker over
+    // one row is chrome. Empty is also what it holds before the torrent's metadata arrives, because
+    // until then nothing in the app knows what a magnet contains.
+    val packFiles: List<TorrentPackFile> = emptyList(),
+)
+
+// What the picker shows, worked out from the torrent's file list and the url on screen.
+//
+// Pure and separate from PlayerController, which is 1200 lines around a Media3 player and cannot be
+// constructed on a JVM runner. Both rules here are the silent kind — get either wrong and the sheet
+// still renders, just marking the wrong row or offering a choice that isn't one.
+object TorrentPackFiles {
+
+    fun forPlayback(ref: TorrentRef?, listed: List<TorrentFileEntry>): List<TorrentPackFile> {
+        // One file is not a choice. A single-file torrent is what most magnets are, and a picker
+        // showing the row you are already watching is a control that cannot do anything.
+        if (ref == null || listed.size < 2) return emptyList()
+        // `auto` names no index, so the current file has to be resolved the same way the reader
+        // resolved it — the same function over the same list, which is what makes the row the picker
+        // marks the row that is actually playing.
+        val current = if (ref.isAuto) TorrentVideoFiles.selectPlayableFile(listed) else ref.fileIdx
+        return listed.map { entry ->
+            TorrentPackFile(
+                fileIndex = entry.index,
+                // Directories dropped: release groups put the episode number in the filename, and
+                // the directory above it is the pack's name repeated on every single row.
+                label = entry.path.substringAfterLast('/'),
+                sizeBytes = entry.sizeBytes,
+                isCurrent = entry.index == current,
+            )
+        }
+    }
+}
+
+// One episode inside the torrent that is playing, as the picker shows it.
+//
+// The label is the file's own name with its directories dropped: release groups put the episode
+// number in the filename, and the directory above it is the pack's name repeated on every row.
+data class TorrentPackFile(
+    val fileIndex: Int,
+    val label: String,
+    val sizeBytes: Long,
+    // Whether this is the file on screen right now. Resolved rather than read off the url, because a
+    // url that says `auto` names no index at all.
+    val isCurrent: Boolean,
 )
 
 @OptIn(UnstableApi::class)
@@ -138,6 +189,9 @@ class PlayerController @Inject constructor(
     private val playerSettingsPrefs: PlayerSettingsPrefs,
     private val castManager: com.otakustream.core.player.cast.CastManager,
     private val torrentEngine: com.otakustream.core.torrent.TorrentEngine,
+    // What is inside the torrent being played. Filled in by the reader when metadata arrives, which
+    // is why the picker is populated on STATE_READY rather than when playback is asked for.
+    private val torrentFileCatalog: com.otakustream.core.torrent.TorrentFileCatalog,
     // Injected rather than constructed here: SimpleCache takes an exclusive lock on its directory,
     // so the downloader and the player must be looking at the same instance, not two views of the
     // same folder.
@@ -296,6 +350,10 @@ class PlayerController @Inject constructor(
                 publishProgress(_progress.value.positionMs)
                 if (playbackState == Player.STATE_READY) {
                     maybeFetchAniSkip()
+                    // Here rather than in play(): a magnet carries no file list, so at the moment
+                    // playback is asked for there is nothing to list. By READY the reader has the
+                    // torrent's metadata and has published it.
+                    refreshPackFiles()
                 }
                 if (playbackState == Player.STATE_ENDED && PlaybackQueue.autoPlayEnabled) {
                     playNextJob?.cancel()
@@ -600,6 +658,11 @@ class PlayerController @Inject constructor(
             codecName = null,
             videoBitrateBps = 0,
             notice = null,
+            // The previous torrent's episodes must not sit in the picker over this video. Cleared
+            // rather than recomputed: whether there is anything to list is not known until the new
+            // media's metadata arrives, and a list that is briefly the old one is worse than none —
+            // tapping a row would leave the episode the user just started.
+            packFiles = emptyList(),
         )
 
         // Reset skip state for the new media before either source repopulates it. The lookup is
@@ -1068,6 +1131,37 @@ class PlayerController @Inject constructor(
             )
         }
         play(url, continuesChain = true)
+    }
+
+    // The other episodes in the torrent on screen, or nothing when there is no choice to offer.
+    //
+    // Recomputed rather than cached: the catalog is filled in by whichever reader opened the file,
+    // on a Media3 thread, at a moment nothing here observes. Reading it at READY is the first point
+    // this can be sure the answer exists.
+    private fun refreshPackFiles() {
+        val ref = currentMediaUrl?.let { TorrentUri.parse(it) }
+        val listed = if (ref == null) emptyList() else torrentFileCatalog.playableFiles(ref.infoHash)
+        val pack = TorrentPackFiles.forPlayback(ref, listed)
+        if (pack != _uiState.value.packFiles) {
+            _uiState.value = _uiState.value.copy(packFiles = pack)
+        }
+    }
+
+    // Switch to another episode inside the torrent already playing.
+    //
+    // A plain play() of the same torrent with a different file index: torrent:// is one identity per
+    // file, so resume position, skip markers and history all follow the episode rather than the
+    // pack. Provenance is USER, which is the truth — this is the viewer choosing, not a source
+    // returning a link — and torrent:// is allowed under both.
+    fun playPackFile(fileIndex: Int) {
+        val ref = currentMediaUrl?.let { TorrentUri.parse(it) } ?: return
+        // Already on screen. Worth checking rather than letting play() restart it: when the current
+        // url says `auto`, the file it resolved to has a *different* url from the one this would
+        // build, so nothing further down would notice they are the same file — and the viewer would
+        // lose their place in the episode they are already watching.
+        if (_uiState.value.packFiles.any { it.fileIndex == fileIndex && it.isCurrent }) return
+        val url = TorrentUri.build(ref.infoHash, fileIndex) ?: return
+        play(url)
     }
 
     // AniSkip is fetched once per playback, after the real duration is known (STATE_READY).

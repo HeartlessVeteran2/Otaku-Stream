@@ -34,7 +34,8 @@ object TorrentVideoFiles {
 
     // The file to play when nothing asks the user. Largest wins: within one torrent the feature is
     // reliably larger than extras, and across a season pack the episodes are close enough in size
-    // that this only decides between equals — which is why a pack still needs the picker below.
+    // that this only decides between equals — which is why a pack also needs listPlayableFiles, so
+    // the player can offer the rest.
     //
     // Returns null only when the torrent contains no video at all, which is a real answer: the
     // caller should say so rather than open index 0 and let the player fail with nothing to explain.
@@ -44,6 +45,25 @@ object TorrentVideoFiles {
             // position keyed on torrent://<hash>/<index> would point somewhere else on replay.
             compareBy<TorrentFileEntry> { it.sizeBytes }.thenByDescending { it.path.lowercase() },
         )?.index
+
+    // Every file the picker may offer, in the order a person reads a season: natural, so episode 2
+    // comes before episode 10.
+    //
+    // Same candidate set as selectPlayableFile, deliberately. If the two disagreed, a pack would
+    // open on a file the picker does not list — and the row the user is looking at would be the one
+    // they cannot see is playing.
+    //
+    // Ordered by path rather than by the torrent's own file order, which is not reliably episode
+    // order, and certainly not by size, which is what selectPlayableFile uses and would interleave a
+    // season at random.
+    fun listPlayableFiles(files: List<TorrentFileEntry>): List<TorrentFileEntry> =
+        candidates(files).sortedWith(NATURAL_ORDER)
+
+    // Ties broken on index so the order is total: two files can share a path in a malformed torrent,
+    // and a comparator that called them equal would let sortedWith return them in either order.
+    private val NATURAL_ORDER: Comparator<TorrentFileEntry> =
+        compareBy(NaturalPathOrder) { entry: TorrentFileEntry -> entry.path }
+            .thenBy { entry -> entry.index }
 
     private fun candidates(files: List<TorrentFileEntry>): List<TorrentFileEntry> {
         val videos = files.filter { extensionOf(it.path) in EXTENSIONS && it.sizeBytes > 0 }
@@ -61,4 +81,43 @@ object TorrentVideoFiles {
             .any { it.lowercase() in SAMPLE_MARKERS }
 
     private fun extensionOf(path: String): String = path.substringAfterLast('.', "").lowercase()
+}
+
+// Digit runs compared as numbers, everything else case-insensitively, so "Episode 2" precedes
+// "Episode 10". Plain lexicographic ordering puts 10 before 2, which for a season pack is wrong in
+// exactly the case this picker exists for — and wrong quietly, since the list still looks sorted.
+//
+// ASCII digits only, on purpose. Char.isDigit() accepts any Unicode decimal digit, and a filename
+// carrying Arabic-Indic numerals would be parsed as a number this comparator cannot then compare
+// against an ASCII one. Treating those as ordinary characters is the honest answer.
+private object NaturalPathOrder : Comparator<String> {
+    override fun compare(a: String, b: String): Int {
+        var i = 0
+        var j = 0
+        while (i < a.length && j < b.length) {
+            if (a[i].isAsciiDigit() && b[j].isAsciiDigit()) {
+                val startA = i
+                val startB = j
+                while (i < a.length && a[i].isAsciiDigit()) i++
+                while (j < b.length && b[j].isAsciiDigit()) j++
+                // Leading zeros dropped first, so "07" and "7" are the same episode rather than the
+                // string comparison's two different ones. After that a longer run is the larger
+                // number, and equal lengths compare as text.
+                val numA = a.substring(startA, i).trimStart('0')
+                val numB = b.substring(startB, j).trimStart('0')
+                if (numA.length != numB.length) return numA.length - numB.length
+                val digits = numA.compareTo(numB)
+                if (digits != 0) return digits
+            } else {
+                val chars = a[i].lowercaseChar().compareTo(b[j].lowercaseChar())
+                if (chars != 0) return chars
+                i++
+                j++
+            }
+        }
+        // Whatever is left over: the shorter string is the prefix, and prefixes sort first.
+        return (a.length - i) - (b.length - j)
+    }
+
+    private fun Char.isAsciiDigit(): Boolean = this in '0'..'9'
 }
