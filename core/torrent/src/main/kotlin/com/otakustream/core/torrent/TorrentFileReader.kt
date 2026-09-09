@@ -180,6 +180,11 @@ class TorrentFileReader private constructor(
             trackers: List<String>,
             saveDir: File,
             onClosed: (TorrentFileReader) -> Unit,
+            // Handed the torrent's whole file list the moment it is known. This is the only place in
+            // the app where it exists — a magnet carries none of it — and it is needed on a screen,
+            // which is nowhere near here. A callback rather than a dependency for the same reason
+            // onClosed is one: this class reads bytes, and it should not also know who is listening.
+            onFilesKnown: (List<TorrentFileEntry>) -> Unit = {},
         ): TorrentFileReader {
             if (!saveDir.exists() && !saveDir.mkdirs()) {
                 throw IOException("Could not create torrent save directory: $saveDir")
@@ -194,6 +199,11 @@ class TorrentFileReader private constructor(
             val entries = (0 until files.numFiles()).map { index ->
                 TorrentFileEntry(index = index, path = files.filePath(index), sizeBytes = files.fileSize(index))
             }
+
+            // Published before the index is settled, and before any of the failures below can throw:
+            // a torrent with no video in it is exactly the case where a screen most wants to say what
+            // it does contain instead of "could not play".
+            onFilesKnown(entries)
 
             val fileIdx = if (ref.isAuto) {
                 TorrentVideoFiles.selectPlayableFile(entries)

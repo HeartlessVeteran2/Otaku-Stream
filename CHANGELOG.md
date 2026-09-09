@@ -53,6 +53,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   sole way to remove one thing was to clear all of it. The per-row delete has an undo, and the undo
   expires when the history it came from is wiped — the Clear dialog says it cannot be undone, and
   that has to stay true even while an older snackbar is still on screen.
+- **A season pack's other episodes are reachable from the player.** A magnet often points at a whole
+  season, and the app opened whichever file was largest with no way to get to the rest — so a viewer
+  who wanted episode 7 had to go back and hope a different magnet held only that episode. The track
+  sheet now offers what else is in the torrent, in the order a person counts episodes rather than
+  the order the strings sort in. Picking one starts a new playback of that file, so resume position,
+  skip markers and history follow the episode instead of the pack.
 - **Pull down to reload** (#142, #144) on the three screens that fetch over the network — Play,
   Browse, and the Stremio account library. There was no way to ask for fresh data short of leaving
   the tab and coming back. Each screen tracks refreshing separately from its first load, so the

@@ -123,6 +123,7 @@ fun PlayerScreen(
     var showTrackSheet by remember { mutableStateOf(false) }
     var showEqualizerSheet by remember { mutableStateOf(false) }
     var showSubtitleStyleSheet by remember { mutableStateOf(false) }
+    var showPackFileSheet by remember { mutableStateOf(false) }
     // Window brightness as a 0..1 fraction, tracked here so the gesture HUD can show a level ring.
     //
     // Null until a baseline is known. It used to start at a fabricated 0.5f, which meant the first
@@ -596,9 +597,27 @@ fun PlayerScreen(
                         showTrackSheet = false
                         showSubtitleStyleSheet = true
                     },
+                    onOpenPackFiles = {
+                        showTrackSheet = false
+                        showPackFileSheet = true
+                    },
                     onAutoSkipChange = viewModel::setAutoSkipEnabled,
                     onSeekDurationChange = viewModel::setSeekDurationMs,
                     onDismiss = { showTrackSheet = false },
+                )
+            }
+
+            if (showPackFileSheet) {
+                PackFileSheet(
+                    files = uiState.packFiles,
+                    onSelect = { fileIndex ->
+                        // Dismissed before the switch, not after: picking a row starts a new
+                        // playback, and a sheet left open over the episode that just started is a
+                        // sheet the viewer has to dismiss to see what they asked for.
+                        showPackFileSheet = false
+                        viewModel.playPackFile(fileIndex)
+                    },
+                    onDismiss = { showPackFileSheet = false },
                 )
             }
 

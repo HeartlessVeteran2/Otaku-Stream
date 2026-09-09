@@ -20,6 +20,9 @@ class TorrentEngine @Inject constructor(
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     private val settings: TorrentSettings,
     private val trackerStore: TorrentTrackerStore,
+    // Where a torrent's file list goes once open() learns it, so a screen can ask what else is in
+    // the pack without holding a reader open.
+    private val fileCatalog: TorrentFileCatalog,
 ) {
 
     private val lock = Any()
@@ -280,6 +283,7 @@ class TorrentEngine @Inject constructor(
                 effectiveTrackers,
                 saveDir,
                 onClosed = { closing -> releaseReader(openedAt, closing) },
+                onFilesKnown = { files -> fileCatalog.remember(ref.infoHash, files) },
             )
         } catch (e: Throwable) {
             // The count was taken before open() could fail; give it back, or a failed open would

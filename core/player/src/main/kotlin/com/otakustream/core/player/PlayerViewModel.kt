@@ -95,6 +95,11 @@ class PlayerViewModel @Inject constructor(
 
     fun clearSubtitleOverride() = controller.clearTrackOverride(C.TRACK_TYPE_TEXT)
 
+    // Another episode inside the torrent already playing. Not a track selection — it starts a new
+    // playback of a different url — but it belongs in the same sheet, because from the viewer's side
+    // it is the same question: which of the things in front of me do I want to watch.
+    fun playPackFile(fileIndex: Int) = controller.playPackFile(fileIndex)
+
     fun clearVideoQualityOverride() = controller.clearTrackOverride(C.TRACK_TYPE_VIDEO)
 
     fun setSubtitlesEnabled(enabled: Boolean) = controller.setSubtitlesEnabled(enabled)

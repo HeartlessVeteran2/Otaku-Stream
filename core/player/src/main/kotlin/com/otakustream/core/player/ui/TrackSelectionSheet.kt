@@ -13,6 +13,7 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.FormatColorText
+import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -39,6 +40,7 @@ fun TrackSelectionSheet(
     onSubtitlesEnabledChange: (Boolean) -> Unit,
     onLoadSubtitleFile: () -> Unit,
     onOpenSubtitleStyle: () -> Unit,
+    onOpenPackFiles: () -> Unit,
     onAutoSkipChange: (Boolean) -> Unit,
     onSeekDurationChange: (Long) -> Unit,
     onDismiss: () -> Unit,
@@ -101,6 +103,24 @@ fun TrackSelectionSheet(
             }
             if (uiState.videoQualityTracks.isNotEmpty()) {
                 TrackSection(title = "Quality", tracks = uiState.videoQualityTracks, onSelect = onSelectQuality)
+            }
+            // Only for a torrent holding more than one playable file, which is what packFiles being
+            // non-empty means. A row here rather than the list itself: a season is longer than this
+            // sheet's fixed-height Column can show.
+            if (uiState.packFiles.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        // Role.Button: these are clickable Rows, so without it a screen reader
+                        // announces the text and gives no indication it can be activated.
+                        .clickable(onClick = onOpenPackFiles, role = Role.Button)
+                        .padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(imageVector = Icons.Filled.VideoLibrary, contentDescription = null)
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(text = "In this torrent (${uiState.packFiles.size})")
+                }
             }
 
             Text(text = "Playback", style = MaterialTheme.typography.titleMedium)
