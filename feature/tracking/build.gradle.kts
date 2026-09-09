@@ -63,6 +63,9 @@ dependencies {
     // UiMessages — the app-wide snackbar sink. Background sync has no screen of its own to put a
     // message on, and being signed out of AniList without being told is worse than being told.
     implementation(project(":core:sources-api"))
+    // runCatchingCancellable — AniSkipClient's contract is "any failure is an empty list", and the
+    // helper is how this project keeps that promise without also swallowing cancellation.
+    implementation(project(":core:common"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
