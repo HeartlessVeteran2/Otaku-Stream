@@ -92,7 +92,8 @@ class EpisodeDownloadsImpl @Inject constructor(
     // isM3U8 and headers are the two things the player is given per-video that a bare url does not
     // carry, and both decide whether the download works at all — see DownloadEntry.
     override fun start(url: String, isM3U8: Boolean, headers: Map<String, String>) {
-        // Registered before the request, so the first segment fetch already has them.
+        // Registered before the request, so the download's first fetch already has them — and its
+        // segments too, which reach the same entry through the origin. See DownloadHeaders.
         if (headers.isNotEmpty()) downloadHeaders.remember(url, headers)
         val request = DownloadRequest.Builder(url, android.net.Uri.parse(url))
             // Without this, an HLS url whose path has no .m3u8 extension is treated as a

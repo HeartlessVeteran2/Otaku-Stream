@@ -30,6 +30,19 @@ interface DownloadDao {
     @Query("SELECT headersJson FROM downloads WHERE videoUrl = :videoUrl LIMIT 1")
     fun headersJsonForBlocking(videoUrl: String): String?
 
+    // Every row that stored headers, so a request whose url is not itself a download can still find
+    // the download it belongs to. An HLS download fetches a playlist and then hundreds of segments,
+    // and only the playlist's url is in this table — see DownloadHeaders.
+    //
+    // Whole rows rather than a LIKE prefix: matching an origin in SQL means escaping `%` and `_` in
+    // a url, and getting that subtly wrong silently applies one host's headers to another. The table
+    // holds one row per saved episode, so scanning it costs nothing measurable, and the comparison
+    // happens in Kotlin where it can be tested.
+    //
+    // Blocking for the same reason as the query above.
+    @Query("SELECT videoUrl, headersJson FROM downloads WHERE headersJson IS NOT NULL")
+    fun headerRowsBlocking(): List<DownloadHeaderRow>
+
     // REPLACE rather than IGNORE: re-downloading an episode after removing it should pick up the
     // current title and cover, not silently keep whatever was stored the first time.
     @Insert(onConflict = OnConflictStrategy.REPLACE)

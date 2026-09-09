@@ -45,4 +45,9 @@ dependencies {
     kapt(libs.hilt.compiler)
 
     testImplementation(libs.junit)
+    // Real org.json for JVM unit tests (the android.jar stub throws "not mocked"). DownloadHeaders
+    // encodes and decodes its stored headers with JSONObject, and decode() swallows the stub's
+    // exception into an empty map — so without this the header tests fail as silently wrong values
+    // rather than as a missing dependency.
+    testImplementation(libs.json)
 }
