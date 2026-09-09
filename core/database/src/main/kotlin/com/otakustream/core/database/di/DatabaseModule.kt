@@ -35,6 +35,8 @@ import com.otakustream.core.database.stremio.StremioRepositoryImpl
 import com.otakustream.core.database.tracking.TrackingDao
 import com.otakustream.core.database.tracking.TrackingRepository
 import com.otakustream.core.database.tracking.TrackingRepositoryImpl
+import com.otakustream.core.database.stremio.StremioAccountStore
+import com.otakustream.core.database.stremio.StremioAccountStoreImpl
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -102,6 +104,13 @@ object DatabaseProvidesModule {
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class DatabaseBindsModule {
+
+    // @Singleton is load-bearing here, not decoration: the store holds the in-memory authKey
+    // StateFlow every screen observes. A second instance would have its own, so a sign-out on one
+    // screen would be invisible to another until the process restarted.
+    @Binds
+    @Singleton
+    abstract fun bindStremioAccountStore(impl: StremioAccountStoreImpl): StremioAccountStore
 
     @Binds
     abstract fun bindPlaybackProgressRepository(
