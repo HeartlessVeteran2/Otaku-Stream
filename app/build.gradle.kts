@@ -67,6 +67,15 @@ android {
     buildFeatures {
         compose = true
     }
+
+    testOptions {
+        unitTests {
+            // Robolectric needs the merged manifest and resources to build its simulated app.
+            // AppearancePrefs reads and writes a real SharedPreferences file, and without this the
+            // test fails looking for an application rather than failing an assertion.
+            isIncludeAndroidResources = true
+        }
+    }
 }
 
 dependencies {
@@ -106,4 +115,10 @@ dependencies {
     // The theme's colour tables are plain Kotlin values, so ThemeTest asserts role coverage and
     // contrast on the JVM with no device and no Robolectric.
     testImplementation(libs.junit)
+
+    // AppearancePrefs is the exception: it is the one piece of app-module logic that talks to
+    // SharedPreferences, and the stub android.jar's version throws "not mocked" on every call.
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.kotlinx.coroutines.test)
 }
