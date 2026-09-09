@@ -84,6 +84,11 @@ private fun PackFileRow(file: TorrentPackFile, onClick: () -> Unit) {
 
 // Enough to tell a 350 MB episode from a 1.4 GB one, which is the only question a size answers here:
 // whether this row is the episode or an extra that slipped past the filter.
+//
+// format() without an explicit locale, deliberately: this string is read by a person, so the decimal
+// separator should be theirs. A German viewer should see "1,4 GB". ReadableSizeTest pins that in
+// both directions, because the alternative reading — that the default locale is an oversight — leads
+// to Locale.ROOT and a dot printed to everyone.
 internal fun readableSize(bytes: Long): String = when {
     bytes >= 1024L * 1024L * 1024L -> "%.1f GB".format(bytes / (1024.0 * 1024.0 * 1024.0))
     bytes >= 1024L * 1024L -> "${bytes / (1024L * 1024L)} MB"

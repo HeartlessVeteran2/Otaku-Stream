@@ -1,16 +1,40 @@
 package com.otakustream.core.player.ui
 
+import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Before
 import org.junit.Test
+import java.util.Locale
 
 // The size under each row in the torrent picker. It answers one question — is this row an episode,
 // or something that slipped past the video filter — so the only thing it has to get right is the
 // order of magnitude, and never round a small file away to nothing.
+//
+// The decimal separator is the reader's, not ours: "1,4 GB" is what a German viewer should see, and
+// String.format's default locale is what makes that happen. That was an accident before this test
+// said so, and an accident in both directions — the assertions below only passed on a runner whose
+// default locale uses a dot, and a "fix" to Locale.ROOT would have quietly made the app print a
+// dot to everyone.
 class ReadableSizeTest {
+
+    private val original = Locale.getDefault()
+
+    @Before
+    fun pinLocale() = Locale.setDefault(Locale.US)
+
+    @After
+    fun restoreLocale() = Locale.setDefault(original)
 
     @Test
     fun `an episode reads in gigabytes to one decimal`() {
         assertEquals("1.4 GB", readableSize((1.4 * 1024 * 1024 * 1024).toLong()))
+    }
+
+    @Test
+    fun `the decimal separator is the reader's own`() {
+        Locale.setDefault(Locale.GERMANY)
+
+        assertEquals("1,4 GB", readableSize((1.4 * 1024 * 1024 * 1024).toLong()))
     }
 
     @Test
