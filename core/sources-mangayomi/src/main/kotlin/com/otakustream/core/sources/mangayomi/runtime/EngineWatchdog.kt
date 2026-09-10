@@ -8,7 +8,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.Closeable
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 // One extension call took longer than the engine's whole budget.
@@ -94,6 +93,20 @@ internal class EngineWatchdog(
 
     private class Wedge(val method: String)
 
+    // Where one call is in its life on the engine thread. A boolean could not carry this, and the
+    // difference is a race with a permanent consequence.
+    //
+    // Marking used to be gated on a "did it start" flag, which is true from the moment the block
+    // begins and stays true after it ends. So a call that *finished* in the same instant its
+    // caller's budget expired still looked eligible: the timeout marked the engine, and the block's
+    // finally — the only thing that clears a mark — had already run and would never run again. One
+    // narrow race, and the extension refuses every later call for the life of the process.
+    //
+    // As a state, the two outcomes linearize on a single compareAndSet: the timeout may mark only
+    // by moving RUNNING to WEDGED, and completion moves whatever it finds to FINISHED. Whichever
+    // lands first, the other's transition fails and it does nothing.
+    private enum class CallState { QUEUED, RUNNING, WEDGED, FINISHED }
+
     // Distinguishes "the block returned null" from "the budget expired", which withTimeoutOrNull's
     // own null cannot: invoke() legitimately returns a null String.
     private class Completed<T>(val value: T)
@@ -103,19 +116,9 @@ internal class EngineWatchdog(
         wedgedBy.get()?.let { throw ExtensionWedgedException(it.method) }
 
         val mine = Wedge(method)
-        // Whether this call ever reached the engine thread, which decides whether it is allowed to
-        // say the engine is gone.
-        //
-        // Only a call that actually ran can be the one holding the thread. A call still queued when
-        // its budget expires is a *symptom* of someone else holding it, and marking on its behalf
-        // is not merely imprecise — it is unrecoverable. Its own block never runs, so the finally
-        // below never runs either, so the mark it left is never cleared; and the call genuinely
-        // holding the thread cannot clear it, because compareAndSet only matches its own token. A
-        // slow-but-recoverable call would then leave the extension refusing every later call for
-        // the life of the process, which is the exact failure this class exists to prevent.
-        val started = AtomicBoolean(false)
+        val state = AtomicReference(CallState.QUEUED)
         val work = engineScope.async {
-            started.set(true)
+            state.compareAndSet(CallState.QUEUED, CallState.RUNNING)
             try {
                 block()
             } finally {
@@ -129,8 +132,12 @@ internal class EngineWatchdog(
                 // disable the extension permanently, which is the failure this class exists to
                 // prevent, reintroduced from the other side.
                 //
-                // Only its own mark: compareAndSet, so a call that finishes late cannot clear the
-                // mark left by a different call that is still gone.
+                // FINISHED first, so a timeout landing at this same instant cannot move RUNNING to
+                // WEDGED behind this line and leave a mark nothing will ever clear.
+                //
+                // Then the mark, and only its own: compareAndSet, so a call that finishes late
+                // cannot clear the mark left by a different call that is still gone.
+                state.set(CallState.FINISHED)
                 wedgedBy.compareAndSet(mine, null)
             }
         }
@@ -163,11 +170,15 @@ internal class EngineWatchdog(
         }
 
         if (completed == null) {
-            // Two conditions, and both are about the same thing: only the call that is actually
-            // holding the engine thread may say the engine is gone. `started` rules out one that
-            // never got it; compareAndSet rules out overwriting a mark already left by the call
-            // that did.
-            if (started.get()) wedgedBy.compareAndSet(null, mine)
+            // Only a call that is *still on* the engine thread may say the engine is gone, and this
+            // transition is what establishes that. It fails for a call still QUEUED — a symptom of
+            // someone else holding the thread, not a report about it — and for one already
+            // FINISHED, whose finally has run and will not run again to clear anything.
+            //
+            // The second compareAndSet then rules out overwriting a mark an earlier call left.
+            if (state.compareAndSet(CallState.RUNNING, CallState.WEDGED)) {
+                wedgedBy.compareAndSet(null, mine)
+            }
             // Same reasoning as caller cancellation — if this call never got the thread, it is
             // stale now and must not run later.
             work.cancel()

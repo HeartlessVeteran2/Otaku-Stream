@@ -157,6 +157,60 @@ class EngineWatchdogTest {
         assertEquals("ok", watchdog.run("search") { "ok" })
     }
 
+    // A call that finished must never be marked, even if its caller's budget expired at the same
+    // instant.
+    //
+    // The guard this replaced was a "did it start" flag, true from the moment the block began and
+    // still true after it ended — so a call that completed in the same breath as its timeout looked
+    // eligible, the timeout marked the engine, and the block's finally, the only thing that clears
+    // a mark, had already run. One narrow race and the extension refuses every later call for the
+    // life of the process.
+    //
+    // Not a rare race, as it turns out. Written first with a block that returned instantly, this
+    // caught nothing — a block finishing well inside its budget never reaches the timeout path at
+    // all. Matching the block's duration to the budget puts completion and expiry in the same
+    // instant, and against the old flag that poisons the engine on the *first* call: 399 of these
+    // 400 were then refused, because once a mark is left with nothing able to clear it, everything
+    // afterwards is refused too.
+    //
+    // The loop stays because a single call would rest on winning one race; the count is what makes
+    // the failure legible when it happens.
+    @Test(timeout = 30_000)
+    fun `a burst of calls that all finish never leaves the engine marked`() = runBlocking {
+        // The block is made to take about as long as the budget, which is the whole trick: a block
+        // that finishes well inside its budget never reaches the timeout path at all, and one that
+        // never finishes is an ordinary wedge. Completion and expiry have to land together.
+        val budgetMs = 10L
+        val watchdog = watchdog(budgetMs = budgetMs)
+        var refused = 0
+
+        repeat(400) {
+            try {
+                watchdog.run("getPopular") { Thread.sleep(budgetMs); "ok" }
+            } catch (expected: ExtensionTimeoutException) {
+                // Whether any individual call beats a one-millisecond budget is genuinely up for
+                // grabs. That is not what is being tested.
+            } catch (wedged: ExtensionWedgedException) {
+                // Nor is this, on its own. A call that has overrun and not yet returned *is* an
+                // engine that might be gone, and refusing the next caller while that is unresolved
+                // is the whole design. What is forbidden is the refusal outliving the call.
+                refused++
+            }
+        }
+
+        // The property that separates the fix from the defect is permanence, not refusal. Every
+        // block here returned, so every mark must have been cleared by the block that left it —
+        // whereas the old flag let a mark outlive its call with nothing able to clear it, and from
+        // that point on the engine refused everything.
+        assertTrue(
+            "the engine was left marked after $refused of 400 calls were refused",
+            awaitUnwedged(watchdog),
+        )
+        // And a marked engine refuses everything after it, so a majority of refusals means marks
+        // are sticking even if the last one happened to clear.
+        assertTrue("$refused of 400 calls refused; marks are outliving their calls", refused < 100)
+    }
+
     // A call that gave up must not still be waiting its turn to run.
     //
     // The screens time out every fifteen seconds and try again, so without this a slow extension
@@ -244,11 +298,21 @@ class EngineWatchdogTest {
     // to do with the watchdog.
     @Test(timeout = 15_000)
     fun `a call queued before the wedge still ends`() {
-        val watchdog = watchdog(budgetMs = 400L)
+        // A wide budget on purpose. The queued call has to reach `run` before the wedging call's
+        // budget expires, or it is refused before dispatch and this tests the previous case over
+        // again — so the gap between "queued call launched" and "a mark could exist" is made large
+        // rather than merely likely.
+        //
+        // Large, not proven: the latch below fires immediately before `run`, and the mark cannot
+        // appear for a further two seconds, but nothing here forces that ordering. A busy runner
+        // that stalls a Dispatchers.Default coroutine for two seconds would make this fail rather
+        // than pass wrongly, which is the right direction for a flake to point.
+        val watchdog = watchdog(budgetMs = 2_000L)
         val callers = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val queuedResult = AtomicReference<Throwable?>()
         val queuedDone = CountDownLatch(1)
         val wedgeStarted = CountDownLatch(1)
+        val queuedEntering = CountDownLatch(1)
 
         try {
             callers.launch {
@@ -265,6 +329,7 @@ class EngineWatchdogTest {
 
             callers.launch {
                 try {
+                    queuedEntering.countDown()
                     watchdog.run("search") { "never reached" }
                 } catch (t: Throwable) {
                     queuedResult.set(t)
@@ -272,6 +337,7 @@ class EngineWatchdogTest {
                     queuedDone.countDown()
                 }
             }
+            assertTrue("the queued call should have reached run", queuedEntering.await(5, TimeUnit.SECONDS))
 
             assertTrue("the queued call should not wait forever", queuedDone.await(10, TimeUnit.SECONDS))
             // Exactly a timeout, not "either exception".
