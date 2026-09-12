@@ -117,11 +117,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   segment, each with its own URL, and none of the segment URLs are in the downloads table — so every
   segment went out with no Referer, no cookie and no auth header, and a source that requires one
   served the playlist and then refused everything after it. A request that is not itself a download
-  is now matched to the download it sits underneath, and only to one it actually sits underneath:
-  sharing a host is not a relationship, and treating it as one handed a video's credentials to
-  unrelated requests on the same CDN. The same bug's other half was a leak — every segment cached its
-  own miss under its own URL, so one episode left thousands of entries behind that removing the
-  download could never reach.
+  is now matched to one whose path contains it, and only to one that does: sharing a host is not a
+  relationship, and treating it as one handed a video's credentials to unrelated requests on the same
+  CDN. Not a complete identity — two downloads in the *same* directory with different headers are
+  still indistinguishable, because a segment URL carries nothing saying which of them asked for it —
+  but that is the case a host issuing per-video credentials does not produce, since those give each
+  video its own path. The same bug's other half was a leak: every segment cached its own miss under
+  its own URL, so one episode left thousands of entries behind that removing the download could never
+  reach.
 - **A runaway extension no longer takes its source down until the app is restarted** (#156). QuickJS
   is single-threaded and the wrapper offers no interrupt hook, so `while (true) {}` in an extension
   owned that thread permanently and every later call to it queued behind — silently, with no error,
