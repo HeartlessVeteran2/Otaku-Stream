@@ -173,8 +173,8 @@ class EngineWatchdogTest {
     // 400 were then refused, because once a mark is left with nothing able to clear it, everything
     // afterwards is refused too.
     //
-    // The loop stays because a single call would rest on winning one race; the count is what makes
-    // the failure legible when it happens.
+    // The loop stays because a single call would rest on winning one race; the count is carried
+    // into the failure message, where it is useful, and deliberately not asserted on — see below.
     @Test(timeout = 30_000)
     fun `a burst of calls that all finish never leaves the engine marked`() = runBlocking {
         // The block is made to take about as long as the budget, which is the whole trick: a block
@@ -198,17 +198,22 @@ class EngineWatchdogTest {
             }
         }
 
-        // The property that separates the fix from the defect is permanence, not refusal. Every
-        // block here returned, so every mark must have been cleared by the block that left it —
-        // whereas the old flag let a mark outlive its call with nothing able to clear it, and from
-        // that point on the engine refused everything.
+        // Permanence is the property, and the only one asserted. Every block here returned, so
+        // every mark must have been cleared by the block that left it — whereas the old flag let a
+        // mark outlive its call with nothing able to clear it, and from then on the engine refused
+        // everything.
+        //
+        // An earlier version also asserted a ceiling on `refused`, and that was wrong twice over.
+        // It is not a defect for some calls to be refused: a call that has overrun and not yet
+        // returned genuinely is an engine that might be gone, and refusing the next caller while
+        // that is unresolved is the design. And how often it happens depends entirely on how loaded
+        // the machine is — one on a quiet dev box, far more on a busy CI runner, which is exactly
+        // how that assertion failed in CI after passing three times locally. A threshold there is a
+        // coin toss dressed as an assertion.
         assertTrue(
             "the engine was left marked after $refused of 400 calls were refused",
             awaitUnwedged(watchdog),
         )
-        // And a marked engine refuses everything after it, so a majority of refusals means marks
-        // are sticking even if the last one happened to clear.
-        assertTrue("$refused of 400 calls refused; marks are outliving their calls", refused < 100)
     }
 
     // A call that gave up must not still be waiting its turn to run.
