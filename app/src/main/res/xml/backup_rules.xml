@@ -8,6 +8,13 @@
     <exclude domain="sharedpref" path="otaku_secure_prefs.xml" />
     <exclude domain="sharedpref" path="stremio_account_prefs.xml" />
     <!--
+      The pending OAuth nonce. Not a credential — it is single-use, now time-limited, and
+      worthless without the sign-in it belongs to — but it is the one secrets-adjacent prefs
+      file that was not listed here, and a nonce restored onto another device belongs to a
+      sign-in that device never started.
+    -->
+    <exclude domain="sharedpref" path="anilist_auth_state.xml" />
+    <!--
       The database holds watch history and the scripted/Mangayomi source code the user installed —
       a record of what they watch and from where. None of it is a credential, and none of it is
       worth shipping to a cloud backup the user did not ask for; all of it is rebuildable.

@@ -111,11 +111,18 @@ class TorrentEngine @Inject constructor(
 
     // Whether the native library is usable on this device at all.
     //
-    // Only arm64 is bundled (see the module's abiFilters), so on a 32-bit device the class fails to
-    // initialize. That surfaces as UnsatisfiedLinkError the first time, and then as
-    // NoClassDefFoundError on every later access because the class is left in an erroneous state —
-    // which is exactly why this is computed once and cached. Callers use it to disable the feature
-    // with an explanation instead of letting the app die.
+    // Only arm64 is bundled, so on a 32-bit device the class fails to initialize. That surfaces as
+    // UnsatisfiedLinkError the first time, and then as NoClassDefFoundError on every later access
+    // because the class is left in an erroneous state — which is exactly why this is computed once
+    // and cached. Callers use it to disable the feature with an explanation instead of letting the
+    // app die.
+    //
+    // Not via abiFilters, which the module's build.gradle.kts explicitly avoids and explains why:
+    // an app-level filter would also strip QuickJS's 32-bit libraries and break every Mangayomi
+    // extension on those devices. What keeps the other architectures out is depending on the arm64
+    // libtorrent4j artifact alone. This comment used to cite abiFilters — the one mechanism the
+    // build went out of its way not to use — which would send the next reader looking for a setting
+    // that is not there.
     val isAvailable: Boolean by lazy {
         try {
             // Touching a native static is the cheapest way to force the library load and find out.

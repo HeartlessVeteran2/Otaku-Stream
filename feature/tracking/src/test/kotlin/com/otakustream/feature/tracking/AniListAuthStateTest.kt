@@ -20,9 +20,76 @@ class AniListAuthStateTest {
 
     private lateinit var authState: AniListAuthState
 
+    // Moved by the expiry tests instead of sleeping. Every other test leaves it alone, so they run
+    // well inside the window and behave exactly as they did before it existed.
+    private var nowMs = 1_000_000L
+
     @Before
     fun setUp() {
-        authState = AniListAuthState(ApplicationProvider.getApplicationContext())
+        authState = AniListAuthState(ApplicationProvider.getApplicationContext()) { nowMs }
+    }
+
+    // A nonce is only meant to outlive the app's process, not the sign-in. Without a stamp, tapping
+    // Connect and changing your mind left a `state` value on disk that was still accepted months
+    // later.
+    @Test
+    fun `a nonce past its window is refused`() {
+        val nonce = authState.begin()
+
+        nowMs += 16 * 60 * 1000L
+
+        assertFalse(authState.consume(nonce))
+    }
+
+    @Test
+    fun `a nonce inside its window is still accepted`() {
+        val nonce = authState.begin()
+
+        // A slow sign-in: a browser, a login form, a password manager, and Android killing the
+        // process in the middle. Fourteen minutes must still work.
+        nowMs += 14 * 60 * 1000L
+
+        assertTrue(authState.consume(nonce))
+    }
+
+    // A clock that moved backwards must not resurrect a stale nonce. Subtracting gives a negative
+    // age, which sails under any upper bound — so a nonce minted before the user changed the date,
+    // or before an NTP correction, would read as freshly issued for as long as the clock stayed
+    // behind. There is no reading of "the clock went backwards" under which it is still
+    // trustworthy.
+    @Test
+    fun `a nonce from the future is refused rather than treated as fresh`() {
+        val nonce = authState.begin()
+
+        nowMs -= 60 * 60 * 1000L
+
+        assertFalse(authState.consume(nonce))
+    }
+
+    // Expiring clears the nonce, and that does not reopen the denial-of-service the class refuses
+    // to allow elsewhere: a *failed match* must not burn a nonce the real redirect still needs, but
+    // an expired one could not have been accepted by anything arriving later anyway.
+    @Test
+    fun `an expired nonce is cleared rather than left on disk`() {
+        val nonce = authState.begin()
+        nowMs += 16 * 60 * 1000L
+        authState.consume(nonce)
+
+        // Back inside a window it no longer has: gone, not merely out of date.
+        nowMs -= 16 * 60 * 1000L
+        assertFalse(authState.consume(nonce))
+    }
+
+    // A nonce written by a build from before the stamp existed reads as mintedAt = 0. Treating that
+    // as "valid forever" would leave exactly the nonces this change is about; treating it as
+    // expired costs one re-tap of Connect on the first sign-in after updating.
+    @Test
+    fun `a nonce with no stamp is treated as expired, not as valid forever`() {
+        val prefs = ApplicationProvider.getApplicationContext<android.content.Context>()
+            .getSharedPreferences("anilist_auth_state", android.content.Context.MODE_PRIVATE)
+        prefs.edit().putString("pending_state", "legacy-nonce").commit()
+
+        assertFalse(authState.consume("legacy-nonce"))
     }
 
     @Test
@@ -114,7 +181,10 @@ class AniListAuthStateTest {
         // redirect arrived — turning a security control into an intermittent sign-in failure.
         val nonce = authState.begin()
 
-        val afterRestart = AniListAuthState(ApplicationProvider.getApplicationContext())
+        // The same clock as the first instance: a restart is a new object reading the same
+        // preferences, not a jump forward in time. Handing it the real clock here would make the
+        // nonce look fifty years old and test the expiry rather than the persistence.
+        val afterRestart = AniListAuthState(ApplicationProvider.getApplicationContext()) { nowMs }
 
         assertTrue(afterRestart.consume(nonce))
     }

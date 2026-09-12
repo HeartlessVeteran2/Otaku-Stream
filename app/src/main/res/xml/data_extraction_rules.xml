@@ -9,6 +9,13 @@
     <cloud-backup>
         <exclude domain="sharedpref" path="otaku_secure_prefs.xml" />
         <exclude domain="sharedpref" path="stremio_account_prefs.xml" />
+        <!--
+          The pending OAuth nonce. Not a credential — it is single-use, now time-limited, and
+          worthless without the sign-in it belongs to — but it is the one secrets-adjacent prefs
+          file that was not listed here, and a nonce restored onto another device belongs to a
+          sign-in that device never started.
+        -->
+        <exclude domain="sharedpref" path="anilist_auth_state.xml" />
         <!-- See backup_rules.xml for why the database is excluded as well as the prefs. -->
         <exclude domain="database" path="otaku_stream.db" />
         <exclude domain="database" path="otaku_stream.db-wal" />
@@ -19,6 +26,13 @@
     <device-transfer>
         <exclude domain="sharedpref" path="otaku_secure_prefs.xml" />
         <exclude domain="sharedpref" path="stremio_account_prefs.xml" />
+        <!--
+          The pending OAuth nonce. Not a credential — it is single-use, now time-limited, and
+          worthless without the sign-in it belongs to — but it is the one secrets-adjacent prefs
+          file that was not listed here, and a nonce restored onto another device belongs to a
+          sign-in that device never started.
+        -->
+        <exclude domain="sharedpref" path="anilist_auth_state.xml" />
         <!-- See backup_rules.xml for why the database is excluded as well as the prefs. -->
         <exclude domain="database" path="otaku_stream.db" />
         <exclude domain="database" path="otaku_stream.db-wal" />
