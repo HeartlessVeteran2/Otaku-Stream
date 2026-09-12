@@ -10,8 +10,12 @@ import javax.inject.Singleton
 // Plain class (not a Rhino BaseFunction) so it can be a shared @Singleton — ScriptEngine wraps
 // this in a fresh BaseFunction per script scope instead, since BaseFunction carries Rhino scope
 // state that must not be shared across scripts/threads.
+// `open` is a test seam and nothing else. The deadline check that stops a script's fetch *loop*
+// lives in ScriptEngine, and a test for it needs a fetch that is slow without being a real socket:
+// against a fast-failing url the loop spins fast enough that Rhino's instruction observer catches
+// it on its own, and the test would pass whether or not the check exists.
 @Singleton
-class HttpBridge @Inject constructor(
+open class HttpBridge @Inject constructor(
     httpClient: OkHttpClient,
 ) {
     // The shared client with a shorter leash, sharing its connection pool and dispatcher.
@@ -44,7 +48,7 @@ class HttpBridge @Inject constructor(
         .callTimeout(SCRIPT_CALL_TIMEOUT_SECONDS, TimeUnit.SECONDS)
         .build()
 
-    fun httpGet(url: String, headersJson: String?): String {
+    open fun httpGet(url: String, headersJson: String?): String {
         val requestBuilder = Request.Builder().url(url)
         if (!headersJson.isNullOrBlank()) {
             val headers = JSONObject(headersJson)
