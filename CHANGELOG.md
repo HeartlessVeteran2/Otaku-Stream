@@ -111,6 +111,47 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- **Saved episodes from a Referer-gated source complete instead of stalling at 0%** (#155). Request
+  headers are resolved per *request* but were stored per *video*. For a progressive MP4 those are the
+  same string, so it worked. For HLS they are not — Media3 fetches the playlist and then every
+  segment, each with its own URL, and none of the segment URLs are in the downloads table — so every
+  segment went out with no Referer, no cookie and no auth header, and a source that requires one
+  served the playlist and then refused everything after it. A request that is not itself a download
+  is now matched to the download it sits underneath, and only to one it actually sits underneath:
+  sharing a host is not a relationship, and treating it as one handed a video's credentials to
+  unrelated requests on the same CDN. The same bug's other half was a leak — every segment cached its
+  own miss under its own URL, so one episode left thousands of entries behind that removing the
+  download could never reach.
+- **A runaway extension no longer takes its source down until the app is restarted** (#156). QuickJS
+  is single-threaded and the wrapper offers no interrupt hook, so `while (true) {}` in an extension
+  owned that thread permanently and every later call to it queued behind — silently, with no error,
+  for the life of the process. Rhino's half of the app had had a deadline since the same failure was
+  found there; this one never got one. The thread still cannot be taken back — that is not available
+  without an interrupt hook — but the caller no longer waits on it and later callers are told rather
+  than queued, with a message that says to reload the extension rather than "try again", which is the
+  one thing that cannot work. An extension that was merely slow is not disabled for it: a call that
+  does come back clears its own mark.
+- **A Rhino source that loops on fetches is now actually stopped by its deadline** (#156). The
+  instruction observer runs between interpreter instructions, and a native call is one instruction
+  however long it takes — so `while (true) { httpGet(url) }` issued hundreds of requests, each up to
+  the call timeout, with the source's lock held, before the deadline was consulted once. It is now
+  checked in the HTTP bridge, where such a loop demonstrably spends its time.
+- **A dead host costs a Mangayomi extension eight seconds rather than twenty** (#156). The connect,
+  read and write timeouts added to the Rhino bridge in #136 were never added to the Mangayomi one,
+  which inherited the app-wide defaults.
+- **An abandoned AniList sign-in no longer leaves a usable `state` value on disk** (#157). The OAuth
+  nonce is single-use and replaced by the next attempt, but carried no timestamp — so tapping Connect
+  and changing your mind left one that was still accepted months later. Fifteen minutes now; a nonce
+  from a build before the stamp existed, or one whose clock has moved backwards, reads as expired.
+- **A crash in the background is no longer lost entirely** (#157). Since Android 10 a background
+  process may not start an activity, and the refusal is a log line rather than an exception — so the
+  crash screen silently never appeared, and the fallback to the platform's handler sat inside a
+  `catch` that never fired. The crash now goes to the platform handler whenever the screen is not
+  certain to show, which costs a logcat trace instead of nothing at all.
+- **A Cloudflare challenge is still recognised if the `Server` header is missing** (#157). Detection
+  gated every signal on `Server: cloudflare`, including `cf-mitigated: challenge`, which Cloudflare
+  only ever sends about its own challenges. One header stopping being emitted would have made a
+  gated source fail forever with the solver never asked to run.
 - **A hung extension no longer disables its source for the life of the process** (#127). Every
   scripted-source entry point holds a mutex across a *blocking* interpreter call, which coroutine
   cancellation cannot interrupt — so a timeout returned on schedule while the lock stayed held, and
